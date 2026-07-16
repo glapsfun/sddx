@@ -1,0 +1,41 @@
+{
+  "name": "sddx",
+  "version": "0.0.1",
+  "description": "Loop-based Spec-Driven Development: dense specs with mandatory oracles, hook-enforced TDD, parallel worktrees, hash-chained receipts.",
+  "author": { "name": "glapsfun" },
+  "repository": "https://github.com/glapsfun/sddx",
+  "license": "MIT",
+  "keywords": ["sdd", "tdd", "spec-driven", "worktree", "receipts", "oracle"],
+  "userConfig": {
+    "workspace_mode": {
+      "type": "string",
+      "title": "Workspace mode",
+      "default": "auto",
+      "description": "Task workspace strategy: worktree | branch | auto"
+    },
+    "test_globs": {
+      "type": "string",
+      "title": "Test globs",
+      "default": "",
+      "description": "Comma-separated extra globs classified as test files by the TDD gate"
+    },
+    "exempt_globs": {
+      "type": "string",
+      "title": "Exempt globs",
+      "default": "",
+      "description": "Comma-separated extra globs exempt from the RED-phase write block"
+    },
+    "max_iterations_default": {
+      "type": "number",
+      "title": "Max iterations",
+      "default": 5,
+      "description": "Default stop rule: max loop iterations per task"
+    },
+    "board_enabled": {
+      "type": "boolean",
+      "title": "Board enabled",
+      "default": true,
+      "description": "Regenerate .sddx/BOARD.md automatically"
+    }
+  }
+}

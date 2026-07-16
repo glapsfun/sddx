@@ -17,12 +17,7 @@ export interface Spec {
   out_of_scope: string[];
 }
 
-const ORACLE_TYPES: ReadonlySet<string> = new Set([
-  "command",
-  "test-suite",
-  "browser",
-  "manual",
-]);
+const ORACLE_TYPES: ReadonlySet<string> = new Set(["command", "test-suite", "browser", "manual"]);
 
 function toList(v: unknown): string[] {
   if (Array.isArray(v)) return v.map(String);

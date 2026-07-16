@@ -1,8 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
-import { fixtureRepo } from "./fixtures";
 import {
   branchExists,
   commit,
@@ -14,6 +13,7 @@ import {
   stageAll,
   writeTree,
 } from "../src/lib/git";
+import { fixtureRepo } from "./fixtures";
 
 describe("git helpers", () => {
   test("branch create/switch/exists, stage, tree, commit", () => {

@@ -1,7 +1,7 @@
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 
 export function fixtureRepo(): string {
   const dir = mkdtempSync(join(tmpdir(), "sddx-fixture-"));

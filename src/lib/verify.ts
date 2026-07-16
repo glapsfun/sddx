@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { commit, stageAll, writeTree } from "./git";
-import { chainHead, sha256, writeReceipt, type Receipt } from "./receipt";
+import { chainHead, type Receipt, sha256, writeReceipt } from "./receipt";
 import { readTask, transition, writeTask } from "./task";
 
 const ORACLE_TIMEOUT_MS = 10 * 60_000;

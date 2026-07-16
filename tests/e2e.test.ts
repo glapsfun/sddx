@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { sha256, validateReceipt, verifyChain } from "../src/lib/receipt";
 import { fixtureRepo } from "./fixtures";
 import { repoRoot } from "./helpers";
-import { sha256, validateReceipt, verifyChain } from "../src/lib/receipt";
 
 const CLI_SRC = join(repoRoot, "src/cli.ts");
 const CLI_DIST = join(repoRoot, "dist/cli.mjs");
@@ -21,7 +21,9 @@ function completeTask(cwd: string, runtime: string[], n: number): string {
     join(cwd, `spec${n}.yaml`),
     `task: add greet ${n}\nsuccess_criteria:\n  - "node check${n}.js exits 0"\noracle:\n  type: command\n  run: "node check${n}.js"\n`,
   );
-  const id = /created (\S+)/.exec(run(cwd, runtime, "task", "create", "--spec", `spec${n}.yaml`))![1]!;
+  const id = /created (\S+)/.exec(
+    run(cwd, runtime, "task", "create", "--spec", `spec${n}.yaml`),
+  )![1]!;
 
   writeFileSync(join(cwd, `check${n}.js`), `require("./greet${n}.js");\n`);
   const red = spawnSync("node", [`check${n}.js`], { cwd });
@@ -53,13 +55,16 @@ test("M1 oracle: two real tasks end-to-end — receipts validate, chain verifies
 
   // the task's commit is atomic: code + spec + task + receipt
   const commitOf = spawnSync(
-    "git", ["log", "--format=%H", "-1", "--", `.sddx/receipts/${id1}.json`],
+    "git",
+    ["log", "--format=%H", "-1", "--", `.sddx/receipts/${id1}.json`],
     { cwd, encoding: "utf8" },
   ).stdout.trim();
-  const files = spawnSync(
-    "git", ["show", "--name-only", "--format=", commitOf],
-    { cwd, encoding: "utf8" },
-  ).stdout.trim().split("\n");
+  const files = spawnSync("git", ["show", "--name-only", "--format=", commitOf], {
+    cwd,
+    encoding: "utf8",
+  })
+    .stdout.trim()
+    .split("\n");
   expect(files).toContain("greet1.js");
   expect(files).toContain("check1.js");
   expect(files).toContain(`.sddx/specs/${id1}.yaml`);

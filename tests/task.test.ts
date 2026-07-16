@@ -3,13 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseSpec } from "../src/lib/spec";
-import {
-  createTask,
-  readTask,
-  taskId,
-  transition,
-  writeTask,
-} from "../src/lib/task";
+import { createTask, readTask, taskId, transition, writeTask } from "../src/lib/task";
 
 const spec = parseSpec(
   "task: Add a Health endpoint!\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: t\n",
@@ -48,9 +42,7 @@ describe("task state", () => {
     expect(t.phase).toBe("VERIFY");
     expect(t.evidence.red?.test_exit).toBe(1);
     expect(t.evidence.green?.test_exit).toBe(0);
-    expect(t.history.map((h) => h.phase)).toEqual([
-      "PLAN", "RED", "GREEN", "REFACTOR", "VERIFY",
-    ]);
+    expect(t.history.map((h) => h.phase)).toEqual(["PLAN", "RED", "GREEN", "REFACTOR", "VERIFY"]);
   });
 
   test("evidence gates: RED needs failing exit, GREEN needs passing exit", () => {

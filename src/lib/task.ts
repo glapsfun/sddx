@@ -1,0 +1,128 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import type { Oracle, Spec } from "./spec";
+
+export type Phase =
+  | "PLAN"
+  | "RED"
+  | "GREEN"
+  | "REFACTOR"
+  | "VERIFY"
+  | "DONE"
+  | "ABANDONED";
+
+export const TRANSITIONS: Record<Phase, Phase[]> = {
+  PLAN: ["RED", "ABANDONED"],
+  RED: ["GREEN", "ABANDONED"],
+  GREEN: ["REFACTOR", "VERIFY", "ABANDONED"],
+  REFACTOR: ["GREEN", "VERIFY", "ABANDONED"],
+  VERIFY: ["DONE", "ABANDONED"],
+  DONE: [],
+  ABANDONED: [],
+};
+
+export interface Workspace {
+  mode: "branch" | "none";
+  branch: string | null;
+  base_sha: string;
+}
+
+export interface TaskState {
+  id: string;
+  task: string;
+  phase: Phase;
+  spec_path: string;
+  oracle: Oracle;
+  workspace: Workspace;
+  allow: string[];
+  iterations: number;
+  evidence: Record<string, { test_exit?: number; exit_code?: number; at: string }>;
+  history: Array<{ phase: Phase; at: string }>;
+  created_at: string;
+  updated_at: string;
+}
+
+export const sddxDir = (cwd: string): string => join(cwd, ".sddx");
+export const taskPath = (cwd: string, id: string): string =>
+  join(sddxDir(cwd), "tasks", `${id}.json`);
+
+export function taskId(sentence: string, date = new Date()): string {
+  const slug = sentence
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40)
+    .replace(/-+$/g, "");
+  const ymd = date.toISOString().slice(0, 10).replace(/-/g, "");
+  return `${ymd}-${slug}`;
+}
+
+export function createTask(
+  cwd: string,
+  spec: Spec,
+  specPath: string,
+  workspace: Workspace,
+): TaskState {
+  const now = new Date().toISOString();
+  const t: TaskState = {
+    id: taskId(spec.task),
+    task: spec.task,
+    phase: "PLAN",
+    spec_path: specPath,
+    oracle: spec.oracle,
+    workspace,
+    allow: [],
+    iterations: 0,
+    evidence: {},
+    history: [{ phase: "PLAN", at: now }],
+    created_at: now,
+    updated_at: now,
+  };
+  const path = taskPath(cwd, t.id);
+  if (existsSync(path)) throw new Error(`task ${t.id} already exists at ${path}`);
+  mkdirSync(join(sddxDir(cwd), "tasks"), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(t, null, 2)}\n`);
+  return t;
+}
+
+export function readTask(cwd: string, id: string): TaskState {
+  const path = taskPath(cwd, id);
+  if (!existsSync(path)) throw new Error(`no such task: ${id} (${path})`);
+  return JSON.parse(readFileSync(path, "utf8")) as TaskState;
+}
+
+export function writeTask(cwd: string, t: TaskState): void {
+  t.updated_at = new Date().toISOString();
+  writeFileSync(taskPath(cwd, t.id), `${JSON.stringify(t, null, 2)}\n`);
+}
+
+export function transition(
+  t: TaskState,
+  to: Phase,
+  opts: { testExit?: number; internal?: boolean } = {},
+): TaskState {
+  if (!TRANSITIONS[t.phase].includes(to)) {
+    throw new Error(`illegal transition ${t.phase} → ${to}`);
+  }
+  const at = new Date().toISOString();
+  if (to === "RED") {
+    if (opts.testExit === undefined || opts.testExit === 0) {
+      throw new Error(
+        "RED requires evidence of a failing test: --test-exit <nonzero exit code>",
+      );
+    }
+    t.evidence.red = { test_exit: opts.testExit, at };
+  }
+  if (to === "GREEN") {
+    if (opts.testExit !== 0) {
+      throw new Error("GREEN requires evidence of a passing test: --test-exit 0");
+    }
+    t.evidence.green = { test_exit: 0, at };
+  }
+  if (to === "DONE" && !opts.internal) {
+    throw new Error("DONE is set by the verifier, not by phase transitions");
+  }
+  t.phase = to;
+  t.history.push({ phase: to, at });
+  return t;
+}

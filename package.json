@@ -6,7 +6,7 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit",
-    "build": "bun build src/bootstrap.ts --outfile=dist/bootstrap.mjs --target=node --format=esm",
+    "build": "bun scripts/build.ts",
     "check": "bun run typecheck && bun test && bun run build"
   },
   "devDependencies": {

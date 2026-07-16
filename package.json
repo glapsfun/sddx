@@ -1,0 +1,16 @@
+{
+  "name": "sddx",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "build": "bun build src/bootstrap.ts --outfile=dist/bootstrap.mjs --target=node --format=esm",
+    "check": "bun run typecheck && bun test && bun run build"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.12",
+    "typescript": "^5.9.2"
+  }
+}

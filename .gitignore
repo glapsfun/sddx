@@ -5,3 +5,6 @@
 .claude
 CLAUDE.md
 openspec
+
+# deps
+node_modules/

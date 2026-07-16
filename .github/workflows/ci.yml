@@ -1,0 +1,25 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+      - run: bun run build
+      - name: dist drift check
+        run: git diff --exit-code -- dist
+      - name: plugin validate (strict)
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          claude plugin validate --strict .

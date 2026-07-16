@@ -11,8 +11,7 @@ export function git(cwd: string, ...args: string[]): string {
 
 export const headSha = (cwd: string): string => git(cwd, "rev-parse", "HEAD");
 
-export const currentBranch = (cwd: string): string =>
-  git(cwd, "rev-parse", "--abbrev-ref", "HEAD");
+export const currentBranch = (cwd: string): string => git(cwd, "rev-parse", "--abbrev-ref", "HEAD");
 
 export const createBranch = (cwd: string, name: string): void => {
   git(cwd, "switch", "-c", name);

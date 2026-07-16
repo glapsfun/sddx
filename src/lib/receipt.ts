@@ -3,8 +3,8 @@ import {
   chmodSync,
   existsSync,
   mkdirSync,
-  readFileSync,
   readdirSync,
+  readFileSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
@@ -49,8 +49,8 @@ function listReceipts(cwd: string): Array<{ file: string; receipt: Receipt }> {
 
 export function chainHead(cwd: string): { seq: number; prevHash: string } {
   const receipts = listReceipts(cwd);
-  if (receipts.length === 0) return { seq: 0, prevHash: "genesis" };
-  const last = receipts[receipts.length - 1]!;
+  const last = receipts.at(-1);
+  if (!last) return { seq: 0, prevHash: "genesis" };
   return { seq: last.receipt.seq, prevHash: sha256(readFileSync(last.file)) };
 }
 
@@ -78,20 +78,35 @@ export function validateReceipt(raw: unknown): string[] {
   need("version", r.version === 1);
   need("task_id", typeof r.task_id === "string" && r.task_id !== "");
   need("seq", typeof r.seq === "number" && Number.isInteger(r.seq) && (r.seq as number) >= 1);
-  need("prev", r.prev === "genesis" || (typeof r.prev === "string" && HEX64.test(r.prev as string)));
+  need(
+    "prev",
+    r.prev === "genesis" || (typeof r.prev === "string" && HEX64.test(r.prev as string)),
+  );
   need("harness", typeof r.harness === "string" && r.harness !== "");
   need("model", r.model === null || typeof r.model === "string");
   need("plugin_version", typeof r.plugin_version === "string");
   const o = r.oracle as Record<string, unknown> | undefined;
-  need("oracle", !!o && typeof o === "object" && typeof o.run === "string" && typeof o.expect === "string");
+  need(
+    "oracle",
+    !!o && typeof o === "object" && typeof o.run === "string" && typeof o.expect === "string",
+  );
   need("exit_code", typeof r.exit_code === "number");
   need("duration_ms", typeof r.duration_ms === "number" && (r.duration_ms as number) >= 0);
-  need("stdout_sha256", typeof r.stdout_sha256 === "string" && HEX64.test(r.stdout_sha256 as string));
-  need("stderr_sha256", typeof r.stderr_sha256 === "string" && HEX64.test(r.stderr_sha256 as string));
+  need(
+    "stdout_sha256",
+    typeof r.stdout_sha256 === "string" && HEX64.test(r.stdout_sha256 as string),
+  );
+  need(
+    "stderr_sha256",
+    typeof r.stderr_sha256 === "string" && HEX64.test(r.stderr_sha256 as string),
+  );
   need("base_sha", typeof r.base_sha === "string" && HEX40.test(r.base_sha as string));
   need("tree_sha", typeof r.tree_sha === "string" && HEX40.test(r.tree_sha as string));
   need("verdict", r.verdict === "pass");
-  need("verified_at", typeof r.verified_at === "string" && !Number.isNaN(Date.parse(r.verified_at as string)));
+  need(
+    "verified_at",
+    typeof r.verified_at === "string" && !Number.isNaN(Date.parse(r.verified_at as string)),
+  );
   return errors;
 }
 

@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
-import { fixtureRepo } from "./fixtures";
-import { parseSpec } from "../src/lib/spec";
-import { createTask, readTask, transition, writeTask } from "../src/lib/task";
 import { headSha } from "../src/lib/git";
 import { validateReceipt } from "../src/lib/receipt";
+import { parseSpec } from "../src/lib/spec";
+import { createTask, readTask, transition, writeTask } from "../src/lib/task";
 import { verifyTask } from "../src/lib/verify";
+import { fixtureRepo } from "./fixtures";
 
 function taskInVerify(cwd: string, oracleRun: string) {
   const spec = parseSpec(
@@ -39,11 +39,12 @@ describe("verifyTask", () => {
     expect(receipt.prev).toBe("genesis");
     expect(receipt.base_sha).toBe(t.workspace.base_sha);
 
-    const files = spawnSync(
-      "git",
-      ["show", "--name-only", "--format=", "HEAD"],
-      { cwd, encoding: "utf8" },
-    ).stdout.trim().split("\n");
+    const files = spawnSync("git", ["show", "--name-only", "--format=", "HEAD"], {
+      cwd,
+      encoding: "utf8",
+    })
+      .stdout.trim()
+      .split("\n");
     expect(files).toContain("impl.txt");
     expect(files).toContain(`.sddx/tasks/${t.id}.json`);
     expect(files).toContain(`.sddx/receipts/${t.id}.json`);

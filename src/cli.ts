@@ -11,12 +11,12 @@ import {
 import { parseSpec } from "./lib/spec";
 import {
   createTask,
+  type Phase,
   readTask,
   sddxDir,
   taskId,
   transition,
   writeTask,
-  type Phase,
 } from "./lib/task";
 import { verifyTask } from "./lib/verify";
 
@@ -133,15 +133,27 @@ function main(argv: string[]): void {
   const cwd = process.cwd();
   const [cmd, ...rest] = argv;
   try {
-    if (cmd === "task" && rest[0] === "create") return cmdTaskCreate(cwd, rest.slice(1));
-    if (cmd === "task" && rest[0] === "phase") return cmdTaskPhase(cwd, rest.slice(1));
-    if (cmd === "task" && rest[0] === "show") {
-      if (!rest[1]) fail(USAGE, 2);
-      console.log(JSON.stringify(readTask(cwd, rest[1]!), null, 2));
+    if (cmd === "task" && rest[0] === "create") {
+      cmdTaskCreate(cwd, rest.slice(1));
       return;
     }
-    if (cmd === "verify") return cmdVerify(cwd, rest);
-    if (cmd === "cleanup") return cmdCleanup(cwd, rest);
+    if (cmd === "task" && rest[0] === "phase") {
+      cmdTaskPhase(cwd, rest.slice(1));
+      return;
+    }
+    if (cmd === "task" && rest[0] === "show") {
+      if (!rest[1]) fail(USAGE, 2);
+      console.log(JSON.stringify(readTask(cwd, rest[1]), null, 2));
+      return;
+    }
+    if (cmd === "verify") {
+      cmdVerify(cwd, rest);
+      return;
+    }
+    if (cmd === "cleanup") {
+      cmdCleanup(cwd, rest);
+      return;
+    }
     fail(USAGE, 2);
   } catch (e) {
     fail((e as Error).message);

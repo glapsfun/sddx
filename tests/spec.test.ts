@@ -28,9 +28,7 @@ describe("parseSpec", () => {
   });
 
   test("rejects a non-manual oracle without run", () => {
-    const { errors } = parseSpec(
-      "task: t\nsuccess_criteria:\n  - a\noracle:\n  type: command\n",
-    );
+    const { errors } = parseSpec("task: t\nsuccess_criteria:\n  - a\noracle:\n  type: command\n");
     expect(errors.join(" ")).toContain("oracle.run");
   });
 

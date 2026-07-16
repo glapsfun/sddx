@@ -2,14 +2,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Oracle, Spec } from "./spec";
 
-export type Phase =
-  | "PLAN"
-  | "RED"
-  | "GREEN"
-  | "REFACTOR"
-  | "VERIFY"
-  | "DONE"
-  | "ABANDONED";
+export type Phase = "PLAN" | "RED" | "GREEN" | "REFACTOR" | "VERIFY" | "DONE" | "ABANDONED";
 
 export const TRANSITIONS: Record<Phase, Phase[]> = {
   PLAN: ["RED", "ABANDONED"],
@@ -107,9 +100,7 @@ export function transition(
   const at = new Date().toISOString();
   if (to === "RED") {
     if (opts.testExit === undefined || opts.testExit === 0) {
-      throw new Error(
-        "RED requires evidence of a failing test: --test-exit <nonzero exit code>",
-      );
+      throw new Error("RED requires evidence of a failing test: --test-exit <nonzero exit code>");
     }
     t.evidence.red = { test_exit: opts.testExit, at };
   }

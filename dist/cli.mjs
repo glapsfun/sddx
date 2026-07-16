@@ -7032,12 +7032,7 @@ var $visit = visit.visit;
 var $visitAsync = visit.visitAsync;
 
 // src/lib/spec.ts
-var ORACLE_TYPES = new Set([
-  "command",
-  "test-suite",
-  "browser",
-  "manual"
-]);
+var ORACLE_TYPES = new Set(["command", "test-suite", "browser", "manual"]);
 function toList(v) {
   if (Array.isArray(v))
     return v.map(String);
@@ -7184,8 +7179,8 @@ import {
   chmodSync,
   existsSync as existsSync2,
   mkdirSync as mkdirSync2,
-  readFileSync as readFileSync2,
   readdirSync,
+  readFileSync as readFileSync2,
   writeFileSync as writeFileSync2
 } from "node:fs";
 import { join as join2 } from "node:path";
@@ -7203,9 +7198,9 @@ function listReceipts(cwd) {
 }
 function chainHead(cwd) {
   const receipts = listReceipts(cwd);
-  if (receipts.length === 0)
+  const last = receipts.at(-1);
+  if (!last)
     return { seq: 0, prevHash: "genesis" };
-  const last = receipts[receipts.length - 1];
   return { seq: last.receipt.seq, prevHash: sha256(readFileSync2(last.file)) };
 }
 function writeReceipt(cwd, r) {
@@ -7391,20 +7386,28 @@ function main(argv) {
   const cwd = process.cwd();
   const [cmd, ...rest] = argv;
   try {
-    if (cmd === "task" && rest[0] === "create")
-      return cmdTaskCreate(cwd, rest.slice(1));
-    if (cmd === "task" && rest[0] === "phase")
-      return cmdTaskPhase(cwd, rest.slice(1));
+    if (cmd === "task" && rest[0] === "create") {
+      cmdTaskCreate(cwd, rest.slice(1));
+      return;
+    }
+    if (cmd === "task" && rest[0] === "phase") {
+      cmdTaskPhase(cwd, rest.slice(1));
+      return;
+    }
     if (cmd === "task" && rest[0] === "show") {
       if (!rest[1])
         fail(USAGE, 2);
       console.log(JSON.stringify(readTask(cwd, rest[1]), null, 2));
       return;
     }
-    if (cmd === "verify")
-      return cmdVerify(cwd, rest);
-    if (cmd === "cleanup")
-      return cmdCleanup(cwd, rest);
+    if (cmd === "verify") {
+      cmdVerify(cwd, rest);
+      return;
+    }
+    if (cmd === "cleanup") {
+      cmdCleanup(cwd, rest);
+      return;
+    }
     fail(USAGE, 2);
   } catch (e) {
     fail(e.message);

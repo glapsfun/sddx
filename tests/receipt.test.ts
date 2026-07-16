@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   chainHead,
+  type Receipt,
   sha256,
   validateReceipt,
   verifyChain,
   writeReceipt,
-  type Receipt,
 } from "../src/lib/receipt";
 
 function makeReceipt(cwd: string, taskId: string): Receipt {
@@ -70,9 +70,7 @@ describe("receipt chain", () => {
     const good = makeReceipt(cwd, "t1");
     expect(validateReceipt(good)).toEqual([]);
     expect(validateReceipt({ ...good, verdict: "maybe" }).join(" ")).toContain("verdict");
-    expect(validateReceipt({ ...good, stdout_sha256: "xyz" }).join(" ")).toContain(
-      "stdout_sha256",
-    );
+    expect(validateReceipt({ ...good, stdout_sha256: "xyz" }).join(" ")).toContain("stdout_sha256");
   });
 
   test("gap in seq is an error", () => {

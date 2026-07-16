@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { fixtureRepo } from "./fixtures";
 import { repoRoot } from "./helpers";
 
@@ -29,7 +29,8 @@ describe("sddx cli", () => {
     expect(existsSync(join(cwd, ".sddx", "tasks", `${id}.json`))).toBe(true);
     expect(existsSync(join(cwd, ".sddx", "specs", `${id}.yaml`))).toBe(true);
     const branch = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-      cwd, encoding: "utf8",
+      cwd,
+      encoding: "utf8",
     }).stdout.trim();
     expect(branch).toBe(`sddx/${id}`);
   });
@@ -58,9 +59,7 @@ describe("sddx cli", () => {
   test("verify pass end-to-end and cleanup guards", () => {
     const cwd = fixtureRepo();
     writeFileSync(join(cwd, "spec.yaml"), SPEC);
-    const id = /created (\S+)/.exec(
-      cli(cwd, "task", "create", "--spec", "spec.yaml").stdout,
-    )![1]!;
+    const id = /created (\S+)/.exec(cli(cwd, "task", "create", "--spec", "spec.yaml").stdout)![1]!;
     cli(cwd, "task", "phase", id, "RED", "--test-exit", "1");
     cli(cwd, "task", "phase", id, "GREEN", "--test-exit", "0");
     cli(cwd, "task", "phase", id, "VERIFY");

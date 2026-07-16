@@ -1,0 +1,15 @@
+#!/bin/sh
+# sddx launcher: prefer bun, fall back to node (>=18). No other runtimes.
+if command -v bun >/dev/null 2>&1; then
+  exec bun "$@"
+fi
+if command -v node >/dev/null 2>&1; then
+  major=$(node -p 'process.versions.node.split(".")[0]')
+  if [ "$major" -ge 18 ]; then
+    exec node "$@"
+  fi
+  echo "sddx: node >= 18 required (found $(node --version))" >&2
+  exit 1
+fi
+echo "sddx: neither bun nor node found on PATH" >&2
+exit 1

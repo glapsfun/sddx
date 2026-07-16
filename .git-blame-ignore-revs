@@ -1,0 +1,5 @@
+# Mechanical reformat commits — ignore in git blame.
+# Use with: git config blame.ignoreRevsFile .git-blame-ignore-revs
+
+# style: apply biome format and lint fixes across src and tests
+96005d5259c6d88a1c443ad4f6a71b455e956cd2

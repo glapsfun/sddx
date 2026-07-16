@@ -1,0 +1,11 @@
+extends: relaxed
+
+ignore:
+  - node_modules/
+  - dist/
+  - .sddx/
+
+rules:
+  line-length: disable
+  # GitHub workflow `on:` keys false-positive as truthy values.
+  truthy: disable

@@ -6,6 +6,22 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+      - run: pipx install pre-commit
+      # Commit-stage hooks only; typecheck/test/build stay in the ci job.
+      - run: pre-commit run --all-files --show-diff-on-failure
+
   ci:
     runs-on: ubuntu-latest
     steps:

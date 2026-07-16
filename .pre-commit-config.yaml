@@ -1,0 +1,52 @@
+# Local quality gates. One-time setup:
+#   pre-commit install --install-hooks
+# Commit stage: fast hygiene + lint on staged files.
+# Push stage: typecheck + full test suite.
+default_install_hook_types: [pre-commit, pre-push]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+        exclude: ^dist/
+      - id: end-of-file-fixer
+        exclude: ^dist/
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: check-json
+        # bun.lock is JSONC (trailing commas); Biome lints JSON/JSONC anyway.
+        exclude: ^bun\.lock$
+      - id: check-yaml
+        args: [--allow-multiple-documents]
+
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        args: [-c, .yamllint.yaml]
+
+  - repo: local
+    hooks:
+      - id: biome-check
+        name: biome check
+        entry: bunx biome check --no-errors-on-unmatched
+        language: system
+        types_or: [ts, tsx, javascript, jsx, json]
+        exclude: ^(dist|node_modules)/
+
+      - id: typecheck
+        name: tsc --noEmit
+        entry: bun run typecheck
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      - id: test
+        name: bun test
+        entry: bun test
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

@@ -17,13 +17,13 @@
       "type": "string",
       "title": "Test globs",
       "default": "",
-      "description": "Comma-separated extra globs classified as test files by the TDD gate"
+      "description": "Space-separated extra globs classified as test files by the TDD gate"
     },
     "exempt_globs": {
       "type": "string",
       "title": "Exempt globs",
       "default": "",
-      "description": "Comma-separated extra globs exempt from the RED-phase write block"
+      "description": "Space-separated extra globs exempt from the RED-phase write block"
     },
     "max_iterations_default": {
       "type": "number",

@@ -18,8 +18,13 @@ jobs:
       - run: bun test
       - run: bun run build
       - name: dist drift check
-        run: git diff --exit-code -- dist
+        run: |
+          if [ -n "$(git status --porcelain -- dist)" ]; then
+            git status --porcelain -- dist
+            echo "dist/ is out of sync with src/ — run 'bun run build' and commit the result" >&2
+            exit 1
+          fi
       - name: plugin validate (strict)
         run: |
-          npm install -g @anthropic-ai/claude-code
+          npm install -g @anthropic-ai/claude-code@2.1.211
           claude plugin validate --strict .

@@ -1,11 +1,17 @@
 #!/bin/sh
 # sddx launcher: prefer bun, fall back to node (>=18). No other runtimes.
+if [ "$#" -lt 1 ]; then
+  echo "usage: sddx-run <script> [args...]" >&2
+  exit 64
+fi
 if command -v bun >/dev/null 2>&1; then
   exec bun "$@"
 fi
 if command -v node >/dev/null 2>&1; then
-  major=$(node -p 'process.versions.node.split(".")[0]')
-  if [ "$major" -ge 18 ]; then
+  version=$(node --version) # vMAJOR.MINOR.PATCH — parsed in-shell, no extra process
+  version=${version#v}
+  major=${version%%.*}
+  if [ "$major" -ge 18 ] 2>/dev/null; then
     exec node "$@"
   fi
   echo "sddx: node >= 18 required (found $(node --version))" >&2

@@ -119,9 +119,16 @@ export function renderBoard(cwd: string): string {
     for (const id of readdirSync(wtDir).sort()) {
       const taskPath = join(wtDir, id, ".sddx", "tasks", `${id}.json`);
       if (!existsSync(taskPath)) continue;
+      // worktrees carry their own .sddx/config.json — judge stuck by the same
+      // threshold the gates inside that worktree use
       rows.set(
         id,
-        taskRow(taskPath, id, [join(wtDir, id, ".sddx", "receipts"), mainReceipts], threshold),
+        taskRow(
+          taskPath,
+          id,
+          [join(wtDir, id, ".sddx", "receipts"), mainReceipts],
+          stuckThreshold(join(wtDir, id)),
+        ),
       );
     }
   }

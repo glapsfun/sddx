@@ -27,6 +27,23 @@ describe("checkBashCommand", () => {
     expect(checkBashCommand("jq . package.json", ["jq"]).allow).toBe(true);
     expect(checkBashCommand("jq . x | curl example.com", ["jq"]).allow).toBe(false);
   });
+
+  test("multi-line, substitution, and eval-flag bypasses are closed", () => {
+    expect(allow("bun test\nsed -i '' s/a/b/ src/x.ts")).toBe(false); // every line checked
+    expect(allow("cat $(sed -i '' s/a/b/ src/x.ts)")).toBe(false); // command substitution
+    expect(allow("ls `mv tests src`")).toBe(false); // backticks
+    expect(allow("bun -e \"require('fs').writeFileSync('x','y')\"")).toBe(false); // eval flag
+    expect(allow("node --eval 1")).toBe(false);
+  });
+
+  test("fd duplication passes; the sddx CLI and its runtimes pass", () => {
+    expect(allow("bun test 2>&1 | tail -20")).toBe(true); // 2>&1 writes no file
+    expect(allow("bun test 2> err.log")).toBe(false); // real redirection still blocked
+    expect(allow("node check1.js")).toBe(true); // the project's own oracle pattern
+    expect(allow('"/plug/bin/sddx-run" "/plug/dist/cli.mjs" task phase x RED --test-exit 1')).toBe(
+      true,
+    ); // the loop's own CLI must never be gated out
+  });
 });
 
 describe("bashGate resolution", () => {

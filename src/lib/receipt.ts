@@ -81,6 +81,11 @@ export function chainHead(cwd: string): { seq: number; prevHash: string } {
 }
 
 export function writeReceipt(cwd: string, r: Receipt): string {
+  // a receipt is immutable the moment it is written — never let an invalid one in
+  const schemaErrors = validateReceipt(r);
+  if (schemaErrors.length > 0) {
+    throw new Error(`refusing to write invalid receipt: ${schemaErrors.join("; ")}`);
+  }
   const path = receiptPath(cwd, r.task_id);
   if (existsSync(path)) {
     throw new Error(`receipt for ${r.task_id} already exists — receipts are immutable`);

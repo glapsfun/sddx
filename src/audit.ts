@@ -48,6 +48,39 @@ export function auditReceipts(
 
   for (const file of files) {
     const rel = join(".sddx", "receipts", file);
+    // signature verification runs before the commit-binding checks below — their
+    // `continue`s must not hide an invalid signature on an unbound receipt
+    let raw: string | null = null;
+    try {
+      raw = readFileSync(join(cwd, rel), "utf8");
+    } catch {
+      // chain verification already reports unreadable receipts
+    }
+    if (raw !== null && raw.includes('"signature"')) {
+      let parsed: Record<string, unknown> | null = null;
+      try {
+        parsed = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        // chain verification already reports unparseable receipts
+      }
+      if (parsed && typeof parsed.signature === "string" && typeof parsed.signer === "string") {
+        const { signature, signer, ...unsigned } = parsed; // rest spread keeps key order
+        const payload = sha256(`${JSON.stringify(unsigned, null, 2)}\n`);
+        // destructured bindings are `unknown` under Record<string, unknown> — the
+        // typeof guard above makes these casts safe
+        const verdict = verifySignature(cwd, payload, {
+          signature: signature as string,
+          signer: signer as string,
+        });
+        if (verdict === "invalid") findings.push(`${rel}: embedded receipt signature is invalid`);
+        if (verdict === "unverifiable")
+          notes.push(`${rel}: signed by ${signer} — set gpg.ssh.allowedSignersFile to verify`);
+      } else {
+        notes.push(`${rel}: unsigned`);
+      }
+    } else if (raw !== null) {
+      notes.push(`${rel}: unsigned`);
+    }
     const log = gitLines(cwd, "log", "--format=%H", "--", rel);
     if (!log.ok) {
       findings.push(`${rel}: commit binding failed: ${log.err}`);
@@ -61,27 +94,6 @@ export function auditReceipts(
     const dirty = gitLines(cwd, "status", "--porcelain", "--", rel);
     if (dirty.ok && dirty.lines.length > 0) {
       findings.push(`${rel}: working tree differs from committed state — receipt bytes tampered`);
-    }
-    let parsed: Record<string, unknown> | null = null;
-    try {
-      parsed = JSON.parse(readFileSync(join(cwd, rel), "utf8")) as Record<string, unknown>;
-    } catch {
-      // chain verification already reports unparseable receipts
-    }
-    if (parsed && typeof parsed.signature === "string" && typeof parsed.signer === "string") {
-      const { signature, signer, ...unsigned } = parsed; // rest spread keeps key order
-      const payload = sha256(`${JSON.stringify(unsigned, null, 2)}\n`);
-      // destructured bindings are `unknown` under Record<string, unknown> — the
-      // typeof guard above makes these casts safe
-      const verdict = verifySignature(cwd, payload, {
-        signature: signature as string,
-        signer: signer as string,
-      });
-      if (verdict === "invalid") findings.push(`${rel}: embedded receipt signature is invalid`);
-      if (verdict === "unverifiable")
-        notes.push(`${rel}: signed by ${signer} — set gpg.ssh.allowedSignersFile to verify`);
-    } else {
-      notes.push(`${rel}: unsigned`);
     }
     if (opts.signatures) {
       const v = spawnSync("git", ["verify-commit", introducing], { cwd });

@@ -20,6 +20,10 @@ On failure: report it faithfully and stop. Do not debug, do not edit, do not
 re-run the oracle hoping for a different answer (once more to rule out flake is
 acceptable; say so if you do).
 
+`verify` refuses tasks with no recorded `oracle_red` (the executor's red-check)
+or one dated after the first GREEN. That is a spec-process failure, not a code
+failure: report it verbatim and stop — the fix is the executor's, not yours.
+
 ## Never
 
 - Edit any file. Receipts are written by `sddx verify`, not by you.

@@ -26,9 +26,11 @@ export function matchTestRunner(command: string): string | null {
   return null;
 }
 
-/** Failure identity: exit code + last 20 output lines, numbers and whitespace
- * normalized away (durations vary between identical failures). */
-export function failureFingerprint(exitCode: number, output: string): string {
+/** Failure identity: command + exit code + last 20 output lines, numbers and
+ * whitespace normalized away (durations vary between identical failures). The
+ * command term keeps distinct test invocations distinct even when the harness
+ * delivers no output and only the exit code is left to compare. */
+export function failureFingerprint(exitCode: number, output: string, command = ""): string {
   const tail = output
     .split("\n")
     .slice(-20)
@@ -36,7 +38,7 @@ export function failureFingerprint(exitCode: number, output: string): string {
     .replace(/\d+(\.\d+)?/g, "#")
     .replace(/\s+/g, " ")
     .trim();
-  return sha256(`${exitCode}\n${tail}`);
+  return sha256(`${exitCode}\n${command.trim()}\n${tail}`);
 }
 
 export interface RecordResult {
@@ -61,7 +63,7 @@ export function recordTestRun(
 
   const at = new Date().toISOString();
   if (exitCode !== 0) {
-    const fp = failureFingerprint(exitCode, output);
+    const fp = failureFingerprint(exitCode, output, command);
     task.stuck =
       task.stuck?.fingerprint === fp
         ? { fingerprint: fp, count: task.stuck.count + 1, since: task.stuck.since }
@@ -80,11 +82,13 @@ export function recordTestRun(
     // observation without a legal transition (e.g. exit 0 in PLAN) is still evidence
     task.evidence.last_test = { test_exit: exitCode, at, source: "hook" };
   }
-  const threshold = stuckThreshold(res.root);
-  const stuck =
-    task.stuck && task.stuck.count >= threshold
-      ? { count: task.stuck.count, threshold }
-      : undefined;
+  let stuck: RecordResult["stuck"];
+  if (task.stuck) {
+    // config is only consulted when a failure streak exists — keeps the
+    // passing-run hot path free of config I/O
+    const threshold = stuckThreshold(res.root);
+    if (task.stuck.count >= threshold) stuck = { count: task.stuck.count, threshold };
+  }
   writeTask(res.root, task);
-  return { matched: true, transitioned: to, taskId: task.id, ...(stuck ? { stuck } : {}) };
+  return { matched: true, transitioned: to, taskId: task.id, stuck };
 }

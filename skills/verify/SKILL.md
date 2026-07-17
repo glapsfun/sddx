@@ -16,6 +16,9 @@ Run: `... verify <task-id> --model <your model id, if you know it>`
   stays in VERIFY. Return to the loop (fix under GREEN/REFACTOR rules), then
   verify again. Respect the spec's stop_rules: if iterations exceed
   max_iterations (default 5), stop and escalate to the user.
+- **error: no failing-oracle evidence** → the red-check was skipped. A task
+  still in RED can run `... red-check <id>`; a task already past RED cannot be
+  red-checked retroactively — abandon and recreate it. Escalate to the user.
 
 After a pass, cross-check the spec's `success_criteria` in prose: list each
 criterion and whether the oracle's observed run covers it. This review is

@@ -1,12 +1,10 @@
-import { spawnSync } from "node:child_process";
 import { oracleRuns } from "./config";
 import { captureEnv } from "./envinfo";
 import { commit, stageAll, writeTree } from "./git";
+import { runOracle } from "./oracle";
 import { chainHead, type OracleRun, type Receipt, sha256, writeReceipt } from "./receipt";
 import { signPayload } from "./sign";
 import { readTask, transition, writeTask } from "./task";
-
-const ORACLE_TIMEOUT_MS = 10 * 60_000;
 
 function expectedExit(expect: string): number {
   const m = /^exit\s+(\d+)$/.exec(expect.trim());
@@ -39,7 +37,9 @@ export function verifyTask(
   const redEvidence = task.evidence.oracle_red;
   if (!redEvidence || redEvidence.exit_code === undefined || redEvidence.exit_code === 0) {
     throw new Error(
-      `task ${id} has no failing-oracle evidence — run \`sddx red-check ${id}\` during RED; an oracle that never failed proves nothing`,
+      `task ${id} has no failing-oracle evidence — an oracle that never failed proves nothing. ` +
+        `In RED, run \`sddx red-check ${id}\`. A task already past RED (e.g. created before sddx 0.2) ` +
+        `cannot be red-checked retroactively: abandon it (sddx task phase ${id} ABANDONED) and recreate`,
     );
   }
   const firstGreen = task.history.find((h) => h.phase === "GREEN");
@@ -55,15 +55,13 @@ export function verifyTask(
   const started = Date.now();
   let exitCode = 0;
   for (let i = 0; i < wanted; i += 1) {
-    const runStarted = Date.now();
-    const run = spawnSync("sh", ["-c", task.oracle.run], { cwd, timeout: ORACLE_TIMEOUT_MS });
-    if (run.error) throw new Error(`oracle could not run: ${run.error.message}`);
-    exitCode = run.status ?? -1;
+    const run = runOracle(cwd, task.oracle.run);
+    exitCode = run.exitCode;
     runs.push({
-      exit_code: exitCode,
-      duration_ms: Date.now() - runStarted,
-      stdout_sha256: sha256(run.stdout ?? Buffer.alloc(0)),
-      stderr_sha256: sha256(run.stderr ?? Buffer.alloc(0)),
+      exit_code: run.exitCode,
+      duration_ms: run.durationMs,
+      stdout_sha256: sha256(run.stdout),
+      stderr_sha256: sha256(run.stderr),
     });
     if (exitCode !== want) break; // fail fast — one bad run fails the whole verification
   }

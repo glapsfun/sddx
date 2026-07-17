@@ -151,6 +151,18 @@ function cmdTaskPhase(cwd: string, args: string[]): void {
   console.log(`${id} phase=${task.phase}`);
 }
 
+function cmdRedCheck(cwd: string, args: string[]): void {
+  const [id] = args;
+  if (!id) fail(USAGE, 2);
+  const res = redCheck(cwd, id);
+  if (!res.ok) {
+    fail(
+      `red-check: oracle exited 0 while task ${id} is RED — the oracle does not discriminate; fix the spec's oracle before implementing`,
+    );
+  }
+  console.log(`red-check: oracle failed as required (exit ${res.exitCode}) — recorded oracle_red`);
+}
+
 function cmdVerify(cwd: string, args: string[]): void {
   const [id] = args;
   if (!id) fail(USAGE, 2);
@@ -234,17 +246,7 @@ function main(argv: string[]): void {
       return;
     }
     if (cmd === "red-check") {
-      const [id] = rest;
-      if (!id) fail(USAGE, 2);
-      const res = redCheck(cwd, id);
-      if (!res.ok) {
-        fail(
-          `red-check: oracle exited 0 while task ${id} is RED — the oracle does not discriminate; fix the spec's oracle before implementing`,
-        );
-      }
-      console.log(
-        `red-check: oracle failed as required (exit ${res.exitCode}) — recorded oracle_red`,
-      );
+      cmdRedCheck(cwd, rest);
       return;
     }
     if (cmd === "verify") {

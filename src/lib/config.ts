@@ -41,8 +41,10 @@ export function oracleRuns(
   specRuns: number | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): number {
-  if (specRuns !== undefined) return specRuns;
+  // re-validate the task-file value: a tampered "runs": 0 must never mean
+  // "verify without executing the oracle"
   return (
+    positiveInt(specRuns) ??
     positiveInt(Number(env.SDDX_ORACLE_RUNS)) ??
     positiveInt(readConfig(root).oracle_runs_default) ??
     1

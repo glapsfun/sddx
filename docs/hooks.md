@@ -69,12 +69,16 @@ identically on Windows.
 ## RED-phase Bash gate
 
 `PreToolUse` on Bash: while the governing task is pre-GREEN (PLAN or RED),
-a command runs only if the first word of **every** pipeline segment is on the
-allow-list — test runners (`bun`, `npm`, `npx`, `pnpm`, `yarn`, `pytest`,
-`go`, `cargo`, `make`), read tools (`ls`, `cat`, `grep`, `rg`, `find`,
-`head`, `tail`, `wc`), and `git status|diff|log|show`. Any `>` redirection is
-blocked outright — the gate does not parse targets. Extend (never replace)
-the list with userConfig `red_bash_allow`. This closes the classic
+a command runs only if the first word of **every** segment (split on pipes,
+`&&`, `;`, and newlines) is on the allow-list — test runners and runtimes
+(`bun`, `npm`, `npx`, `pnpm`, `yarn`, `pytest`, `go`, `cargo`, `make`,
+`node`, `python`, `python3`), read tools (`ls`, `cat`, `grep`, `rg`, `find`,
+`head`, `tail`, `wc`), `git status|diff|log|show`, and the sddx CLI itself
+(`sddx-run`/`sddx` — recording phases must never be gated out). Blocked
+outright, with no target parsing: `>` redirection (fd duplication like `2>&1`
+is fine), command/process substitution (`$(…)`, backticks, `<(…)`), and
+eval/print flags (`-e`, `-c`, `-p`, …) on the runtimes. Extend (never
+replace) the list with userConfig `red_bash_allow`. This closes the classic
 `sed -i`/`tee` bypass around the Edit/Write gate.
 
 ## Stuck-loop escalation

@@ -15,11 +15,19 @@ export interface ReceiptSignature {
   signer: string;
 }
 
+// audit calls verifySignature once per receipt; per-repo config is constant for
+// the process lifetime, so cache lookups instead of re-spawning git each time
+const gitConfigCache = new Map<string, string | null>();
+
 function gitConfig(cwd: string, key: string): string | null {
+  const cacheKey = `${cwd}\0${key}`;
+  const cached = gitConfigCache.get(cacheKey);
+  if (cached !== undefined) return cached;
   const r = spawnSync("git", ["config", "--get", key], { cwd, encoding: "utf8" });
-  if (r.status !== 0) return null;
-  const v = (r.stdout ?? "").trim();
-  return v === "" ? null : v;
+  const v = r.status === 0 ? (r.stdout ?? "").trim() : "";
+  const result = v === "" ? null : v;
+  gitConfigCache.set(cacheKey, result);
+  return result;
 }
 
 const expandHome = (p: string): string => (p.startsWith("~/") ? join(homedir(), p.slice(2)) : p);

@@ -8,6 +8,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeBoard } from "./board";
 import { bashGate } from "./lib/bashgate";
+import { readConfig } from "./lib/config";
 import { recordTestRun } from "./lib/recorder";
 import { stopGate } from "./lib/stopgate";
 import { isTerminal, type TaskState } from "./lib/task";
@@ -130,16 +131,8 @@ function boardEnabled(cwd: string, env = process.env): boolean {
   if (env.SDDX_BOARD_ENABLED !== undefined) {
     return !["false", "0"].includes(env.SDDX_BOARD_ENABLED);
   }
-  const path = join(cwd, ".sddx", "config.json");
-  if (existsSync(path)) {
-    try {
-      const cfg = JSON.parse(readFileSync(path, "utf8")) as { board_enabled?: boolean };
-      if (typeof cfg.board_enabled === "boolean") return cfg.board_enabled;
-    } catch {
-      // unreadable config → default
-    }
-  }
-  return true;
+  const cfg = readConfig(cwd).board_enabled;
+  return typeof cfg === "boolean" ? cfg : true;
 }
 
 function cmdSessionStart(event: HookEvent): void {

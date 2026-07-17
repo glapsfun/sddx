@@ -7094,6 +7094,76 @@ function parseSpec(yamlText) {
 // src/lib/task.ts
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
+// src/lib/glob.ts
+function segmentToRegex(segment) {
+  let out = "";
+  for (const ch of segment) {
+    if (ch === "*")
+      out += "[^/]*";
+    else if (ch === "?")
+      out += "[^/]";
+    else
+      out += ch.replace(/[.+^${}()|[\]\\]/, "\\$&");
+  }
+  return out;
+}
+function globToRegExp(pattern) {
+  const segments = pattern.split("/");
+  let re = "^";
+  for (let i = 0;i < segments.length; i++) {
+    const last = i === segments.length - 1;
+    if (segments[i] === "**") {
+      re += last ? ".+" : "(?:[^/]+/)*";
+    } else {
+      re += segmentToRegex(segments[i]) + (last ? "" : "/");
+    }
+  }
+  return new RegExp(`${re}$`);
+}
+var globMatch = (pattern, path) => globToRegExp(pattern).test(path);
+
+// src/lib/classify.ts
+var BUILTIN_EXEMPT_GLOBS = [
+  ".sddx/**",
+  "docs/**",
+  "**/*.md",
+  "package.json",
+  "tsconfig.json",
+  ".github/**",
+  "openspec/**",
+  ".claude/**"
+];
+var BUILTIN_TEST_GLOBS = [
+  "**/*.test.*",
+  "**/*.spec.*",
+  "**/*_test.*",
+  "**/test_*.py",
+  "tests/**",
+  "test/**",
+  "__tests__/**",
+  "spec/**"
+];
+var splitGlobs = (value) => (value ?? "").split(/\s+/).filter((g) => g !== "");
+var normalizeRelPath = (path) => path.replace(/\\/g, "/").replace(/^(\.\/)+/, "");
+function classify(relPath, allow, config = {}) {
+  const path = normalizeRelPath(relPath);
+  for (const entry of allow) {
+    if (normalizeRelPath(entry) === path)
+      return { rule: "allow", pattern: entry };
+  }
+  for (const pattern of [...BUILTIN_EXEMPT_GLOBS, ...splitGlobs(config.exemptGlobs)]) {
+    if (globMatch(pattern, path))
+      return { rule: "exempt", pattern };
+  }
+  for (const pattern of [...BUILTIN_TEST_GLOBS, ...splitGlobs(config.testGlobs)]) {
+    if (globMatch(pattern, path))
+      return { rule: "test", pattern };
+  }
+  return { rule: "implementation", pattern: null };
+}
+
+// src/lib/task.ts
 var TRANSITIONS = {
   PLAN: ["RED", "ABANDONED"],
   RED: ["GREEN", "ABANDONED"],
@@ -7150,23 +7220,38 @@ function transition(t, to, opts = {}) {
     throw new Error(`illegal transition ${t.phase} → ${to}`);
   }
   const at = new Date().toISOString();
+  const source = opts.source ?? "manual";
   if (to === "RED") {
     if (opts.testExit === undefined || opts.testExit === 0) {
       throw new Error("RED requires evidence of a failing test: --test-exit <nonzero exit code>");
     }
-    t.evidence.red = { test_exit: opts.testExit, at };
+    t.evidence.red = { test_exit: opts.testExit, at, source };
   }
   if (to === "GREEN") {
     if (opts.testExit !== 0) {
       throw new Error("GREEN requires evidence of a passing test: --test-exit 0");
     }
-    t.evidence.green = { test_exit: 0, at };
+    t.evidence.green = { test_exit: 0, at, source };
   }
   if (to === "DONE" && !opts.internal) {
     throw new Error("DONE is set by the verifier, not by phase transitions");
   }
   t.phase = to;
   t.history.push({ phase: to, at });
+  return t;
+}
+var TERMINAL_PHASES = new Set(["DONE", "ABANDONED"]);
+var isTerminal = (phase) => TERMINAL_PHASES.has(phase);
+function allowPath(t, path) {
+  if (isTerminal(t.phase)) {
+    throw new Error(`task ${t.id} is ${t.phase}; allow-list is frozen on terminal tasks`);
+  }
+  const normalized = normalizeRelPath(path);
+  if (normalized === "" || normalized.startsWith("/") || normalized.split("/").includes("..")) {
+    throw new Error(`allow requires a repo-relative path, got: ${path}`);
+  }
+  if (!t.allow.includes(normalized))
+    t.allow.push(normalized);
   return t;
 }
 
@@ -7255,7 +7340,7 @@ function verifyTask(cwd, id, opts) {
   const treeSha = writeTree(cwd);
   const head = chainHead(cwd);
   const receipt = {
-    version: 1,
+    version: 2,
     task_id: id,
     seq: head.seq + 1,
     prev: head.prevHash,
@@ -7270,7 +7355,8 @@ function verifyTask(cwd, id, opts) {
     base_sha: task.workspace.base_sha,
     tree_sha: treeSha,
     verdict: "pass",
-    verified_at: new Date().toISOString()
+    verified_at: new Date().toISOString(),
+    allow: [...task.allow]
   };
   const receiptPath2 = writeReceipt(cwd, receipt);
   stageAll(cwd);
@@ -7478,6 +7564,7 @@ function sweep(cwd, opts = {}) {
 var USAGE = `usage:
   sddx task create --spec <path> [--workspace auto|worktree|branch|none] [--no-branch]
   sddx task phase <id> <PHASE> [--test-exit <n>]
+  sddx task allow <id> <path>
   sddx task show <id>
   sddx verify <id> [--model <m>] [--harness <h>]
   sddx cleanup <id>
@@ -7646,6 +7733,16 @@ function main(argv) {
     }
     if (cmd === "task" && rest[0] === "phase") {
       cmdTaskPhase(cwd, rest.slice(1));
+      return;
+    }
+    if (cmd === "task" && rest[0] === "allow") {
+      const [id, path] = rest.slice(1);
+      if (!id || !path)
+        fail(USAGE, 2);
+      const task = readTask(cwd, id);
+      allowPath(task, path);
+      writeTask(cwd, task);
+      console.log(`${id} allow=[${task.allow.join(", ")}]`);
       return;
     }
     if (cmd === "task" && rest[0] === "show") {

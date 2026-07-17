@@ -1,0 +1,61 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run\" \"${CLAUDE_PLUGIN_ROOT}/dist/hooks.mjs\" session-start",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit|NotebookEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run\" \"${CLAUDE_PLUGIN_ROOT}/dist/hooks.mjs\" tdd-gate",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run\" \"${CLAUDE_PLUGIN_ROOT}/dist/hooks.mjs\" record-test",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run\" \"${CLAUDE_PLUGIN_ROOT}/dist/hooks.mjs\" stop-gate",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run\" \"${CLAUDE_PLUGIN_ROOT}/dist/hooks.mjs\" stop-gate",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

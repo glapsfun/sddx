@@ -10,6 +10,7 @@ import {
 } from "./lib/git";
 import { parseSpec } from "./lib/spec";
 import {
+  allowPath,
   createTask,
   type Phase,
   readTask,
@@ -33,6 +34,7 @@ import {
 const USAGE = `usage:
   sddx task create --spec <path> [--workspace auto|worktree|branch|none] [--no-branch]
   sddx task phase <id> <PHASE> [--test-exit <n>]
+  sddx task allow <id> <path>
   sddx task show <id>
   sddx verify <id> [--model <m>] [--harness <h>]
   sddx cleanup <id>
@@ -209,6 +211,15 @@ function main(argv: string[]): void {
     }
     if (cmd === "task" && rest[0] === "phase") {
       cmdTaskPhase(cwd, rest.slice(1));
+      return;
+    }
+    if (cmd === "task" && rest[0] === "allow") {
+      const [id, path] = rest.slice(1);
+      if (!id || !path) fail(USAGE, 2);
+      const task = readTask(cwd, id);
+      allowPath(task, path);
+      writeTask(cwd, task);
+      console.log(`${id} allow=[${task.allow.join(", ")}]`);
       return;
     }
     if (cmd === "task" && rest[0] === "show") {

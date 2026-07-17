@@ -120,3 +120,25 @@ describe("receipt chain", () => {
     expect(verifyChain(cwd).join(" ")).toContain("seq");
   });
 });
+
+describe("receipt versioning", () => {
+  test("v2 requires allow; v1 must not carry it", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "sddx-receipt-"));
+    const v1 = makeReceipt(cwd, "t1");
+    expect(validateReceipt(v1)).toEqual([]);
+
+    const v2 = { ...makeReceipt(cwd, "t2"), version: 2 as const, allow: ["src/migration.sql"] };
+    expect(validateReceipt(v2)).toEqual([]);
+
+    expect(validateReceipt({ ...v2, allow: undefined })).toContain("allow: missing or invalid");
+    expect(validateReceipt({ ...v1, allow: [] })).toContain("allow: missing or invalid");
+    expect(validateReceipt({ ...v2, allow: [42] })).toContain("allow: missing or invalid");
+  });
+
+  test("mixed v1/v2 chain verifies", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "sddx-receipt-"));
+    writeReceipt(cwd, makeReceipt(cwd, "t1"));
+    writeReceipt(cwd, { ...makeReceipt(cwd, "t2"), version: 2, allow: [] });
+    expect(verifyChain(cwd)).toEqual([]);
+  });
+});

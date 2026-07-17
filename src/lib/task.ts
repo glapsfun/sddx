@@ -1,8 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { normalizeRelPath } from "./classify";
 import type { Oracle, Spec } from "./spec";
 
 export type Phase = "PLAN" | "RED" | "GREEN" | "REFACTOR" | "VERIFY" | "DONE" | "ABANDONED";
+
+export type EvidenceSource = "hook" | "manual";
 
 export const TRANSITIONS: Record<Phase, Phase[]> = {
   PLAN: ["RED", "ABANDONED"],
@@ -31,7 +34,10 @@ export interface TaskState {
   workspace: Workspace;
   allow: string[];
   iterations: number;
-  evidence: Record<string, { test_exit?: number; exit_code?: number; at: string }>;
+  evidence: Record<
+    string,
+    { test_exit?: number; exit_code?: number; at: string; source?: EvidenceSource }
+  >;
   history: Array<{ phase: Phase; at: string }>;
   created_at: string;
   updated_at: string;
@@ -94,28 +100,48 @@ export function writeTask(cwd: string, t: TaskState): void {
 export function transition(
   t: TaskState,
   to: Phase,
-  opts: { testExit?: number; internal?: boolean } = {},
+  opts: { testExit?: number; internal?: boolean; source?: EvidenceSource } = {},
 ): TaskState {
   if (!TRANSITIONS[t.phase].includes(to)) {
     throw new Error(`illegal transition ${t.phase} → ${to}`);
   }
   const at = new Date().toISOString();
+  const source = opts.source ?? "manual";
   if (to === "RED") {
     if (opts.testExit === undefined || opts.testExit === 0) {
       throw new Error("RED requires evidence of a failing test: --test-exit <nonzero exit code>");
     }
-    t.evidence.red = { test_exit: opts.testExit, at };
+    t.evidence.red = { test_exit: opts.testExit, at, source };
   }
   if (to === "GREEN") {
     if (opts.testExit !== 0) {
       throw new Error("GREEN requires evidence of a passing test: --test-exit 0");
     }
-    t.evidence.green = { test_exit: 0, at };
+    t.evidence.green = { test_exit: 0, at, source };
   }
   if (to === "DONE" && !opts.internal) {
     throw new Error("DONE is set by the verifier, not by phase transitions");
   }
   t.phase = to;
   t.history.push({ phase: to, at });
+  return t;
+}
+
+export const TERMINAL_PHASES: ReadonlySet<Phase> = new Set(["DONE", "ABANDONED"]);
+export const isTerminal = (phase: Phase): boolean => TERMINAL_PHASES.has(phase);
+
+/**
+ * The audited TDD-gate escape hatch: exact repo-relative paths only. Idempotent;
+ * the verifier copies the final list into the receipt.
+ */
+export function allowPath(t: TaskState, path: string): TaskState {
+  if (isTerminal(t.phase)) {
+    throw new Error(`task ${t.id} is ${t.phase}; allow-list is frozen on terminal tasks`);
+  }
+  const normalized = normalizeRelPath(path);
+  if (normalized === "" || normalized.startsWith("/") || normalized.split("/").includes("..")) {
+    throw new Error(`allow requires a repo-relative path, got: ${path}`);
+  }
+  if (!t.allow.includes(normalized)) t.allow.push(normalized);
   return t;
 }

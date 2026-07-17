@@ -10,7 +10,8 @@ import {
 import { join } from "node:path";
 
 export interface Receipt {
-  version: 1;
+  /** 1 = M1 schema; 2 adds `allow` (audited TDD-gate exemptions). */
+  version: 1 | 2;
   task_id: string;
   seq: number;
   prev: string;
@@ -26,6 +27,8 @@ export interface Receipt {
   tree_sha: string;
   verdict: "pass";
   verified_at: string;
+  /** Required from version 2: the task's gate exemptions, empty when none. */
+  allow?: string[];
 }
 
 export const sha256 = (data: string | Uint8Array): string =>
@@ -75,7 +78,15 @@ export function validateReceipt(raw: unknown): string[] {
   const need = (field: string, ok: boolean) => {
     if (!ok) errors.push(`${field}: missing or invalid`);
   };
-  need("version", r.version === 1);
+  need("version", r.version === 1 || r.version === 2);
+  if (r.version === 2) {
+    need(
+      "allow",
+      Array.isArray(r.allow) && (r.allow as unknown[]).every((p) => typeof p === "string"),
+    );
+  } else {
+    need("allow", r.allow === undefined);
+  }
   need("task_id", typeof r.task_id === "string" && r.task_id !== "");
   need("seq", typeof r.seq === "number" && Number.isInteger(r.seq) && (r.seq as number) >= 1);
   need(

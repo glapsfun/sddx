@@ -60,7 +60,7 @@ export function verifyTask(
 
   const head = chainHead(cwd);
   const receipt: Receipt = {
-    version: 1,
+    version: 2,
     task_id: id,
     seq: head.seq + 1,
     prev: head.prevHash,
@@ -76,6 +76,7 @@ export function verifyTask(
     tree_sha: treeSha,
     verdict: "pass",
     verified_at: new Date().toISOString(),
+    allow: [...task.allow],
   };
   const receiptPath = writeReceipt(cwd, receipt);
 

@@ -1,6 +1,6 @@
 {
   "name": "sddx",
-  "version": "0.0.4",
+  "version": "0.1.0",
   "description": "Loop-based Spec-Driven Development: dense specs with mandatory oracles, hook-enforced TDD, parallel worktrees, hash-chained receipts.",
   "author": {
     "name": "glapsfun"

@@ -1,5 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { auditReceipts } from "./audit";
+import { writeBoard } from "./board";
 import {
   branchExists,
   createBranch,
@@ -37,6 +39,8 @@ const USAGE = `usage:
   sddx task allow <id> <path>
   sddx task show <id>
   sddx verify <id> [--model <m>] [--harness <h>]
+  sddx board
+  sddx audit [--signatures]
   sddx cleanup <id>
   sddx sweep`;
 
@@ -229,6 +233,20 @@ function main(argv: string[]): void {
     }
     if (cmd === "verify") {
       cmdVerify(cwd, rest);
+      return;
+    }
+    if (cmd === "board") {
+      const res = writeBoard(cwd);
+      console.log(`${res.path}${res.changed ? "" : " (unchanged)"}`);
+      return;
+    }
+    if (cmd === "audit") {
+      const unknown = rest.filter((a) => a !== "--signatures");
+      if (unknown.length > 0) fail(USAGE, 2);
+      const res = auditReceipts(cwd, { signatures: rest.includes("--signatures") });
+      for (const f of res.findings) console.error(f);
+      if (res.findings.length > 0) fail(`audit: ${res.findings.length} finding(s)`);
+      console.log(`audit: ${res.receipts} receipt(s) verified, chain intact`);
       return;
     }
     if (cmd === "cleanup") {

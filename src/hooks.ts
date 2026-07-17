@@ -6,6 +6,7 @@
 // Deliberately not exported: process entrypoint (see bootstrap.ts).
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { writeBoard } from "./board";
 import { recordTestRun } from "./lib/recorder";
 import { stopGate } from "./lib/stopgate";
 import { isTerminal, type TaskState } from "./lib/task";
@@ -86,6 +87,22 @@ function cmdStopGate(event: HookEvent): void {
   emit(decision.block ? { decision: "block", reason: decision.reason } : {});
 }
 
+function boardEnabled(cwd: string, env = process.env): boolean {
+  if (env.SDDX_BOARD_ENABLED !== undefined) {
+    return !["false", "0"].includes(env.SDDX_BOARD_ENABLED);
+  }
+  const path = join(cwd, ".sddx", "config.json");
+  if (existsSync(path)) {
+    try {
+      const cfg = JSON.parse(readFileSync(path, "utf8")) as { board_enabled?: boolean };
+      if (typeof cfg.board_enabled === "boolean") return cfg.board_enabled;
+    } catch {
+      // unreadable config → default
+    }
+  }
+  return true;
+}
+
 function cmdSessionStart(event: HookEvent): void {
   const cwd = event.cwd ?? process.cwd();
   const lines: string[] = [];
@@ -96,6 +113,13 @@ function cmdSessionStart(event: HookEvent): void {
         lines.push(`sddx: swept ${res.removed.length} orphan worktree(s)`);
     } catch {
       // sweep needs git; its absence must not delay session start
+    }
+    if (boardEnabled(cwd)) {
+      try {
+        writeBoard(cwd);
+      } catch (e) {
+        lines.push(`sddx: board refresh failed: ${(e as Error).message}`);
+      }
     }
     const tasksDir = join(cwd, ".sddx", "tasks");
     if (existsSync(tasksDir)) {

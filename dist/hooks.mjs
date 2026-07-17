@@ -3,16 +3,343 @@ var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, 
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
 // src/hooks.ts
-import { existsSync as existsSync6, readdirSync as readdirSync3, readFileSync as readFileSync5 } from "node:fs";
-import { join as join6 } from "node:path";
+import { existsSync as existsSync7, readdirSync as readdirSync4, readFileSync as readFileSync6 } from "node:fs";
+import { join as join7 } from "node:path";
+
+// src/board.ts
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync2, readFileSync as readFileSync2, writeFileSync } from "node:fs";
+import { join as join2 } from "node:path";
+
+// src/lib/worktree.ts
+import { spawnSync as spawnSync2 } from "node:child_process";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  realpathSync,
+  rmdirSync,
+  statSync
+} from "node:fs";
+import { join } from "node:path";
+
+// src/lib/git.ts
+import { spawnSync } from "node:child_process";
+function git(cwd, ...args) {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
+  if (r.error)
+    throw new Error(`git not runnable: ${r.error.message}`);
+  if (r.status !== 0) {
+    throw new Error(`git ${args.join(" ")} failed: ${(r.stderr ?? "").trim()}`);
+  }
+  return (r.stdout ?? "").trim();
+}
+var headSha = (cwd) => git(cwd, "rev-parse", "HEAD");
+var currentBranch = (cwd) => git(cwd, "rev-parse", "--abbrev-ref", "HEAD");
+var createBranch = (cwd, name) => {
+  git(cwd, "switch", "-c", name);
+};
+function branchExists(cwd, name) {
+  const r = spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${name}`], {
+    cwd
+  });
+  return r.status === 0;
+}
+function isMerged(cwd, branch) {
+  return git(cwd, "branch", "--merged", "HEAD", "--format=%(refname:short)").split(`
+`).includes(branch);
+}
+var deleteBranch = (cwd, name) => {
+  git(cwd, "branch", "-d", name);
+};
+var stageAll = (cwd) => {
+  git(cwd, "add", "-A");
+};
+var writeTree = (cwd) => git(cwd, "write-tree");
+function commit(cwd, message) {
+  git(cwd, "commit", "-m", message);
+  return headSha(cwd);
+}
+
+// src/lib/worktree.ts
+var worktreesDir = (cwd) => join(cwd, ".sddx-worktrees");
+function tryRev(cwd, ref) {
+  const r = spawnSync2("git", ["rev-parse", "--verify", "--quiet", ref], {
+    cwd,
+    encoding: "utf8"
+  });
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+function resolveBaseRef(cwd) {
+  const symref = spawnSync2("git", ["symbolic-ref", "-q", "refs/remotes/origin/HEAD"], {
+    cwd,
+    encoding: "utf8"
+  });
+  if (symref.status === 0) {
+    const sha = tryRev(cwd, symref.stdout.trim());
+    if (sha)
+      return { sha, source: "origin/HEAD" };
+  }
+  for (const [ref, source] of [
+    ["refs/remotes/origin/main", "origin/main"],
+    ["refs/remotes/origin/master", "origin/master"]
+  ]) {
+    const sha = tryRev(cwd, ref);
+    if (sha)
+      return { sha, source };
+  }
+  return { sha: git(cwd, "rev-parse", "HEAD"), source: "HEAD" };
+}
+var gitCommonDir = (cwd) => {
+  const dir = git(cwd, "rev-parse", "--git-common-dir");
+  return join(cwd, dir);
+};
+var EXCLUDE_LINE = ".sddx-worktrees/";
+function ensureExcluded(cwd) {
+  const infoDir = join(gitCommonDir(cwd), "info");
+  mkdirSync(infoDir, { recursive: true });
+  const exclude = join(infoDir, "exclude");
+  const current = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
+  if (current.split(`
+`).includes(EXCLUDE_LINE))
+    return;
+  const sep = current === "" || current.endsWith(`
+`) ? "" : `
+`;
+  appendFileSync(exclude, `${sep}${EXCLUDE_LINE}
+`);
+}
+function worktreeAvailable(cwd) {
+  const r = spawnSync2("git", ["worktree", "list"], { cwd });
+  if (r.status !== 0)
+    return false;
+  const gitDir = git(cwd, "rev-parse", "--git-dir");
+  const common = git(cwd, "rev-parse", "--git-common-dir");
+  return gitDir === common;
+}
+function createWorktree(cwd, id, baseSha) {
+  ensureExcluded(cwd);
+  mkdirSync(worktreesDir(cwd), { recursive: true });
+  const path = join(worktreesDir(cwd), id);
+  git(cwd, "worktree", "add", "-q", path, "-b", `sddx/${id}`, baseSha);
+  return path;
+}
+var isDirty = (worktreePath) => git(worktreePath, "status", "--porcelain") !== "";
+function removeWorktree(cwd, path) {
+  git(cwd, "worktree", "remove", path);
+  git(cwd, "worktree", "prune");
+}
+function listSddxWorktrees(cwd) {
+  const dir = worktreesDir(cwd);
+  if (!existsSync(dir))
+    return [];
+  const realPrefix = `${realpathSync(dir)}/`;
+  const prefix = `${dir}/`;
+  const out = git(cwd, "worktree", "list", "--porcelain");
+  const entries = [];
+  let current = {};
+  for (const line of `${out}
+`.split(`
+`)) {
+    if (line.startsWith("worktree ")) {
+      current = { path: line.slice("worktree ".length), branch: null, head: null };
+    } else if (line.startsWith("HEAD ")) {
+      current.head = line.slice("HEAD ".length);
+    } else if (line.startsWith("branch ")) {
+      current.branch = line.slice("branch ".length).replace(/^refs\/heads\//, "");
+    } else if (line === "" && current.path) {
+      if (current.path.startsWith(realPrefix)) {
+        current.path = prefix + current.path.slice(realPrefix.length);
+        entries.push(current);
+      }
+      current = {};
+    }
+  }
+  return entries;
+}
+function hasSubmodules(cwd, baseSha) {
+  const r = spawnSync2("git", ["cat-file", "-e", `${baseSha}:.gitmodules`], { cwd });
+  return r.status === 0;
+}
+var LOCK_STALE_MS = 10 * 60000;
+function acquireLock(lockPath, now) {
+  try {
+    mkdirSync(lockPath);
+    return true;
+  } catch {
+    let age = 0;
+    try {
+      age = now - statSync(lockPath).mtimeMs;
+    } catch {
+      try {
+        mkdirSync(lockPath);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    if (age <= LOCK_STALE_MS)
+      return false;
+    try {
+      rmdirSync(lockPath);
+      mkdirSync(lockPath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+function readWorktreeTask(worktreePath, id) {
+  const path = join(worktreePath, ".sddx", "tasks", `${id}.json`);
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+var DISPOSABLE = new Set(["DONE", "ABANDONED"]);
+function sweep(cwd, opts = {}) {
+  const now = opts.now ?? Date.now();
+  const lockPath = join(gitCommonDir(cwd), "sddx-sweep.lock");
+  if (!acquireLock(lockPath, now)) {
+    return { removed: [], skipped: [], locked: true };
+  }
+  const removed = [];
+  const skipped = [];
+  try {
+    for (const wt of listSddxWorktrees(cwd)) {
+      const id = wt.branch?.replace(/^sddx\//, "");
+      if (!id) {
+        skipped.push({ path: wt.path, reason: "no sddx branch" });
+        continue;
+      }
+      const task = readWorktreeTask(wt.path, id);
+      if (!task) {
+        skipped.push({ path: wt.path, reason: "no readable task state" });
+        continue;
+      }
+      if (!DISPOSABLE.has(task.phase)) {
+        skipped.push({ path: wt.path, reason: `phase ${task.phase}` });
+        continue;
+      }
+      if (isDirty(wt.path)) {
+        skipped.push({ path: wt.path, reason: "dirty" });
+        continue;
+      }
+      if (task.phase === "DONE" && !existsSync(join(wt.path, ".sddx", "receipts", `${id}.json`))) {
+        skipped.push({ path: wt.path, reason: "DONE without receipt" });
+        continue;
+      }
+      try {
+        removeWorktree(cwd, wt.path);
+        removed.push(wt.path);
+      } catch (e) {
+        skipped.push({ path: wt.path, reason: `remove failed: ${e.message}` });
+      }
+    }
+  } finally {
+    try {
+      rmdirSync(lockPath);
+    } catch {}
+  }
+  return { removed, skipped, locked: false };
+}
+
+// src/board.ts
+var DASH = "—";
+var cell = (s) => s.replace(/\|/g, "\\|").replace(/\n/g, " ");
+function receiptRef(dir, id) {
+  const path = join2(dir, `${id}.json`);
+  if (!existsSync2(path))
+    return DASH;
+  try {
+    return `#${JSON.parse(readFileSync2(path, "utf8")).seq}`;
+  } catch {
+    return "unreadable";
+  }
+}
+function taskRow(taskPath, id, receiptsDirs) {
+  let t;
+  try {
+    t = JSON.parse(readFileSync2(taskPath, "utf8"));
+  } catch {
+    return {
+      id,
+      phase: "UNREADABLE",
+      sentence: "task file failed to parse",
+      workspace: DASH,
+      iterations: DASH,
+      receipt: DASH,
+      allow: DASH
+    };
+  }
+  let receipt = DASH;
+  for (const dir of receiptsDirs) {
+    receipt = receiptRef(dir, id);
+    if (receipt !== DASH)
+      break;
+  }
+  return {
+    id: t.id,
+    phase: t.phase,
+    sentence: t.task,
+    workspace: t.workspace.mode,
+    iterations: String(t.iterations),
+    receipt,
+    allow: t.allow.length > 0 ? t.allow.join(", ") : DASH
+  };
+}
+var jsonIds = (dir) => existsSync2(dir) ? readdirSync2(dir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length)).sort() : [];
+function renderBoard(cwd) {
+  const rows = new Map;
+  const mainReceipts = join2(cwd, ".sddx", "receipts");
+  for (const id of jsonIds(join2(cwd, ".sddx", "tasks"))) {
+    rows.set(id, taskRow(join2(cwd, ".sddx", "tasks", `${id}.json`), id, [mainReceipts]));
+  }
+  const wtDir = worktreesDir(cwd);
+  if (existsSync2(wtDir)) {
+    for (const id of readdirSync2(wtDir).sort()) {
+      const taskPath = join2(wtDir, id, ".sddx", "tasks", `${id}.json`);
+      if (!existsSync2(taskPath))
+        continue;
+      rows.set(id, taskRow(taskPath, id, [join2(wtDir, id, ".sddx", "receipts"), mainReceipts]));
+    }
+  }
+  const lines = ["<!-- generated by sddx — do not edit -->", "", "# sddx board", ""];
+  if (rows.size === 0) {
+    lines.push("_No tasks registered._", "");
+    return lines.join(`
+`);
+  }
+  lines.push("| Task | Phase | Sentence | Workspace | Iter | Receipt | Allow |", "| --- | --- | --- | --- | --- | --- | --- |");
+  for (const id of [...rows.keys()].sort()) {
+    const r = rows.get(id);
+    lines.push(`| ${cell(r.id)} | ${r.phase} | ${cell(r.sentence)} | ${r.workspace} | ${r.iterations} | ${r.receipt} | ${cell(r.allow)} |`);
+  }
+  lines.push("");
+  return lines.join(`
+`);
+}
+var boardPath = (cwd) => join2(cwd, ".sddx", "BOARD.md");
+function writeBoard(cwd) {
+  const path = boardPath(cwd);
+  const rendered = renderBoard(cwd);
+  const current = existsSync2(path) ? readFileSync2(path, "utf8") : null;
+  if (current === rendered)
+    return { path, changed: false };
+  mkdirSync2(join2(cwd, ".sddx"), { recursive: true });
+  writeFileSync(path, rendered);
+  return { path, changed: true };
+}
 
 // src/lib/resolve.ts
-import { existsSync as existsSync2, readdirSync, readFileSync as readFileSync2, statSync } from "node:fs";
-import { basename, dirname, join as join2, resolve as resolvePath } from "node:path";
+import { existsSync as existsSync4, readdirSync as readdirSync3, readFileSync as readFileSync4, statSync as statSync2 } from "node:fs";
+import { basename, dirname, join as join4, resolve as resolvePath } from "node:path";
 
 // src/lib/task.ts
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync as existsSync3, mkdirSync as mkdirSync3, readFileSync as readFileSync3, writeFileSync as writeFileSync2 } from "node:fs";
+import { join as join3 } from "node:path";
 
 // src/lib/glob.ts
 function segmentToRegex(segment) {
@@ -92,8 +419,8 @@ var TRANSITIONS = {
   DONE: [],
   ABANDONED: []
 };
-var sddxDir = (cwd) => join(cwd, ".sddx");
-var taskPath = (cwd, id) => join(sddxDir(cwd), "tasks", `${id}.json`);
+var sddxDir = (cwd) => join3(cwd, ".sddx");
+var taskPath = (cwd, id) => join3(sddxDir(cwd), "tasks", `${id}.json`);
 function taskId(sentence, date = new Date) {
   const slug = sentence.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
   const ymd = date.toISOString().slice(0, 10).replace(/-/g, "");
@@ -116,22 +443,22 @@ function createTask(cwd, spec, specPath, workspace) {
     updated_at: now
   };
   const path = taskPath(cwd, t.id);
-  if (existsSync(path))
+  if (existsSync3(path))
     throw new Error(`task ${t.id} already exists at ${path}`);
-  mkdirSync(join(sddxDir(cwd), "tasks"), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(t, null, 2)}
+  mkdirSync3(join3(sddxDir(cwd), "tasks"), { recursive: true });
+  writeFileSync2(path, `${JSON.stringify(t, null, 2)}
 `);
   return t;
 }
 function readTask(cwd, id) {
   const path = taskPath(cwd, id);
-  if (!existsSync(path))
+  if (!existsSync3(path))
     throw new Error(`no such task: ${id} (${path})`);
-  return JSON.parse(readFileSync(path, "utf8"));
+  return JSON.parse(readFileSync3(path, "utf8"));
 }
 function writeTask(cwd, t) {
   t.updated_at = new Date().toISOString();
-  writeFileSync(taskPath(cwd, t.id), `${JSON.stringify(t, null, 2)}
+  writeFileSync2(taskPath(cwd, t.id), `${JSON.stringify(t, null, 2)}
 `);
 }
 function transition(t, to, opts = {}) {
@@ -178,13 +505,13 @@ function allowPath(t, path) {
 function workspaceRoot(startPath) {
   let dir = resolvePath(startPath);
   try {
-    if (statSync(dir).isFile())
+    if (statSync2(dir).isFile())
       dir = dirname(dir);
   } catch {
     dir = dirname(dir);
   }
   while (true) {
-    if (existsSync2(join2(dir, ".git")))
+    if (existsSync4(join4(dir, ".git")))
       return dir;
     const parent = dirname(dir);
     if (parent === dir)
@@ -194,15 +521,15 @@ function workspaceRoot(startPath) {
 }
 function headBranch(root) {
   try {
-    const dotGit = join2(root, ".git");
+    const dotGit = join4(root, ".git");
     let gitDir = dotGit;
-    if (statSync(dotGit).isFile()) {
-      const m = /^gitdir:\s*(.+)\s*$/m.exec(readFileSync2(dotGit, "utf8"));
+    if (statSync2(dotGit).isFile()) {
+      const m = /^gitdir:\s*(.+)\s*$/m.exec(readFileSync4(dotGit, "utf8"));
       if (!m)
         return null;
       gitDir = resolvePath(root, m[1].trim());
     }
-    const head = readFileSync2(join2(gitDir, "HEAD"), "utf8").trim();
+    const head = readFileSync4(join4(gitDir, "HEAD"), "utf8").trim();
     const ref = /^ref:\s*refs\/heads\/(.+)$/.exec(head);
     return ref ? ref[1] : null;
   } catch {
@@ -210,18 +537,18 @@ function headBranch(root) {
   }
 }
 function readTaskFile(root, id) {
-  const path = join2(root, ".sddx", "tasks", `${id}.json`);
-  if (!existsSync2(path))
+  const path = join4(root, ".sddx", "tasks", `${id}.json`);
+  if (!existsSync4(path))
     return null;
   try {
-    return { kind: "task", root, task: JSON.parse(readFileSync2(path, "utf8")) };
+    return { kind: "task", root, task: JSON.parse(readFileSync4(path, "utf8")) };
   } catch (e) {
     return { kind: "corrupt", root, path, error: e.message };
   }
 }
 function resolveTask(startPath) {
   const root = workspaceRoot(startPath);
-  if (!root || !existsSync2(join2(root, ".sddx")))
+  if (!root || !existsSync4(join4(root, ".sddx")))
     return { kind: "none" };
   if (basename(dirname(root)) === ".sddx-worktrees") {
     const byName = readTaskFile(root, basename(root));
@@ -234,15 +561,15 @@ function resolveTask(startPath) {
     if (byBranch)
       return byBranch;
   }
-  const tasksDir = join2(root, ".sddx", "tasks");
-  if (!existsSync2(tasksDir))
+  const tasksDir = join4(root, ".sddx", "tasks");
+  if (!existsSync4(tasksDir))
     return { kind: "none" };
   const candidates = [];
-  for (const file of readdirSync(tasksDir).filter((f) => f.endsWith(".json"))) {
-    const path = join2(tasksDir, file);
+  for (const file of readdirSync3(tasksDir).filter((f) => f.endsWith(".json"))) {
+    const path = join4(tasksDir, file);
     let task;
     try {
-      task = JSON.parse(readFileSync2(path, "utf8"));
+      task = JSON.parse(readFileSync4(path, "utf8"));
     } catch (e) {
       return { kind: "corrupt", root, path, error: e.message };
     }
@@ -300,8 +627,8 @@ function recordTestRun(cwd, command, exitCode) {
 }
 
 // src/lib/stopgate.ts
-import { existsSync as existsSync3 } from "node:fs";
-import { join as join3 } from "node:path";
+import { existsSync as existsSync5 } from "node:fs";
+import { join as join5 } from "node:path";
 var NEXT_STEP = {
   PLAN: "write a failing test and run it to enter RED",
   RED: "make the failing test pass (run the test runner to enter GREEN)",
@@ -331,8 +658,8 @@ function stopGate(event) {
   }
   const { task } = res;
   if (isTerminal(task.phase)) {
-    const receipt = join3(res.root, ".sddx", "receipts", `${task.id}.json`);
-    if (task.phase === "DONE" && !existsSync3(receipt)) {
+    const receipt = join5(res.root, ".sddx", "receipts", `${task.id}.json`);
+    if (task.phase === "DONE" && !existsSync5(receipt)) {
       return {
         block: true,
         reason: `sddx: task ${task.id} is DONE but .sddx/receipts/${task.id}.json is missing — completion is unproven. Restore the receipt or abandon the task.`
@@ -347,251 +674,15 @@ function stopGate(event) {
   };
 }
 
-// src/lib/worktree.ts
-import { spawnSync as spawnSync2 } from "node:child_process";
-import {
-  appendFileSync,
-  existsSync as existsSync4,
-  mkdirSync as mkdirSync2,
-  readdirSync as readdirSync2,
-  readFileSync as readFileSync3,
-  realpathSync,
-  rmdirSync,
-  statSync as statSync2
-} from "node:fs";
-import { join as join4 } from "node:path";
-
-// src/lib/git.ts
-import { spawnSync } from "node:child_process";
-function git(cwd, ...args) {
-  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
-  if (r.error)
-    throw new Error(`git not runnable: ${r.error.message}`);
-  if (r.status !== 0) {
-    throw new Error(`git ${args.join(" ")} failed: ${(r.stderr ?? "").trim()}`);
-  }
-  return (r.stdout ?? "").trim();
-}
-var headSha = (cwd) => git(cwd, "rev-parse", "HEAD");
-var currentBranch = (cwd) => git(cwd, "rev-parse", "--abbrev-ref", "HEAD");
-var createBranch = (cwd, name) => {
-  git(cwd, "switch", "-c", name);
-};
-function branchExists(cwd, name) {
-  const r = spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${name}`], {
-    cwd
-  });
-  return r.status === 0;
-}
-function isMerged(cwd, branch) {
-  return git(cwd, "branch", "--merged", "HEAD", "--format=%(refname:short)").split(`
-`).includes(branch);
-}
-var deleteBranch = (cwd, name) => {
-  git(cwd, "branch", "-d", name);
-};
-var stageAll = (cwd) => {
-  git(cwd, "add", "-A");
-};
-var writeTree = (cwd) => git(cwd, "write-tree");
-function commit(cwd, message) {
-  git(cwd, "commit", "-m", message);
-  return headSha(cwd);
-}
-
-// src/lib/worktree.ts
-var worktreesDir = (cwd) => join4(cwd, ".sddx-worktrees");
-function tryRev(cwd, ref) {
-  const r = spawnSync2("git", ["rev-parse", "--verify", "--quiet", ref], {
-    cwd,
-    encoding: "utf8"
-  });
-  return r.status === 0 ? r.stdout.trim() : null;
-}
-function resolveBaseRef(cwd) {
-  const symref = spawnSync2("git", ["symbolic-ref", "-q", "refs/remotes/origin/HEAD"], {
-    cwd,
-    encoding: "utf8"
-  });
-  if (symref.status === 0) {
-    const sha = tryRev(cwd, symref.stdout.trim());
-    if (sha)
-      return { sha, source: "origin/HEAD" };
-  }
-  for (const [ref, source] of [
-    ["refs/remotes/origin/main", "origin/main"],
-    ["refs/remotes/origin/master", "origin/master"]
-  ]) {
-    const sha = tryRev(cwd, ref);
-    if (sha)
-      return { sha, source };
-  }
-  return { sha: git(cwd, "rev-parse", "HEAD"), source: "HEAD" };
-}
-var gitCommonDir = (cwd) => {
-  const dir = git(cwd, "rev-parse", "--git-common-dir");
-  return join4(cwd, dir);
-};
-var EXCLUDE_LINE = ".sddx-worktrees/";
-function ensureExcluded(cwd) {
-  const infoDir = join4(gitCommonDir(cwd), "info");
-  mkdirSync2(infoDir, { recursive: true });
-  const exclude = join4(infoDir, "exclude");
-  const current = existsSync4(exclude) ? readFileSync3(exclude, "utf8") : "";
-  if (current.split(`
-`).includes(EXCLUDE_LINE))
-    return;
-  const sep = current === "" || current.endsWith(`
-`) ? "" : `
-`;
-  appendFileSync(exclude, `${sep}${EXCLUDE_LINE}
-`);
-}
-function worktreeAvailable(cwd) {
-  const r = spawnSync2("git", ["worktree", "list"], { cwd });
-  if (r.status !== 0)
-    return false;
-  const gitDir = git(cwd, "rev-parse", "--git-dir");
-  const common = git(cwd, "rev-parse", "--git-common-dir");
-  return gitDir === common;
-}
-function createWorktree(cwd, id, baseSha) {
-  ensureExcluded(cwd);
-  mkdirSync2(worktreesDir(cwd), { recursive: true });
-  const path = join4(worktreesDir(cwd), id);
-  git(cwd, "worktree", "add", "-q", path, "-b", `sddx/${id}`, baseSha);
-  return path;
-}
-var isDirty = (worktreePath) => git(worktreePath, "status", "--porcelain") !== "";
-function removeWorktree(cwd, path) {
-  git(cwd, "worktree", "remove", path);
-  git(cwd, "worktree", "prune");
-}
-function listSddxWorktrees(cwd) {
-  const dir = worktreesDir(cwd);
-  if (!existsSync4(dir))
-    return [];
-  const realPrefix = `${realpathSync(dir)}/`;
-  const prefix = `${dir}/`;
-  const out = git(cwd, "worktree", "list", "--porcelain");
-  const entries = [];
-  let current = {};
-  for (const line of `${out}
-`.split(`
-`)) {
-    if (line.startsWith("worktree ")) {
-      current = { path: line.slice("worktree ".length), branch: null, head: null };
-    } else if (line.startsWith("HEAD ")) {
-      current.head = line.slice("HEAD ".length);
-    } else if (line.startsWith("branch ")) {
-      current.branch = line.slice("branch ".length).replace(/^refs\/heads\//, "");
-    } else if (line === "" && current.path) {
-      if (current.path.startsWith(realPrefix)) {
-        current.path = prefix + current.path.slice(realPrefix.length);
-        entries.push(current);
-      }
-      current = {};
-    }
-  }
-  return entries;
-}
-function hasSubmodules(cwd, baseSha) {
-  const r = spawnSync2("git", ["cat-file", "-e", `${baseSha}:.gitmodules`], { cwd });
-  return r.status === 0;
-}
-var LOCK_STALE_MS = 10 * 60000;
-function acquireLock(lockPath, now) {
-  try {
-    mkdirSync2(lockPath);
-    return true;
-  } catch {
-    let age = 0;
-    try {
-      age = now - statSync2(lockPath).mtimeMs;
-    } catch {
-      try {
-        mkdirSync2(lockPath);
-        return true;
-      } catch {
-        return false;
-      }
-    }
-    if (age <= LOCK_STALE_MS)
-      return false;
-    try {
-      rmdirSync(lockPath);
-      mkdirSync2(lockPath);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
-function readWorktreeTask(worktreePath, id) {
-  const path = join4(worktreePath, ".sddx", "tasks", `${id}.json`);
-  try {
-    return JSON.parse(readFileSync3(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
-var DISPOSABLE = new Set(["DONE", "ABANDONED"]);
-function sweep(cwd, opts = {}) {
-  const now = opts.now ?? Date.now();
-  const lockPath = join4(gitCommonDir(cwd), "sddx-sweep.lock");
-  if (!acquireLock(lockPath, now)) {
-    return { removed: [], skipped: [], locked: true };
-  }
-  const removed = [];
-  const skipped = [];
-  try {
-    for (const wt of listSddxWorktrees(cwd)) {
-      const id = wt.branch?.replace(/^sddx\//, "");
-      if (!id) {
-        skipped.push({ path: wt.path, reason: "no sddx branch" });
-        continue;
-      }
-      const task = readWorktreeTask(wt.path, id);
-      if (!task) {
-        skipped.push({ path: wt.path, reason: "no readable task state" });
-        continue;
-      }
-      if (!DISPOSABLE.has(task.phase)) {
-        skipped.push({ path: wt.path, reason: `phase ${task.phase}` });
-        continue;
-      }
-      if (isDirty(wt.path)) {
-        skipped.push({ path: wt.path, reason: "dirty" });
-        continue;
-      }
-      if (task.phase === "DONE" && !existsSync4(join4(wt.path, ".sddx", "receipts", `${id}.json`))) {
-        skipped.push({ path: wt.path, reason: "DONE without receipt" });
-        continue;
-      }
-      try {
-        removeWorktree(cwd, wt.path);
-        removed.push(wt.path);
-      } catch (e) {
-        skipped.push({ path: wt.path, reason: `remove failed: ${e.message}` });
-      }
-    }
-  } finally {
-    try {
-      rmdirSync(lockPath);
-    } catch {}
-  }
-  return { removed, skipped, locked: false };
-}
-
 // src/tdd-gate.ts
-import { existsSync as existsSync5, readFileSync as readFileSync4 } from "node:fs";
-import { isAbsolute, join as join5, relative, resolve } from "node:path";
+import { existsSync as existsSync6, readFileSync as readFileSync5 } from "node:fs";
+import { isAbsolute, join as join6, relative, resolve } from "node:path";
 function loadGateConfig(root, env = process.env) {
   let fileConfig = {};
-  const path = join5(root, ".sddx", "config.json");
-  if (existsSync5(path)) {
+  const path = join6(root, ".sddx", "config.json");
+  if (existsSync6(path)) {
     try {
-      fileConfig = JSON.parse(readFileSync4(path, "utf8"));
+      fileConfig = JSON.parse(readFileSync5(path, "utf8"));
     } catch {}
   }
   return {
@@ -645,7 +736,7 @@ function tddGate(input, env = process.env) {
 // src/hooks.ts
 function readEvent() {
   try {
-    const raw = readFileSync5(0, "utf8");
+    const raw = readFileSync6(0, "utf8");
     const parsed = raw.trim() === "" ? {} : JSON.parse(raw);
     return typeof parsed === "object" && parsed !== null ? parsed : {};
   } catch {
@@ -693,20 +784,41 @@ function cmdStopGate(event) {
   const decision = stopGate({ cwd: event.cwd, stop_hook_active: event.stop_hook_active });
   emit(decision.block ? { decision: "block", reason: decision.reason } : {});
 }
+function boardEnabled(cwd, env = process.env) {
+  if (env.SDDX_BOARD_ENABLED !== undefined) {
+    return !["false", "0"].includes(env.SDDX_BOARD_ENABLED);
+  }
+  const path = join7(cwd, ".sddx", "config.json");
+  if (existsSync7(path)) {
+    try {
+      const cfg = JSON.parse(readFileSync6(path, "utf8"));
+      if (typeof cfg.board_enabled === "boolean")
+        return cfg.board_enabled;
+    } catch {}
+  }
+  return true;
+}
 function cmdSessionStart(event) {
   const cwd = event.cwd ?? process.cwd();
   const lines = [];
-  if (existsSync6(join6(cwd, ".sddx"))) {
+  if (existsSync7(join7(cwd, ".sddx"))) {
     try {
       const res = sweep(cwd);
       if (res.removed.length > 0)
         lines.push(`sddx: swept ${res.removed.length} orphan worktree(s)`);
     } catch {}
-    const tasksDir = join6(cwd, ".sddx", "tasks");
-    if (existsSync6(tasksDir)) {
-      for (const file of readdirSync3(tasksDir).filter((f) => f.endsWith(".json"))) {
+    if (boardEnabled(cwd)) {
+      try {
+        writeBoard(cwd);
+      } catch (e) {
+        lines.push(`sddx: board refresh failed: ${e.message}`);
+      }
+    }
+    const tasksDir = join7(cwd, ".sddx", "tasks");
+    if (existsSync7(tasksDir)) {
+      for (const file of readdirSync4(tasksDir).filter((f) => f.endsWith(".json"))) {
         try {
-          const t = JSON.parse(readFileSync5(join6(tasksDir, file), "utf8"));
+          const t = JSON.parse(readFileSync6(join7(tasksDir, file), "utf8"));
           if (!isTerminal(t.phase))
             lines.push(`sddx task ${t.id}: phase ${t.phase} — ${t.task}`);
         } catch {

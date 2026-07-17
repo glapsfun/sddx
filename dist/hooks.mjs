@@ -665,7 +665,7 @@ import { existsSync as existsSync5 } from "node:fs";
 import { join as join5 } from "node:path";
 var NEXT_STEP = {
   PLAN: "write a failing test and run it to enter RED",
-  RED: "make the failing test pass (run the test runner to enter GREEN)",
+  RED: "run sddx red-check <id>, then make the failing test pass (run the test runner to enter GREEN)",
   GREEN: "refactor if needed, then: sddx task phase <id> VERIFY && sddx verify <id>",
   REFACTOR: "re-run tests to return to GREEN, then verify",
   VERIFY: "run: sddx verify <id>",

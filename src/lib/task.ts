@@ -36,7 +36,14 @@ export interface TaskState {
   iterations: number;
   evidence: Record<
     string,
-    { test_exit?: number; exit_code?: number; at: string; source?: EvidenceSource }
+    {
+      test_exit?: number;
+      exit_code?: number;
+      at: string;
+      source?: EvidenceSource;
+      stdout_sha256?: string;
+      stderr_sha256?: string;
+    }
   >;
   history: Array<{ phase: Phase; at: string }>;
   created_at: string;

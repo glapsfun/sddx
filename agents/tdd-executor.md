@@ -17,10 +17,13 @@ checkout or a sibling worktree is a role violation.
 1. **RED** — write the failing test FIRST. No implementation code of any kind
    before a failing test exists. Run the test runner, capture its real exit code:
    `... task phase <id> RED --test-exit <code>` (rejected unless nonzero).
-2. **GREEN** — write the minimal implementation. Re-run tests; when they pass:
+2. **Red-check** — `... red-check <id>`: the spec's oracle must fail while no
+   implementation exists. If it exits 0, stop and report a spec problem —
+   do not implement against an oracle that cannot fail.
+3. **GREEN** — write the minimal implementation. Re-run tests; when they pass:
    `... task phase <id> GREEN --test-exit 0`.
-3. **REFACTOR** (optional) — clean up with tests staying green.
-4. `... task phase <id> VERIFY` — then stop and report. Verification is not
+4. **REFACTOR** (optional) — clean up with tests staying green.
+5. `... task phase <id> VERIFY` — then stop and report. Verification is not
    your job.
 
 ## Never

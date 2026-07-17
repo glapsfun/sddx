@@ -35,6 +35,18 @@ export function verifyTask(
   if (task.oracle.type === "manual") {
     throw new Error("manual oracles need a human decision; M1 verify supports command oracles");
   }
+  const redEvidence = task.evidence.oracle_red;
+  if (!redEvidence || redEvidence.exit_code === undefined || redEvidence.exit_code === 0) {
+    throw new Error(
+      `task ${id} has no failing-oracle evidence — run \`sddx red-check ${id}\` during RED; an oracle that never failed proves nothing`,
+    );
+  }
+  const firstGreen = task.history.find((h) => h.phase === "GREEN");
+  if (firstGreen && Date.parse(redEvidence.at) > Date.parse(firstGreen.at)) {
+    throw new Error(
+      `oracle_red (${redEvidence.at}) was recorded after the first GREEN (${firstGreen.at}) — the red-check must precede implementation; abandon and restart the task`,
+    );
+  }
   const want = expectedExit(task.oracle.expect);
 
   const wanted = oracleRuns(cwd, task.oracle.runs);

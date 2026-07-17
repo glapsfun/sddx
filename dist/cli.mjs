@@ -7477,115 +7477,8 @@ function writeBoard(cwd) {
   return { path, changed: true };
 }
 
-// node_modules/yaml/dist/index.js
-var composer = require_composer();
-var Document = require_Document();
-var Schema = require_Schema();
-var errors = require_errors();
-var Alias = require_Alias();
-var identity = require_identity();
-var Pair = require_Pair();
-var Scalar = require_Scalar();
-var YAMLMap = require_YAMLMap();
-var YAMLSeq = require_YAMLSeq();
-var cst = require_cst();
-var lexer = require_lexer();
-var lineCounter = require_line_counter();
-var parser = require_parser();
-var publicApi = require_public_api();
-var visit = require_visit();
-var $Composer = composer.Composer;
-var $Document = Document.Document;
-var $Schema = Schema.Schema;
-var $YAMLError = errors.YAMLError;
-var $YAMLParseError = errors.YAMLParseError;
-var $YAMLWarning = errors.YAMLWarning;
-var $Alias = Alias.Alias;
-var $isAlias = identity.isAlias;
-var $isCollection = identity.isCollection;
-var $isDocument = identity.isDocument;
-var $isMap = identity.isMap;
-var $isNode = identity.isNode;
-var $isPair = identity.isPair;
-var $isScalar = identity.isScalar;
-var $isSeq = identity.isSeq;
-var $Pair = Pair.Pair;
-var $Scalar = Scalar.Scalar;
-var $YAMLMap = YAMLMap.YAMLMap;
-var $YAMLSeq = YAMLSeq.YAMLSeq;
-var $Lexer = lexer.Lexer;
-var $LineCounter = lineCounter.LineCounter;
-var $Parser = parser.Parser;
-var $parse = publicApi.parse;
-var $parseAllDocuments = publicApi.parseAllDocuments;
-var $parseDocument = publicApi.parseDocument;
-var $stringify = publicApi.stringify;
-var $visit = visit.visit;
-var $visitAsync = visit.visitAsync;
-
-// src/lib/spec.ts
-var ORACLE_TYPES = new Set(["command", "test-suite", "browser", "manual"]);
-function toList(v) {
-  if (Array.isArray(v))
-    return v.map(String);
-  if (typeof v === "string" && v.trim() !== "")
-    return [v];
-  return [];
-}
-function parseSpec(yamlText) {
-  let raw;
-  try {
-    raw = $parse(yamlText);
-  } catch (e) {
-    return { errors: [`invalid YAML: ${e.message}`] };
-  }
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    return { errors: ["spec must be a YAML mapping"] };
-  }
-  const r = raw;
-  const errors2 = [];
-  if (typeof r.task !== "string" || r.task.trim() === "") {
-    errors2.push("task: one-sentence description required");
-  }
-  const sc = r.success_criteria;
-  if (!Array.isArray(sc) || sc.length === 0 || !sc.every((s) => typeof s === "string" && s.trim() !== "")) {
-    errors2.push("success_criteria: non-empty list of binary criteria required");
-  }
-  const o = r.oracle;
-  if (typeof o !== "object" || o === null || Array.isArray(o)) {
-    errors2.push("oracle: required — no oracle, no goal");
-  } else {
-    const or2 = o;
-    if (typeof or2.type !== "string" || !ORACLE_TYPES.has(or2.type)) {
-      errors2.push("oracle.type: must be one of command | test-suite | browser | manual");
-    }
-    if (or2.type !== "manual" && (typeof or2.run !== "string" || or2.run.trim() === "")) {
-      errors2.push("oracle.run: command required for non-manual oracles");
-    }
-    if (or2.runs !== undefined && (typeof or2.runs !== "number" || !Number.isInteger(or2.runs) || or2.runs < 1)) {
-      errors2.push("oracle.runs: must be an integer >= 1");
-    }
-  }
-  if (errors2.length > 0)
-    return { errors: errors2 };
-  const or = o;
-  return {
-    errors: [],
-    spec: {
-      task: r.task.trim(),
-      context: toList(r.context),
-      success_criteria: sc.map((s) => s.trim()),
-      oracle: {
-        type: or.type,
-        run: typeof or.run === "string" ? or.run.trim() : "",
-        expect: typeof or.expect === "string" ? or.expect.trim() : "exit 0",
-        ...typeof or.runs === "number" ? { runs: or.runs } : {}
-      },
-      stop_rules: Array.isArray(r.stop_rules) ? r.stop_rules : [],
-      out_of_scope: toList(r.out_of_scope)
-    }
-  };
-}
+// src/lib/redcheck.ts
+import { spawnSync as spawnSync4 } from "node:child_process";
 
 // src/lib/task.ts
 import { existsSync as existsSync5, mkdirSync as mkdirSync4, readFileSync as readFileSync4, writeFileSync as writeFileSync4 } from "node:fs";
@@ -7751,8 +7644,144 @@ function allowPath(t, path) {
   return t;
 }
 
+// src/lib/redcheck.ts
+var ORACLE_TIMEOUT_MS = 10 * 60000;
+function redCheck(cwd, id) {
+  const task = readTask(cwd, id);
+  if (task.phase !== "RED") {
+    throw new Error(`task ${id} is in ${task.phase}; red-check requires phase RED (a recorded failing test)`);
+  }
+  if (task.oracle.type === "manual") {
+    throw new Error("manual oracles cannot be red-checked");
+  }
+  const run = spawnSync4("sh", ["-c", task.oracle.run], { cwd, timeout: ORACLE_TIMEOUT_MS });
+  if (run.error)
+    throw new Error(`oracle could not run: ${run.error.message}`);
+  const exitCode = run.status ?? -1;
+  if (exitCode === 0)
+    return { ok: false, exitCode };
+  task.evidence.oracle_red = {
+    exit_code: exitCode,
+    at: new Date().toISOString(),
+    stdout_sha256: sha256(run.stdout ?? Buffer.alloc(0)),
+    stderr_sha256: sha256(run.stderr ?? Buffer.alloc(0))
+  };
+  writeTask(cwd, task);
+  return { ok: true, exitCode };
+}
+
+// node_modules/yaml/dist/index.js
+var composer = require_composer();
+var Document = require_Document();
+var Schema = require_Schema();
+var errors = require_errors();
+var Alias = require_Alias();
+var identity = require_identity();
+var Pair = require_Pair();
+var Scalar = require_Scalar();
+var YAMLMap = require_YAMLMap();
+var YAMLSeq = require_YAMLSeq();
+var cst = require_cst();
+var lexer = require_lexer();
+var lineCounter = require_line_counter();
+var parser = require_parser();
+var publicApi = require_public_api();
+var visit = require_visit();
+var $Composer = composer.Composer;
+var $Document = Document.Document;
+var $Schema = Schema.Schema;
+var $YAMLError = errors.YAMLError;
+var $YAMLParseError = errors.YAMLParseError;
+var $YAMLWarning = errors.YAMLWarning;
+var $Alias = Alias.Alias;
+var $isAlias = identity.isAlias;
+var $isCollection = identity.isCollection;
+var $isDocument = identity.isDocument;
+var $isMap = identity.isMap;
+var $isNode = identity.isNode;
+var $isPair = identity.isPair;
+var $isScalar = identity.isScalar;
+var $isSeq = identity.isSeq;
+var $Pair = Pair.Pair;
+var $Scalar = Scalar.Scalar;
+var $YAMLMap = YAMLMap.YAMLMap;
+var $YAMLSeq = YAMLSeq.YAMLSeq;
+var $Lexer = lexer.Lexer;
+var $LineCounter = lineCounter.LineCounter;
+var $Parser = parser.Parser;
+var $parse = publicApi.parse;
+var $parseAllDocuments = publicApi.parseAllDocuments;
+var $parseDocument = publicApi.parseDocument;
+var $stringify = publicApi.stringify;
+var $visit = visit.visit;
+var $visitAsync = visit.visitAsync;
+
+// src/lib/spec.ts
+var ORACLE_TYPES = new Set(["command", "test-suite", "browser", "manual"]);
+function toList(v) {
+  if (Array.isArray(v))
+    return v.map(String);
+  if (typeof v === "string" && v.trim() !== "")
+    return [v];
+  return [];
+}
+function parseSpec(yamlText) {
+  let raw;
+  try {
+    raw = $parse(yamlText);
+  } catch (e) {
+    return { errors: [`invalid YAML: ${e.message}`] };
+  }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { errors: ["spec must be a YAML mapping"] };
+  }
+  const r = raw;
+  const errors2 = [];
+  if (typeof r.task !== "string" || r.task.trim() === "") {
+    errors2.push("task: one-sentence description required");
+  }
+  const sc = r.success_criteria;
+  if (!Array.isArray(sc) || sc.length === 0 || !sc.every((s) => typeof s === "string" && s.trim() !== "")) {
+    errors2.push("success_criteria: non-empty list of binary criteria required");
+  }
+  const o = r.oracle;
+  if (typeof o !== "object" || o === null || Array.isArray(o)) {
+    errors2.push("oracle: required — no oracle, no goal");
+  } else {
+    const or2 = o;
+    if (typeof or2.type !== "string" || !ORACLE_TYPES.has(or2.type)) {
+      errors2.push("oracle.type: must be one of command | test-suite | browser | manual");
+    }
+    if (or2.type !== "manual" && (typeof or2.run !== "string" || or2.run.trim() === "")) {
+      errors2.push("oracle.run: command required for non-manual oracles");
+    }
+    if (or2.runs !== undefined && (typeof or2.runs !== "number" || !Number.isInteger(or2.runs) || or2.runs < 1)) {
+      errors2.push("oracle.runs: must be an integer >= 1");
+    }
+  }
+  if (errors2.length > 0)
+    return { errors: errors2 };
+  const or = o;
+  return {
+    errors: [],
+    spec: {
+      task: r.task.trim(),
+      context: toList(r.context),
+      success_criteria: sc.map((s) => s.trim()),
+      oracle: {
+        type: or.type,
+        run: typeof or.run === "string" ? or.run.trim() : "",
+        expect: typeof or.expect === "string" ? or.expect.trim() : "exit 0",
+        ...typeof or.runs === "number" ? { runs: or.runs } : {}
+      },
+      stop_rules: Array.isArray(r.stop_rules) ? r.stop_rules : [],
+      out_of_scope: toList(r.out_of_scope)
+    }
+  };
+}
+
 // src/lib/verify.ts
-import { spawnSync as spawnSync5 } from "node:child_process";
+import { spawnSync as spawnSync6 } from "node:child_process";
 
 // src/lib/config.ts
 import { existsSync as existsSync6, readFileSync as readFileSync5 } from "node:fs";
@@ -7776,11 +7805,11 @@ function oracleRuns(root, specRuns, env = process.env) {
 }
 
 // src/lib/envinfo.ts
-import { spawnSync as spawnSync4 } from "node:child_process";
+import { spawnSync as spawnSync5 } from "node:child_process";
 import { arch, platform } from "node:os";
 function captureEnv(cwd) {
   const bun = globalThis.Bun;
-  const status = spawnSync4("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
+  const status = spawnSync5("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
   return {
     os: platform(),
     arch: arch(),
@@ -7791,7 +7820,7 @@ function captureEnv(cwd) {
 }
 
 // src/lib/verify.ts
-var ORACLE_TIMEOUT_MS = 10 * 60000;
+var ORACLE_TIMEOUT_MS2 = 10 * 60000;
 function expectedExit(expect) {
   const m = /^exit\s+(\d+)$/.exec(expect.trim());
   if (!m) {
@@ -7807,6 +7836,14 @@ function verifyTask(cwd, id, opts) {
   if (task.oracle.type === "manual") {
     throw new Error("manual oracles need a human decision; M1 verify supports command oracles");
   }
+  const redEvidence = task.evidence.oracle_red;
+  if (!redEvidence || redEvidence.exit_code === undefined || redEvidence.exit_code === 0) {
+    throw new Error(`task ${id} has no failing-oracle evidence — run \`sddx red-check ${id}\` during RED; an oracle that never failed proves nothing`);
+  }
+  const firstGreen = task.history.find((h) => h.phase === "GREEN");
+  if (firstGreen && Date.parse(redEvidence.at) > Date.parse(firstGreen.at)) {
+    throw new Error(`oracle_red (${redEvidence.at}) was recorded after the first GREEN (${firstGreen.at}) — the red-check must precede implementation; abandon and restart the task`);
+  }
   const want = expectedExit(task.oracle.expect);
   const wanted = oracleRuns(cwd, task.oracle.runs);
   const runs = [];
@@ -7814,7 +7851,7 @@ function verifyTask(cwd, id, opts) {
   let exitCode = 0;
   for (let i = 0;i < wanted; i += 1) {
     const runStarted = Date.now();
-    const run = spawnSync5("sh", ["-c", task.oracle.run], { cwd, timeout: ORACLE_TIMEOUT_MS });
+    const run = spawnSync6("sh", ["-c", task.oracle.run], { cwd, timeout: ORACLE_TIMEOUT_MS2 });
     if (run.error)
       throw new Error(`oracle could not run: ${run.error.message}`);
     exitCode = run.status ?? -1;
@@ -7870,6 +7907,7 @@ var USAGE = `usage:
   sddx task phase <id> <PHASE> [--test-exit <n>]
   sddx task allow <id> <path>
   sddx task show <id>
+  sddx red-check <id>
   sddx verify <id> [--model <m>] [--harness <h>]
   sddx board
   sddx audit [--signatures]
@@ -8055,6 +8093,17 @@ function main(argv) {
       if (!rest[1])
         fail(USAGE, 2);
       console.log(JSON.stringify(readTask(cwd, rest[1]), null, 2));
+      return;
+    }
+    if (cmd === "red-check") {
+      const [id] = rest;
+      if (!id)
+        fail(USAGE, 2);
+      const res = redCheck(cwd, id);
+      if (!res.ok) {
+        fail(`red-check: oracle exited 0 while task ${id} is RED — the oracle does not discriminate; fix the spec's oracle before implementing`);
+      }
+      console.log(`red-check: oracle failed as required (exit ${res.exitCode}) — recorded oracle_red`);
       return;
     }
     if (cmd === "verify") {

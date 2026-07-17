@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fixtureClone, fixtureRepo } from "./fixtures";
-import { repoRoot } from "./helpers";
+import { fakeRedCheck, repoRoot } from "./helpers";
 
 const CLI_SRC = join(repoRoot, "src/cli.ts");
 
@@ -65,6 +65,7 @@ describe("sddx cli", () => {
     cli(cwd, "task", "phase", id, "RED", "--test-exit", "1");
     cli(cwd, "task", "phase", id, "GREEN", "--test-exit", "0");
     cli(cwd, "task", "phase", id, "VERIFY");
+    fakeRedCheck(cwd, id);
     const v = cli(cwd, "verify", id);
     expect(v.status).toBe(0);
     expect(v.stdout).toContain(".sddx/receipts/");
@@ -120,6 +121,7 @@ describe("sddx cli", () => {
     cli(wt, "task", "phase", id, "RED", "--test-exit", "1");
     cli(wt, "task", "phase", id, "GREEN", "--test-exit", "0");
     cli(wt, "task", "phase", id, "VERIFY");
+    fakeRedCheck(wt, id);
     expect(cli(wt, "verify", id).status).toBe(0);
 
     writeFileSync(join(wt, "dirty.txt"), "x\n");

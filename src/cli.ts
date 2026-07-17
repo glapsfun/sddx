@@ -10,6 +10,7 @@ import {
   headSha,
   isMerged,
 } from "./lib/git";
+import { redCheck } from "./lib/redcheck";
 import { parseSpec } from "./lib/spec";
 import {
   allowPath,
@@ -38,6 +39,7 @@ const USAGE = `usage:
   sddx task phase <id> <PHASE> [--test-exit <n>]
   sddx task allow <id> <path>
   sddx task show <id>
+  sddx red-check <id>
   sddx verify <id> [--model <m>] [--harness <h>]
   sddx board
   sddx audit [--signatures]
@@ -229,6 +231,20 @@ function main(argv: string[]): void {
     if (cmd === "task" && rest[0] === "show") {
       if (!rest[1]) fail(USAGE, 2);
       console.log(JSON.stringify(readTask(cwd, rest[1]), null, 2));
+      return;
+    }
+    if (cmd === "red-check") {
+      const [id] = rest;
+      if (!id) fail(USAGE, 2);
+      const res = redCheck(cwd, id);
+      if (!res.ok) {
+        fail(
+          `red-check: oracle exited 0 while task ${id} is RED — the oracle does not discriminate; fix the spec's oracle before implementing`,
+        );
+      }
+      console.log(
+        `red-check: oracle failed as required (exit ${res.exitCode}) — recorded oracle_red`,
+      );
       return;
     }
     if (cmd === "verify") {

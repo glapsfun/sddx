@@ -11,6 +11,7 @@ usage:
   sddx task phase <id> <PHASE> [--test-exit <n>]
   sddx task allow <id> <path>
   sddx task show <id>
+  sddx red-check <id>
   sddx verify <id> [--model <m>] [--harness <h>]
   sddx board
   sddx audit [--signatures]
@@ -78,6 +79,17 @@ sddx task show <id>
 
 Prints the task state file as JSON — phase, workspace, base SHA, allow list,
 iteration count, timestamps.
+
+## sddx red-check
+
+```sh
+sddx red-check <id>
+```
+
+Runs the task's oracle during RED and records its failure
+(`evidence.oracle_red`). Exits 1 if the oracle passes — a pre-passing oracle
+proves nothing and the spec must be fixed. `sddx verify` refuses tasks whose
+`oracle_red` is missing or dated after the first GREEN.
 
 ## sddx verify
 

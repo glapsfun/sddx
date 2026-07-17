@@ -21,6 +21,7 @@ function taskInVerify(cwd: string, oracleRun: string) {
   t = transition(t, "RED", { testExit: 1 });
   t = transition(t, "GREEN", { testExit: 0 });
   t = transition(t, "VERIFY");
+  t.evidence.oracle_red = { exit_code: 1, at: new Date(0).toISOString() };
   writeTask(cwd, t);
   return t;
 }

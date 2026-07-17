@@ -24,7 +24,8 @@ Trivial single task and the user wants it in-session? `--solo` → follow
    Record each printed task id and worktree path.
 4. **Execute in parallel** — dispatch ALL `tdd-executor` agents in a single
    message (one Task call per task), each given its task id and worktree path.
-   Executors never leave their worktree.
+   Executors never leave their worktree. Each executor runs
+   `... red-check <id>` once RED is recorded, before implementing.
 5. **Verify** — per finished task, dispatch a `verifier` agent with the task id
    and worktree path. Only `sddx verify` sets DONE and writes the receipt.
 6. **Report** — one line per task: id · branch · phase · receipt path. Then run

@@ -29,6 +29,7 @@ function completeTask(cwd: string, runtime: string[], n: number): string {
   const red = spawnSync("node", [`check${n}.js`], { cwd });
   expect(red.status).not.toBe(0); // genuinely failing first
   run(cwd, runtime, "task", "phase", id, "RED", "--test-exit", String(red.status));
+  run(cwd, runtime, "red-check", id); // the oracle genuinely fails pre-implementation
 
   writeFileSync(join(cwd, `greet${n}.js`), "module.exports = 'hello';\n");
   const green = spawnSync("node", [`check${n}.js`], { cwd });

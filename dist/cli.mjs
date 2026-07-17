@@ -7004,11 +7004,31 @@ function validateReceipt(raw) {
     if (!ok)
       errors.push(`${field}: missing or invalid`);
   };
-  need("version", r.version === 1 || r.version === 2);
-  if (r.version === 2) {
+  need("version", r.version === 1 || r.version === 2 || r.version === 3);
+  const version = typeof r.version === "number" ? r.version : 0;
+  if (version >= 2) {
     need("allow", Array.isArray(r.allow) && r.allow.every((p) => typeof p === "string"));
   } else {
     need("allow", r.allow === undefined);
+  }
+  if (version <= 2) {
+    need("exit_code", typeof r.exit_code === "number");
+    need("duration_ms", typeof r.duration_ms === "number" && r.duration_ms >= 0);
+    need("stdout_sha256", typeof r.stdout_sha256 === "string" && HEX64.test(r.stdout_sha256));
+    need("stderr_sha256", typeof r.stderr_sha256 === "string" && HEX64.test(r.stderr_sha256));
+    need("runs", r.runs === undefined);
+    need("env", r.env === undefined);
+    need("signature", r.signature === undefined && r.signer === undefined);
+  } else {
+    need("exit_code", r.exit_code === undefined);
+    need("duration_ms", r.duration_ms === undefined);
+    need("stdout_sha256", r.stdout_sha256 === undefined);
+    need("stderr_sha256", r.stderr_sha256 === undefined);
+    const runs = r.runs;
+    need("runs", Array.isArray(runs) && runs.length >= 1 && runs.every((run) => typeof run === "object" && run !== null && typeof run.exit_code === "number" && typeof run.duration_ms === "number" && run.duration_ms >= 0 && HEX64.test(String(run.stdout_sha256)) && HEX64.test(String(run.stderr_sha256))));
+    const env = r.env;
+    need("env", !!env && typeof env === "object" && typeof env.os === "string" && env.os !== "" && typeof env.arch === "string" && env.arch !== "" && (env.runtime === "bun" || env.runtime === "node") && typeof env.runtime_version === "string" && env.runtime_version !== "" && typeof env.dirty_tree === "boolean");
+    need("signature", r.signature === undefined && r.signer === undefined || typeof r.signature === "string" && r.signature !== "" && typeof r.signer === "string" && r.signer !== "");
   }
   need("task_id", typeof r.task_id === "string" && r.task_id !== "");
   need("seq", typeof r.seq === "number" && Number.isInteger(r.seq) && r.seq >= 1);
@@ -7018,10 +7038,6 @@ function validateReceipt(raw) {
   need("plugin_version", typeof r.plugin_version === "string");
   const o = r.oracle;
   need("oracle", !!o && typeof o === "object" && typeof o.run === "string" && typeof o.expect === "string");
-  need("exit_code", typeof r.exit_code === "number");
-  need("duration_ms", typeof r.duration_ms === "number" && r.duration_ms >= 0);
-  need("stdout_sha256", typeof r.stdout_sha256 === "string" && HEX64.test(r.stdout_sha256));
-  need("stderr_sha256", typeof r.stderr_sha256 === "string" && HEX64.test(r.stderr_sha256));
   need("base_sha", typeof r.base_sha === "string" && HEX40.test(r.base_sha));
   need("tree_sha", typeof r.tree_sha === "string" && HEX40.test(r.tree_sha));
   need("verdict", r.verdict === "pass");
@@ -7732,7 +7748,24 @@ function allowPath(t, path) {
 }
 
 // src/lib/verify.ts
+import { spawnSync as spawnSync5 } from "node:child_process";
+
+// src/lib/envinfo.ts
 import { spawnSync as spawnSync4 } from "node:child_process";
+import { arch, platform } from "node:os";
+function captureEnv(cwd) {
+  const bun = globalThis.Bun;
+  const status = spawnSync4("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
+  return {
+    os: platform(),
+    arch: arch(),
+    runtime: bun ? "bun" : "node",
+    runtime_version: bun ? bun.version : process.versions.node,
+    dirty_tree: status.status === 0 && (status.stdout ?? "").trim() !== ""
+  };
+}
+
+// src/lib/verify.ts
 var ORACLE_TIMEOUT_MS = 10 * 60000;
 function expectedExit(expect) {
   const m = /^exit\s+(\d+)$/.exec(expect.trim());
@@ -7751,7 +7784,7 @@ function verifyTask(cwd, id, opts) {
   }
   const want = expectedExit(task.oracle.expect);
   const started = Date.now();
-  const run = spawnSync4("sh", ["-c", task.oracle.run], {
+  const run = spawnSync5("sh", ["-c", task.oracle.run], {
     cwd,
     timeout: ORACLE_TIMEOUT_MS
   });
@@ -7765,6 +7798,7 @@ function verifyTask(cwd, id, opts) {
     writeTask(cwd, task);
     return { verdict: "fail", exitCode, durationMs };
   }
+  const env = captureEnv(cwd);
   transition(task, "DONE", { internal: true });
   task.evidence.verify = { exit_code: exitCode, at: new Date().toISOString() };
   writeTask(cwd, task);
@@ -7772,7 +7806,7 @@ function verifyTask(cwd, id, opts) {
   const treeSha = writeTree(cwd);
   const head = chainHead(cwd);
   const receipt = {
-    version: 2,
+    version: 3,
     task_id: id,
     seq: head.seq + 1,
     prev: head.prevHash,
@@ -7780,10 +7814,15 @@ function verifyTask(cwd, id, opts) {
     model: opts.model ?? null,
     plugin_version: opts.pluginVersion,
     oracle: { run: task.oracle.run, expect: task.oracle.expect },
-    exit_code: exitCode,
-    duration_ms: durationMs,
-    stdout_sha256: sha256(run.stdout ?? Buffer.alloc(0)),
-    stderr_sha256: sha256(run.stderr ?? Buffer.alloc(0)),
+    runs: [
+      {
+        exit_code: exitCode,
+        duration_ms: durationMs,
+        stdout_sha256: sha256(run.stdout ?? Buffer.alloc(0)),
+        stderr_sha256: sha256(run.stderr ?? Buffer.alloc(0))
+      }
+    ],
+    env,
     base_sha: task.workspace.base_sha,
     tree_sha: treeSha,
     verdict: "pass",

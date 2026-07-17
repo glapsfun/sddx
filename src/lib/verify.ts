@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
+import { captureEnv } from "./envinfo";
 import { commit, stageAll, writeTree } from "./git";
-import { chainHead, type Receipt, sha256, writeReceipt } from "./receipt";
+import { chainHead, type OracleRun, type Receipt, sha256, writeReceipt } from "./receipt";
 import { readTask, transition, writeTask } from "./task";
 
 const ORACLE_TIMEOUT_MS = 10 * 60_000;
@@ -51,6 +52,8 @@ export function verifyTask(
     return { verdict: "fail", exitCode, durationMs };
   }
 
+  const env = captureEnv(cwd); // before staging — reflects the tree the oracle saw
+
   transition(task, "DONE", { internal: true });
   task.evidence.verify = { exit_code: exitCode, at: new Date().toISOString() };
   writeTask(cwd, task);
@@ -60,7 +63,7 @@ export function verifyTask(
 
   const head = chainHead(cwd);
   const receipt: Receipt = {
-    version: 2,
+    version: 3,
     task_id: id,
     seq: head.seq + 1,
     prev: head.prevHash,
@@ -68,10 +71,15 @@ export function verifyTask(
     model: opts.model ?? null,
     plugin_version: opts.pluginVersion,
     oracle: { run: task.oracle.run, expect: task.oracle.expect },
-    exit_code: exitCode,
-    duration_ms: durationMs,
-    stdout_sha256: sha256(run.stdout ?? Buffer.alloc(0)),
-    stderr_sha256: sha256(run.stderr ?? Buffer.alloc(0)),
+    runs: [
+      {
+        exit_code: exitCode,
+        duration_ms: durationMs,
+        stdout_sha256: sha256(run.stdout ?? Buffer.alloc(0)),
+        stderr_sha256: sha256(run.stderr ?? Buffer.alloc(0)),
+      },
+    ] satisfies OracleRun[],
+    env,
     base_sha: task.workspace.base_sha,
     tree_sha: treeSha,
     verdict: "pass",

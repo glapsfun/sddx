@@ -13,7 +13,7 @@ writes nothing; there are no failure receipts, so `verdict` is always
 
 | Field            | Type              | Meaning                                                                  |
 | ---------------- | ----------------- | ------------------------------------------------------------------------ |
-| `version`        | `1 \| 2`          | Receipt schema; v2 added `allow`                                         |
+| `version`        | `1 \| 2 \| 3`     | Receipt schema; v2 added `allow`, v3 added `runs`/`env`                  |
 | `task_id`        | string            | The task this receipt settles                                            |
 | `seq`            | number            | Position in the chain; strictly greater than the parent's                |
 | `prev`           | string            | sha256 of the parent receipt *file*, or `"genesis"` for the first        |
@@ -34,6 +34,16 @@ writes nothing; there are no failure receipts, so `verdict` is always
 The `allow` field closes the loop on the gate's only escape hatch
 ([hooks.md](hooks.md)): every exemption a task used is part of its permanent
 record.
+
+### Receipt v3 (sddx ≥ 0.2)
+
+v3 replaces the single run record (`exit_code`, `duration_ms`,
+`stdout_sha256`, `stderr_sha256`) with `runs: []` — one entry per oracle
+execution, each carrying those same four fields; a pass requires every entry
+to exit 0. It adds `env` (`os`, `arch`, `runtime`, `runtime_version`,
+`dirty_tree` — whether the oracle ran against uncommitted changes) and
+optional `signature`/`signer` (see Receipt signing). `sddx audit` accepts
+v1–v3; existing chains stay valid.
 
 ## The hash chain
 

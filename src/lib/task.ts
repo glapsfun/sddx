@@ -34,6 +34,8 @@ export interface TaskState {
   workspace: Workspace;
   allow: string[];
   iterations: number;
+  /** Consecutive identical test failures; cleared by any pass or a different failure. */
+  stuck?: { fingerprint: string; count: number; since: string };
   evidence: Record<
     string,
     {

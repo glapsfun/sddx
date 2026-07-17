@@ -2,12 +2,15 @@
 // governing task lacks verified completion. Zero trust in "done".
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { stuckThreshold } from "./config";
 import { resolveTask } from "./resolve";
 import { isTerminal, type Phase } from "./task";
 
 export interface StopDecision {
   block: boolean;
   reason?: string;
+  /** Informational message when stopping is allowed (e.g. stuck-task escalation). */
+  note?: string;
 }
 
 const NEXT_STEP: Record<Phase, string> = {
@@ -48,6 +51,12 @@ export function stopGate(event: { cwd?: string; stop_hook_active?: boolean }): S
       };
     }
     return { block: false };
+  }
+  if (task.stuck && task.stuck.count >= stuckThreshold(res.root)) {
+    return {
+      block: false,
+      note: `sddx: task ${task.id} is stuck — ${task.stuck.count} identical failures; escalating to the human is the correct next step.`,
+    };
   }
   const step = NEXT_STEP[task.phase].replaceAll("<id>", task.id);
   return {

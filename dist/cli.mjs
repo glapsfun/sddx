@@ -7117,23 +7117,47 @@ function auditReceipts(cwd, opts = {}) {
 }
 
 // src/board.ts
-import { existsSync as existsSync4, mkdirSync as mkdirSync3, readdirSync as readdirSync4, readFileSync as readFileSync3, writeFileSync as writeFileSync3 } from "node:fs";
-import { join as join4 } from "node:path";
+import { existsSync as existsSync5, mkdirSync as mkdirSync3, readdirSync as readdirSync4, readFileSync as readFileSync4, writeFileSync as writeFileSync3 } from "node:fs";
+import { join as join5 } from "node:path";
+
+// src/lib/config.ts
+import { existsSync as existsSync3, readFileSync as readFileSync2 } from "node:fs";
+import { join as join3 } from "node:path";
+function readConfig(root) {
+  const path = join3(root, ".sddx", "config.json");
+  if (!existsSync3(path))
+    return {};
+  try {
+    const parsed = JSON.parse(readFileSync2(path, "utf8"));
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+var positiveInt = (v) => typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : null;
+function stuckThreshold(root, env = process.env) {
+  return positiveInt(Number(env.SDDX_STUCK_THRESHOLD)) ?? positiveInt(readConfig(root).stuck_threshold) ?? 3;
+}
+function oracleRuns(root, specRuns, env = process.env) {
+  if (specRuns !== undefined)
+    return specRuns;
+  return positiveInt(Number(env.SDDX_ORACLE_RUNS)) ?? positiveInt(readConfig(root).oracle_runs_default) ?? 1;
+}
 
 // src/lib/worktree.ts
 import { spawnSync as spawnSync3 } from "node:child_process";
 import {
   appendFileSync,
-  existsSync as existsSync3,
+  existsSync as existsSync4,
   mkdirSync as mkdirSync2,
   readdirSync as readdirSync3,
-  readFileSync as readFileSync2,
+  readFileSync as readFileSync3,
   realpathSync,
   rmdirSync,
   statSync,
   writeFileSync as writeFileSync2
 } from "node:fs";
-import { join as join3, relative } from "node:path";
+import { join as join4, relative } from "node:path";
 
 // src/lib/git.ts
 import { spawnSync as spawnSync2 } from "node:child_process";
@@ -7174,7 +7198,7 @@ function commit(cwd, message) {
 }
 
 // src/lib/worktree.ts
-var worktreesDir = (cwd) => join3(cwd, ".sddx-worktrees");
+var worktreesDir = (cwd) => join4(cwd, ".sddx-worktrees");
 function tryRev(cwd, ref) {
   const r = spawnSync3("git", ["rev-parse", "--verify", "--quiet", ref], {
     cwd,
@@ -7204,14 +7228,14 @@ function resolveBaseRef(cwd) {
 }
 var gitCommonDir = (cwd) => {
   const dir = git(cwd, "rev-parse", "--git-common-dir");
-  return join3(cwd, dir);
+  return join4(cwd, dir);
 };
 var EXCLUDE_LINE = ".sddx-worktrees/";
 function ensureExcluded(cwd) {
-  const infoDir = join3(gitCommonDir(cwd), "info");
+  const infoDir = join4(gitCommonDir(cwd), "info");
   mkdirSync2(infoDir, { recursive: true });
-  const exclude = join3(infoDir, "exclude");
-  const current = existsSync3(exclude) ? readFileSync2(exclude, "utf8") : "";
+  const exclude = join4(infoDir, "exclude");
+  const current = existsSync4(exclude) ? readFileSync3(exclude, "utf8") : "";
   if (current.split(`
 `).includes(EXCLUDE_LINE))
     return;
@@ -7232,7 +7256,7 @@ function worktreeAvailable(cwd) {
 function createWorktree(cwd, id, baseSha) {
   ensureExcluded(cwd);
   mkdirSync2(worktreesDir(cwd), { recursive: true });
-  const path = join3(worktreesDir(cwd), id);
+  const path = join4(worktreesDir(cwd), id);
   git(cwd, "worktree", "add", "-q", path, "-b", `sddx/${id}`, baseSha);
   return path;
 }
@@ -7243,7 +7267,7 @@ function removeWorktree(cwd, path) {
 }
 function listSddxWorktrees(cwd) {
   const dir = worktreesDir(cwd);
-  if (!existsSync3(dir))
+  if (!existsSync4(dir))
     return [];
   const realPrefix = `${realpathSync(dir)}/`;
   const prefix = `${dir}/`;
@@ -7302,9 +7326,9 @@ function acquireLock(lockPath, now) {
   }
 }
 function readWorktreeTask(worktreePath, id) {
-  const path = join3(worktreePath, ".sddx", "tasks", `${id}.json`);
+  const path = join4(worktreePath, ".sddx", "tasks", `${id}.json`);
   try {
-    return JSON.parse(readFileSync2(path, "utf8"));
+    return JSON.parse(readFileSync3(path, "utf8"));
   } catch {
     return null;
   }
@@ -7312,13 +7336,13 @@ function readWorktreeTask(worktreePath, id) {
 var DISPOSABLE = new Set(["DONE", "ABANDONED"]);
 function writeSweepState(cwd, skipped) {
   const entries = skipped.map((s) => ({ path: relative(cwd, s.path), reason: s.reason })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-  mkdirSync2(join3(cwd, ".sddx"), { recursive: true });
-  writeFileSync2(join3(cwd, ".sddx", "sweep.json"), `${JSON.stringify({ skipped: entries }, null, 2)}
+  mkdirSync2(join4(cwd, ".sddx"), { recursive: true });
+  writeFileSync2(join4(cwd, ".sddx", "sweep.json"), `${JSON.stringify({ skipped: entries }, null, 2)}
 `);
 }
 function sweep(cwd, opts = {}) {
   const now = opts.now ?? Date.now();
-  const lockPath = join3(gitCommonDir(cwd), "sddx-sweep.lock");
+  const lockPath = join4(gitCommonDir(cwd), "sddx-sweep.lock");
   if (!acquireLock(lockPath, now)) {
     return { removed: [], skipped: [], locked: true };
   }
@@ -7344,7 +7368,7 @@ function sweep(cwd, opts = {}) {
         skipped.push({ path: wt.path, reason: "dirty" });
         continue;
       }
-      if (task.phase === "DONE" && !existsSync3(join3(wt.path, ".sddx", "receipts", `${id}.json`))) {
+      if (task.phase === "DONE" && !existsSync4(join4(wt.path, ".sddx", "receipts", `${id}.json`))) {
         skipped.push({ path: wt.path, reason: "DONE without receipt" });
         continue;
       }
@@ -7368,19 +7392,19 @@ function sweep(cwd, opts = {}) {
 var DASH = "—";
 var cell = (s) => s.replace(/\|/g, "\\|").replace(/\n/g, " ");
 function receiptRef(dir, id) {
-  const path = join4(dir, `${id}.json`);
-  if (!existsSync4(path))
+  const path = join5(dir, `${id}.json`);
+  if (!existsSync5(path))
     return DASH;
   try {
-    return `#${JSON.parse(readFileSync3(path, "utf8")).seq}`;
+    return `#${JSON.parse(readFileSync4(path, "utf8")).seq}`;
   } catch {
     return "unreadable";
   }
 }
-function taskRow(taskPath, id, receiptsDirs) {
+function taskRow(taskPath, id, receiptsDirs, threshold) {
   let t;
   try {
-    t = JSON.parse(readFileSync3(taskPath, "utf8"));
+    t = JSON.parse(readFileSync4(taskPath, "utf8"));
   } catch {
     return {
       id,
@@ -7400,7 +7424,7 @@ function taskRow(taskPath, id, receiptsDirs) {
   }
   return {
     id: t.id,
-    phase: t.phase,
+    phase: t.stuck && t.stuck.count >= threshold ? `${t.phase} ⚠stuck` : t.phase,
     sentence: t.task,
     workspace: t.workspace.mode,
     iterations: String(t.iterations),
@@ -7409,12 +7433,12 @@ function taskRow(taskPath, id, receiptsDirs) {
   };
 }
 function flagLines(cwd) {
-  const path = join4(cwd, ".sddx", "sweep.json");
-  if (!existsSync4(path))
+  const path = join5(cwd, ".sddx", "sweep.json");
+  if (!existsSync5(path))
     return [];
   let entries;
   try {
-    const parsed = JSON.parse(readFileSync3(path, "utf8"));
+    const parsed = JSON.parse(readFileSync4(path, "utf8"));
     entries = Array.isArray(parsed.skipped) ? parsed.skipped : [];
   } catch {
     return [
@@ -7434,20 +7458,21 @@ function flagLines(cwd) {
     ""
   ];
 }
-var jsonIds = (dir) => existsSync4(dir) ? readdirSync4(dir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length)).sort() : [];
+var jsonIds = (dir) => existsSync5(dir) ? readdirSync4(dir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length)).sort() : [];
 function renderBoard(cwd) {
   const rows = new Map;
-  const mainReceipts = join4(cwd, ".sddx", "receipts");
-  for (const id of jsonIds(join4(cwd, ".sddx", "tasks"))) {
-    rows.set(id, taskRow(join4(cwd, ".sddx", "tasks", `${id}.json`), id, [mainReceipts]));
+  const mainReceipts = join5(cwd, ".sddx", "receipts");
+  const threshold = stuckThreshold(cwd);
+  for (const id of jsonIds(join5(cwd, ".sddx", "tasks"))) {
+    rows.set(id, taskRow(join5(cwd, ".sddx", "tasks", `${id}.json`), id, [mainReceipts], threshold));
   }
   const wtDir = worktreesDir(cwd);
-  if (existsSync4(wtDir)) {
+  if (existsSync5(wtDir)) {
     for (const id of readdirSync4(wtDir).sort()) {
-      const taskPath = join4(wtDir, id, ".sddx", "tasks", `${id}.json`);
-      if (!existsSync4(taskPath))
+      const taskPath = join5(wtDir, id, ".sddx", "tasks", `${id}.json`);
+      if (!existsSync5(taskPath))
         continue;
-      rows.set(id, taskRow(taskPath, id, [join4(wtDir, id, ".sddx", "receipts"), mainReceipts]));
+      rows.set(id, taskRow(taskPath, id, [join5(wtDir, id, ".sddx", "receipts"), mainReceipts], threshold));
     }
   }
   const lines = ["<!-- generated by sddx — do not edit -->", "", "# sddx board", ""];
@@ -7465,14 +7490,14 @@ function renderBoard(cwd) {
   return lines.join(`
 `);
 }
-var boardPath = (cwd) => join4(cwd, ".sddx", "BOARD.md");
+var boardPath = (cwd) => join5(cwd, ".sddx", "BOARD.md");
 function writeBoard(cwd) {
   const path = boardPath(cwd);
   const rendered = renderBoard(cwd);
-  const current = existsSync4(path) ? readFileSync3(path, "utf8") : null;
+  const current = existsSync5(path) ? readFileSync4(path, "utf8") : null;
   if (current === rendered)
     return { path, changed: false };
-  mkdirSync3(join4(cwd, ".sddx"), { recursive: true });
+  mkdirSync3(join5(cwd, ".sddx"), { recursive: true });
   writeFileSync3(path, rendered);
   return { path, changed: true };
 }
@@ -7481,8 +7506,8 @@ function writeBoard(cwd) {
 import { spawnSync as spawnSync4 } from "node:child_process";
 
 // src/lib/task.ts
-import { existsSync as existsSync5, mkdirSync as mkdirSync4, readFileSync as readFileSync4, writeFileSync as writeFileSync4 } from "node:fs";
-import { join as join5 } from "node:path";
+import { existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync5, writeFileSync as writeFileSync4 } from "node:fs";
+import { join as join6 } from "node:path";
 
 // src/lib/glob.ts
 function segmentToRegex(segment) {
@@ -7562,8 +7587,8 @@ var TRANSITIONS = {
   DONE: [],
   ABANDONED: []
 };
-var sddxDir = (cwd) => join5(cwd, ".sddx");
-var taskPath = (cwd, id) => join5(sddxDir(cwd), "tasks", `${id}.json`);
+var sddxDir = (cwd) => join6(cwd, ".sddx");
+var taskPath = (cwd, id) => join6(sddxDir(cwd), "tasks", `${id}.json`);
 function taskId(sentence, date = new Date) {
   const slug = sentence.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
   const ymd = date.toISOString().slice(0, 10).replace(/-/g, "");
@@ -7586,18 +7611,18 @@ function createTask(cwd, spec, specPath, workspace) {
     updated_at: now
   };
   const path = taskPath(cwd, t.id);
-  if (existsSync5(path))
+  if (existsSync6(path))
     throw new Error(`task ${t.id} already exists at ${path}`);
-  mkdirSync4(join5(sddxDir(cwd), "tasks"), { recursive: true });
+  mkdirSync4(join6(sddxDir(cwd), "tasks"), { recursive: true });
   writeFileSync4(path, `${JSON.stringify(t, null, 2)}
 `);
   return t;
 }
 function readTask(cwd, id) {
   const path = taskPath(cwd, id);
-  if (!existsSync5(path))
+  if (!existsSync6(path))
     throw new Error(`no such task: ${id} (${path})`);
-  return JSON.parse(readFileSync4(path, "utf8"));
+  return JSON.parse(readFileSync5(path, "utf8"));
 }
 function writeTask(cwd, t) {
   t.updated_at = new Date().toISOString();
@@ -7782,27 +7807,6 @@ function parseSpec(yamlText) {
 
 // src/lib/verify.ts
 import { spawnSync as spawnSync6 } from "node:child_process";
-
-// src/lib/config.ts
-import { existsSync as existsSync6, readFileSync as readFileSync5 } from "node:fs";
-import { join as join6 } from "node:path";
-function readConfig(root) {
-  const path = join6(root, ".sddx", "config.json");
-  if (!existsSync6(path))
-    return {};
-  try {
-    const parsed = JSON.parse(readFileSync5(path, "utf8"));
-    return typeof parsed === "object" && parsed !== null ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-var positiveInt = (v) => typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : null;
-function oracleRuns(root, specRuns, env = process.env) {
-  if (specRuns !== undefined)
-    return specRuns;
-  return positiveInt(Number(env.SDDX_ORACLE_RUNS)) ?? positiveInt(readConfig(root).oracle_runs_default) ?? 1;
-}
 
 // src/lib/envinfo.ts
 import { spawnSync as spawnSync5 } from "node:child_process";

@@ -77,6 +77,15 @@ blocked outright — the gate does not parse targets. Extend (never replace)
 the list with userConfig `red_bash_allow`. This closes the classic
 `sed -i`/`tee` bypass around the Edit/Write gate.
 
+## Stuck-loop escalation
+
+The PostToolUse recorder fingerprints every failing test run (exit code +
+normalized output tail). Reaching `stuck_threshold` (default 3) consecutive
+identical failures marks the task `stuck`: the recorder tells the model to
+stop and escalate, the Stop gate permits concluding the session (escalation
+beats spinning), and `BOARD.md` shows `⚠stuck`. Any pass or a *different*
+failure resets the counter — progress is allowed, spinning is not.
+
 ## The allow escape hatch
 
 The only way past the gate is per-file and audited:

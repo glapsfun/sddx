@@ -26,6 +26,15 @@ export function readConfig(root: string): SddxConfig {
 const positiveInt = (v: unknown): number | null =>
   typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : null;
 
+/** Precedence: SDDX_STUCK_THRESHOLD > config stuck_threshold > 3. */
+export function stuckThreshold(root: string, env: NodeJS.ProcessEnv = process.env): number {
+  return (
+    positiveInt(Number(env.SDDX_STUCK_THRESHOLD)) ??
+    positiveInt(readConfig(root).stuck_threshold) ??
+    3
+  );
+}
+
 /** Precedence: spec > SDDX_ORACLE_RUNS > config oracle_runs_default > 1. */
 export function oracleRuns(
   root: string,

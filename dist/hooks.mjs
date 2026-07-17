@@ -3,27 +3,51 @@ var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, 
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
 // src/hooks.ts
-import { existsSync as existsSync8, readdirSync as readdirSync4, readFileSync as readFileSync7 } from "node:fs";
-import { join as join8 } from "node:path";
+import { existsSync as existsSync9, readdirSync as readdirSync5, readFileSync as readFileSync8 } from "node:fs";
+import { join as join9 } from "node:path";
 
 // src/board.ts
-import { existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
-import { join as join2 } from "node:path";
+import { existsSync as existsSync3, mkdirSync as mkdirSync2, readdirSync as readdirSync2, readFileSync as readFileSync3, writeFileSync as writeFileSync2 } from "node:fs";
+import { join as join3 } from "node:path";
+
+// src/lib/config.ts
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+function readConfig(root) {
+  const path = join(root, ".sddx", "config.json");
+  if (!existsSync(path))
+    return {};
+  try {
+    const parsed = JSON.parse(readFileSync(path, "utf8"));
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+var positiveInt = (v) => typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : null;
+function stuckThreshold(root, env = process.env) {
+  return positiveInt(Number(env.SDDX_STUCK_THRESHOLD)) ?? positiveInt(readConfig(root).stuck_threshold) ?? 3;
+}
+function oracleRuns(root, specRuns, env = process.env) {
+  if (specRuns !== undefined)
+    return specRuns;
+  return positiveInt(Number(env.SDDX_ORACLE_RUNS)) ?? positiveInt(readConfig(root).oracle_runs_default) ?? 1;
+}
 
 // src/lib/worktree.ts
 import { spawnSync as spawnSync2 } from "node:child_process";
 import {
   appendFileSync,
-  existsSync,
+  existsSync as existsSync2,
   mkdirSync,
   readdirSync,
-  readFileSync,
+  readFileSync as readFileSync2,
   realpathSync,
   rmdirSync,
   statSync,
   writeFileSync
 } from "node:fs";
-import { join, relative } from "node:path";
+import { join as join2, relative } from "node:path";
 
 // src/lib/git.ts
 import { spawnSync } from "node:child_process";
@@ -64,7 +88,7 @@ function commit(cwd, message) {
 }
 
 // src/lib/worktree.ts
-var worktreesDir = (cwd) => join(cwd, ".sddx-worktrees");
+var worktreesDir = (cwd) => join2(cwd, ".sddx-worktrees");
 function tryRev(cwd, ref) {
   const r = spawnSync2("git", ["rev-parse", "--verify", "--quiet", ref], {
     cwd,
@@ -94,14 +118,14 @@ function resolveBaseRef(cwd) {
 }
 var gitCommonDir = (cwd) => {
   const dir = git(cwd, "rev-parse", "--git-common-dir");
-  return join(cwd, dir);
+  return join2(cwd, dir);
 };
 var EXCLUDE_LINE = ".sddx-worktrees/";
 function ensureExcluded(cwd) {
-  const infoDir = join(gitCommonDir(cwd), "info");
+  const infoDir = join2(gitCommonDir(cwd), "info");
   mkdirSync(infoDir, { recursive: true });
-  const exclude = join(infoDir, "exclude");
-  const current = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
+  const exclude = join2(infoDir, "exclude");
+  const current = existsSync2(exclude) ? readFileSync2(exclude, "utf8") : "";
   if (current.split(`
 `).includes(EXCLUDE_LINE))
     return;
@@ -122,7 +146,7 @@ function worktreeAvailable(cwd) {
 function createWorktree(cwd, id, baseSha) {
   ensureExcluded(cwd);
   mkdirSync(worktreesDir(cwd), { recursive: true });
-  const path = join(worktreesDir(cwd), id);
+  const path = join2(worktreesDir(cwd), id);
   git(cwd, "worktree", "add", "-q", path, "-b", `sddx/${id}`, baseSha);
   return path;
 }
@@ -133,7 +157,7 @@ function removeWorktree(cwd, path) {
 }
 function listSddxWorktrees(cwd) {
   const dir = worktreesDir(cwd);
-  if (!existsSync(dir))
+  if (!existsSync2(dir))
     return [];
   const realPrefix = `${realpathSync(dir)}/`;
   const prefix = `${dir}/`;
@@ -192,9 +216,9 @@ function acquireLock(lockPath, now) {
   }
 }
 function readWorktreeTask(worktreePath, id) {
-  const path = join(worktreePath, ".sddx", "tasks", `${id}.json`);
+  const path = join2(worktreePath, ".sddx", "tasks", `${id}.json`);
   try {
-    return JSON.parse(readFileSync(path, "utf8"));
+    return JSON.parse(readFileSync2(path, "utf8"));
   } catch {
     return null;
   }
@@ -202,13 +226,13 @@ function readWorktreeTask(worktreePath, id) {
 var DISPOSABLE = new Set(["DONE", "ABANDONED"]);
 function writeSweepState(cwd, skipped) {
   const entries = skipped.map((s) => ({ path: relative(cwd, s.path), reason: s.reason })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-  mkdirSync(join(cwd, ".sddx"), { recursive: true });
-  writeFileSync(join(cwd, ".sddx", "sweep.json"), `${JSON.stringify({ skipped: entries }, null, 2)}
+  mkdirSync(join2(cwd, ".sddx"), { recursive: true });
+  writeFileSync(join2(cwd, ".sddx", "sweep.json"), `${JSON.stringify({ skipped: entries }, null, 2)}
 `);
 }
 function sweep(cwd, opts = {}) {
   const now = opts.now ?? Date.now();
-  const lockPath = join(gitCommonDir(cwd), "sddx-sweep.lock");
+  const lockPath = join2(gitCommonDir(cwd), "sddx-sweep.lock");
   if (!acquireLock(lockPath, now)) {
     return { removed: [], skipped: [], locked: true };
   }
@@ -234,7 +258,7 @@ function sweep(cwd, opts = {}) {
         skipped.push({ path: wt.path, reason: "dirty" });
         continue;
       }
-      if (task.phase === "DONE" && !existsSync(join(wt.path, ".sddx", "receipts", `${id}.json`))) {
+      if (task.phase === "DONE" && !existsSync2(join2(wt.path, ".sddx", "receipts", `${id}.json`))) {
         skipped.push({ path: wt.path, reason: "DONE without receipt" });
         continue;
       }
@@ -258,19 +282,19 @@ function sweep(cwd, opts = {}) {
 var DASH = "—";
 var cell = (s) => s.replace(/\|/g, "\\|").replace(/\n/g, " ");
 function receiptRef(dir, id) {
-  const path = join2(dir, `${id}.json`);
-  if (!existsSync2(path))
+  const path = join3(dir, `${id}.json`);
+  if (!existsSync3(path))
     return DASH;
   try {
-    return `#${JSON.parse(readFileSync2(path, "utf8")).seq}`;
+    return `#${JSON.parse(readFileSync3(path, "utf8")).seq}`;
   } catch {
     return "unreadable";
   }
 }
-function taskRow(taskPath, id, receiptsDirs) {
+function taskRow(taskPath, id, receiptsDirs, threshold) {
   let t;
   try {
-    t = JSON.parse(readFileSync2(taskPath, "utf8"));
+    t = JSON.parse(readFileSync3(taskPath, "utf8"));
   } catch {
     return {
       id,
@@ -290,7 +314,7 @@ function taskRow(taskPath, id, receiptsDirs) {
   }
   return {
     id: t.id,
-    phase: t.phase,
+    phase: t.stuck && t.stuck.count >= threshold ? `${t.phase} ⚠stuck` : t.phase,
     sentence: t.task,
     workspace: t.workspace.mode,
     iterations: String(t.iterations),
@@ -299,12 +323,12 @@ function taskRow(taskPath, id, receiptsDirs) {
   };
 }
 function flagLines(cwd) {
-  const path = join2(cwd, ".sddx", "sweep.json");
-  if (!existsSync2(path))
+  const path = join3(cwd, ".sddx", "sweep.json");
+  if (!existsSync3(path))
     return [];
   let entries;
   try {
-    const parsed = JSON.parse(readFileSync2(path, "utf8"));
+    const parsed = JSON.parse(readFileSync3(path, "utf8"));
     entries = Array.isArray(parsed.skipped) ? parsed.skipped : [];
   } catch {
     return [
@@ -324,20 +348,21 @@ function flagLines(cwd) {
     ""
   ];
 }
-var jsonIds = (dir) => existsSync2(dir) ? readdirSync2(dir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length)).sort() : [];
+var jsonIds = (dir) => existsSync3(dir) ? readdirSync2(dir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length)).sort() : [];
 function renderBoard(cwd) {
   const rows = new Map;
-  const mainReceipts = join2(cwd, ".sddx", "receipts");
-  for (const id of jsonIds(join2(cwd, ".sddx", "tasks"))) {
-    rows.set(id, taskRow(join2(cwd, ".sddx", "tasks", `${id}.json`), id, [mainReceipts]));
+  const mainReceipts = join3(cwd, ".sddx", "receipts");
+  const threshold = stuckThreshold(cwd);
+  for (const id of jsonIds(join3(cwd, ".sddx", "tasks"))) {
+    rows.set(id, taskRow(join3(cwd, ".sddx", "tasks", `${id}.json`), id, [mainReceipts], threshold));
   }
   const wtDir = worktreesDir(cwd);
-  if (existsSync2(wtDir)) {
+  if (existsSync3(wtDir)) {
     for (const id of readdirSync2(wtDir).sort()) {
-      const taskPath = join2(wtDir, id, ".sddx", "tasks", `${id}.json`);
-      if (!existsSync2(taskPath))
+      const taskPath = join3(wtDir, id, ".sddx", "tasks", `${id}.json`);
+      if (!existsSync3(taskPath))
         continue;
-      rows.set(id, taskRow(taskPath, id, [join2(wtDir, id, ".sddx", "receipts"), mainReceipts]));
+      rows.set(id, taskRow(taskPath, id, [join3(wtDir, id, ".sddx", "receipts"), mainReceipts], threshold));
     }
   }
   const lines = ["<!-- generated by sddx — do not edit -->", "", "# sddx board", ""];
@@ -355,37 +380,16 @@ function renderBoard(cwd) {
   return lines.join(`
 `);
 }
-var boardPath = (cwd) => join2(cwd, ".sddx", "BOARD.md");
+var boardPath = (cwd) => join3(cwd, ".sddx", "BOARD.md");
 function writeBoard(cwd) {
   const path = boardPath(cwd);
   const rendered = renderBoard(cwd);
-  const current = existsSync2(path) ? readFileSync2(path, "utf8") : null;
+  const current = existsSync3(path) ? readFileSync3(path, "utf8") : null;
   if (current === rendered)
     return { path, changed: false };
-  mkdirSync2(join2(cwd, ".sddx"), { recursive: true });
+  mkdirSync2(join3(cwd, ".sddx"), { recursive: true });
   writeFileSync2(path, rendered);
   return { path, changed: true };
-}
-
-// src/lib/config.ts
-import { existsSync as existsSync3, readFileSync as readFileSync3 } from "node:fs";
-import { join as join3 } from "node:path";
-function readConfig(root) {
-  const path = join3(root, ".sddx", "config.json");
-  if (!existsSync3(path))
-    return {};
-  try {
-    const parsed = JSON.parse(readFileSync3(path, "utf8"));
-    return typeof parsed === "object" && parsed !== null ? parsed : {};
-  } catch {
-    return {};
-  }
-}
-var positiveInt = (v) => typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : null;
-function oracleRuns(root, specRuns, env = process.env) {
-  if (specRuns !== undefined)
-    return specRuns;
-  return positiveInt(Number(env.SDDX_ORACLE_RUNS)) ?? positiveInt(readConfig(root).oracle_runs_default) ?? 1;
 }
 
 // src/lib/resolve.ts
@@ -732,6 +736,124 @@ function bashGate(input, env = process.env) {
   return { allow: false, reason: blockMessage(res.task, decision.reason) };
 }
 
+// src/lib/receipt.ts
+import { createHash } from "node:crypto";
+import {
+  chmodSync,
+  existsSync as existsSync6,
+  mkdirSync as mkdirSync4,
+  readdirSync as readdirSync4,
+  readFileSync as readFileSync6,
+  writeFileSync as writeFileSync4
+} from "node:fs";
+import { join as join6 } from "node:path";
+var sha256 = (data) => createHash("sha256").update(data).digest("hex");
+var receiptsDir = (cwd) => join6(cwd, ".sddx", "receipts");
+var receiptPath = (cwd, taskId2) => join6(receiptsDir(cwd), `${taskId2}.json`);
+function listReceipts(cwd) {
+  const dir = receiptsDir(cwd);
+  if (!existsSync6(dir))
+    return [];
+  return readdirSync4(dir).filter((f) => f.endsWith(".json")).map((f) => ({
+    file: join6(dir, f),
+    receipt: JSON.parse(readFileSync6(join6(dir, f), "utf8"))
+  })).sort((a, b) => a.receipt.seq - b.receipt.seq);
+}
+function chainHead(cwd) {
+  const receipts = listReceipts(cwd);
+  const last = receipts.at(-1);
+  if (!last)
+    return { seq: 0, prevHash: "genesis" };
+  return { seq: last.receipt.seq, prevHash: sha256(readFileSync6(last.file)) };
+}
+function writeReceipt(cwd, r) {
+  const path = receiptPath(cwd, r.task_id);
+  if (existsSync6(path)) {
+    throw new Error(`receipt for ${r.task_id} already exists — receipts are immutable`);
+  }
+  mkdirSync4(receiptsDir(cwd), { recursive: true });
+  writeFileSync4(path, `${JSON.stringify(r, null, 2)}
+`);
+  chmodSync(path, 292);
+  return path;
+}
+var HEX64 = /^[0-9a-f]{64}$/;
+var HEX40 = /^[0-9a-f]{40}$/;
+function validateReceipt(raw) {
+  const errors = [];
+  if (typeof raw !== "object" || raw === null)
+    return ["receipt must be an object"];
+  const r = raw;
+  const need = (field, ok) => {
+    if (!ok)
+      errors.push(`${field}: missing or invalid`);
+  };
+  need("version", r.version === 1 || r.version === 2 || r.version === 3);
+  const version = typeof r.version === "number" ? r.version : 0;
+  if (version >= 2) {
+    need("allow", Array.isArray(r.allow) && r.allow.every((p) => typeof p === "string"));
+  } else {
+    need("allow", r.allow === undefined);
+  }
+  if (version <= 2) {
+    need("exit_code", typeof r.exit_code === "number");
+    need("duration_ms", typeof r.duration_ms === "number" && r.duration_ms >= 0);
+    need("stdout_sha256", typeof r.stdout_sha256 === "string" && HEX64.test(r.stdout_sha256));
+    need("stderr_sha256", typeof r.stderr_sha256 === "string" && HEX64.test(r.stderr_sha256));
+    need("runs", r.runs === undefined);
+    need("env", r.env === undefined);
+    need("signature", r.signature === undefined && r.signer === undefined);
+  } else {
+    need("exit_code", r.exit_code === undefined);
+    need("duration_ms", r.duration_ms === undefined);
+    need("stdout_sha256", r.stdout_sha256 === undefined);
+    need("stderr_sha256", r.stderr_sha256 === undefined);
+    const runs = r.runs;
+    need("runs", Array.isArray(runs) && runs.length >= 1 && runs.every((run) => typeof run === "object" && run !== null && typeof run.exit_code === "number" && typeof run.duration_ms === "number" && run.duration_ms >= 0 && HEX64.test(String(run.stdout_sha256)) && HEX64.test(String(run.stderr_sha256))));
+    const env = r.env;
+    need("env", !!env && typeof env === "object" && typeof env.os === "string" && env.os !== "" && typeof env.arch === "string" && env.arch !== "" && (env.runtime === "bun" || env.runtime === "node") && typeof env.runtime_version === "string" && env.runtime_version !== "" && typeof env.dirty_tree === "boolean");
+    need("signature", r.signature === undefined && r.signer === undefined || typeof r.signature === "string" && r.signature !== "" && typeof r.signer === "string" && r.signer !== "");
+  }
+  need("task_id", typeof r.task_id === "string" && r.task_id !== "");
+  need("seq", typeof r.seq === "number" && Number.isInteger(r.seq) && r.seq >= 1);
+  need("prev", r.prev === "genesis" || typeof r.prev === "string" && HEX64.test(r.prev));
+  need("harness", typeof r.harness === "string" && r.harness !== "");
+  need("model", r.model === null || typeof r.model === "string");
+  need("plugin_version", typeof r.plugin_version === "string");
+  const o = r.oracle;
+  need("oracle", !!o && typeof o === "object" && typeof o.run === "string" && typeof o.expect === "string");
+  need("base_sha", typeof r.base_sha === "string" && HEX40.test(r.base_sha));
+  need("tree_sha", typeof r.tree_sha === "string" && HEX40.test(r.tree_sha));
+  need("verdict", r.verdict === "pass");
+  need("verified_at", typeof r.verified_at === "string" && !Number.isNaN(Date.parse(r.verified_at)));
+  return errors;
+}
+function verifyChain(cwd) {
+  const errors = [];
+  const receipts = listReceipts(cwd);
+  const seqByHash = new Map;
+  for (const { file, receipt } of receipts) {
+    seqByHash.set(sha256(readFileSync6(file)), receipt.seq);
+  }
+  for (const { file, receipt } of receipts) {
+    for (const e of validateReceipt(receipt))
+      errors.push(`${file}: ${e}`);
+    if (receipt.prev === "genesis") {
+      if (receipt.seq !== 1) {
+        errors.push(`${file}: genesis-linked receipt must have seq 1, got ${receipt.seq}`);
+      }
+      continue;
+    }
+    const parentSeq = seqByHash.get(receipt.prev);
+    if (parentSeq === undefined) {
+      errors.push(`${file}: prev hash matches no receipt — chain broken (tampered or deleted)`);
+    } else if (parentSeq >= receipt.seq) {
+      errors.push(`${file}: seq ${receipt.seq} must exceed parent seq ${parentSeq}`);
+    }
+  }
+  return errors;
+}
+
 // src/lib/recorder.ts
 var TEST_RUNNER_PREFIXES = [
   "bun test",
@@ -752,7 +874,14 @@ function matchTestRunner(command) {
   }
   return null;
 }
-function recordTestRun(cwd, command, exitCode) {
+function failureFingerprint(exitCode, output) {
+  const tail = output.split(`
+`).slice(-20).join(`
+`).replace(/\d+(\.\d+)?/g, "#").replace(/\s+/g, " ").trim();
+  return sha256(`${exitCode}
+${tail}`);
+}
+function recordTestRun(cwd, command, exitCode, output = "") {
   if (matchTestRunner(command) === null || exitCode === undefined) {
     return { matched: false, transitioned: null };
   }
@@ -760,24 +889,32 @@ function recordTestRun(cwd, command, exitCode) {
   if (res.kind !== "task")
     return { matched: true, transitioned: null };
   const task = res.task;
+  const at = new Date().toISOString();
+  if (exitCode !== 0) {
+    const fp = failureFingerprint(exitCode, output);
+    task.stuck = task.stuck?.fingerprint === fp ? { fingerprint: fp, count: task.stuck.count + 1, since: task.stuck.since } : { fingerprint: fp, count: 1, since: at };
+  } else if (task.stuck) {
+    task.stuck = undefined;
+  }
   let to = null;
   if (task.phase === "PLAN" && exitCode !== 0)
     to = "RED";
   if ((task.phase === "RED" || task.phase === "REFACTOR") && exitCode === 0)
     to = "GREEN";
-  const at = new Date().toISOString();
   if (to) {
     transition(task, to, { testExit: exitCode, source: "hook" });
   } else {
     task.evidence.last_test = { test_exit: exitCode, at, source: "hook" };
   }
+  const threshold = stuckThreshold(res.root);
+  const stuck = task.stuck && task.stuck.count >= threshold ? { count: task.stuck.count, threshold } : undefined;
   writeTask(res.root, task);
-  return { matched: true, transitioned: to, taskId: task.id };
+  return { matched: true, transitioned: to, taskId: task.id, ...stuck ? { stuck } : {} };
 }
 
 // src/lib/stopgate.ts
-import { existsSync as existsSync6 } from "node:fs";
-import { join as join6 } from "node:path";
+import { existsSync as existsSync7 } from "node:fs";
+import { join as join7 } from "node:path";
 var NEXT_STEP = {
   PLAN: "write a failing test and run it to enter RED",
   RED: "run sddx red-check <id>, then make the failing test pass (run the test runner to enter GREEN)",
@@ -807,14 +944,20 @@ function stopGate(event) {
   }
   const { task } = res;
   if (isTerminal(task.phase)) {
-    const receipt = join6(res.root, ".sddx", "receipts", `${task.id}.json`);
-    if (task.phase === "DONE" && !existsSync6(receipt)) {
+    const receipt = join7(res.root, ".sddx", "receipts", `${task.id}.json`);
+    if (task.phase === "DONE" && !existsSync7(receipt)) {
       return {
         block: true,
         reason: `sddx: task ${task.id} is DONE but .sddx/receipts/${task.id}.json is missing — completion is unproven. Restore the receipt or abandon the task.`
       };
     }
     return { block: false };
+  }
+  if (task.stuck && task.stuck.count >= stuckThreshold(res.root)) {
+    return {
+      block: false,
+      note: `sddx: task ${task.id} is stuck — ${task.stuck.count} identical failures; escalating to the human is the correct next step.`
+    };
   }
   const step = NEXT_STEP[task.phase].replaceAll("<id>", task.id);
   return {
@@ -824,14 +967,14 @@ function stopGate(event) {
 }
 
 // src/tdd-gate.ts
-import { existsSync as existsSync7, readFileSync as readFileSync6 } from "node:fs";
-import { isAbsolute, join as join7, relative as relative2, resolve } from "node:path";
+import { existsSync as existsSync8, readFileSync as readFileSync7 } from "node:fs";
+import { isAbsolute, join as join8, relative as relative2, resolve } from "node:path";
 function loadGateConfig(root, env = process.env) {
   let fileConfig = {};
-  const path = join7(root, ".sddx", "config.json");
-  if (existsSync7(path)) {
+  const path = join8(root, ".sddx", "config.json");
+  if (existsSync8(path)) {
     try {
-      fileConfig = JSON.parse(readFileSync6(path, "utf8"));
+      fileConfig = JSON.parse(readFileSync7(path, "utf8"));
     } catch {}
   }
   return {
@@ -885,7 +1028,7 @@ function tddGate(input, env = process.env) {
 // src/hooks.ts
 function readEvent() {
   try {
-    const raw = readFileSync7(0, "utf8");
+    const raw = readFileSync8(0, "utf8");
     const parsed = raw.trim() === "" ? {} : JSON.parse(raw);
     return typeof parsed === "object" && parsed !== null ? parsed : {};
   } catch {
@@ -934,27 +1077,42 @@ function exitCodeOf(response) {
   }
   return;
 }
+function outputOf(response) {
+  let out = "";
+  for (const key of ["stdout", "stderr", "output"]) {
+    const v = response?.[key];
+    if (typeof v === "string")
+      out += v;
+  }
+  return out;
+}
 function cmdRecordTest(event) {
   const command = event.tool_input?.command;
   if (typeof command !== "string") {
     emit({});
     return;
   }
-  const res = recordTestRun(event.cwd ?? process.cwd(), command, exitCodeOf(event.tool_response));
-  emit(res.transitioned ? { systemMessage: `sddx: task ${res.taskId} → ${res.transitioned} (observed test run)` } : {});
+  const res = recordTestRun(event.cwd ?? process.cwd(), command, exitCodeOf(event.tool_response), outputOf(event.tool_response));
+  const parts = [];
+  if (res.transitioned)
+    parts.push(`sddx: task ${res.taskId} → ${res.transitioned} (observed test run)`);
+  if (res.stuck)
+    parts.push(`sddx: task ${res.taskId} has failed identically ${res.stuck.count}× (threshold ${res.stuck.threshold}) — stuck; stop and escalate to the human instead of iterating.`);
+  emit(parts.length > 0 ? { systemMessage: parts.join(`
+`) } : {});
 }
 function cmdStopGate(event) {
   const decision = stopGate({ cwd: event.cwd, stop_hook_active: event.stop_hook_active });
-  emit(decision.block ? { decision: "block", reason: decision.reason } : {});
+  emit(decision.block ? { decision: "block", reason: decision.reason } : decision.note ? { systemMessage: decision.note } : {});
 }
 function boardEnabled(cwd, env = process.env) {
   if (env.SDDX_BOARD_ENABLED !== undefined) {
     return !["false", "0"].includes(env.SDDX_BOARD_ENABLED);
   }
-  const path = join8(cwd, ".sddx", "config.json");
-  if (existsSync8(path)) {
+  const path = join9(cwd, ".sddx", "config.json");
+  if (existsSync9(path)) {
     try {
-      const cfg = JSON.parse(readFileSync7(path, "utf8"));
+      const cfg = JSON.parse(readFileSync8(path, "utf8"));
       if (typeof cfg.board_enabled === "boolean")
         return cfg.board_enabled;
     } catch {}
@@ -964,7 +1122,7 @@ function boardEnabled(cwd, env = process.env) {
 function cmdSessionStart(event) {
   const cwd = event.cwd ?? process.cwd();
   const lines = [];
-  if (existsSync8(join8(cwd, ".sddx"))) {
+  if (existsSync9(join9(cwd, ".sddx"))) {
     try {
       const res = sweep(cwd);
       if (res.removed.length > 0)
@@ -977,11 +1135,11 @@ function cmdSessionStart(event) {
         lines.push(`sddx: board refresh failed: ${e.message}`);
       }
     }
-    const tasksDir = join8(cwd, ".sddx", "tasks");
-    if (existsSync8(tasksDir)) {
-      for (const file of readdirSync4(tasksDir).filter((f) => f.endsWith(".json"))) {
+    const tasksDir = join9(cwd, ".sddx", "tasks");
+    if (existsSync9(tasksDir)) {
+      for (const file of readdirSync5(tasksDir).filter((f) => f.endsWith(".json"))) {
         try {
-          const t = JSON.parse(readFileSync7(join8(tasksDir, file), "utf8"));
+          const t = JSON.parse(readFileSync8(join9(tasksDir, file), "utf8"));
           if (!isTerminal(t.phase))
             lines.push(`sddx task ${t.id}: phase ${t.phase} — ${t.task}`);
         } catch {

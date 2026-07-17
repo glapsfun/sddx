@@ -84,23 +84,46 @@ function exitCodeOf(response: HookEvent["tool_response"]): number | undefined {
   return undefined;
 }
 
+function outputOf(response: HookEvent["tool_response"]): string {
+  let out = "";
+  for (const key of ["stdout", "stderr", "output"]) {
+    const v = response?.[key];
+    if (typeof v === "string") out += v;
+  }
+  return out;
+}
+
 function cmdRecordTest(event: HookEvent): void {
   const command = event.tool_input?.command;
   if (typeof command !== "string") {
     emit({});
     return;
   }
-  const res = recordTestRun(event.cwd ?? process.cwd(), command, exitCodeOf(event.tool_response));
-  emit(
-    res.transitioned
-      ? { systemMessage: `sddx: task ${res.taskId} → ${res.transitioned} (observed test run)` }
-      : {},
+  const res = recordTestRun(
+    event.cwd ?? process.cwd(),
+    command,
+    exitCodeOf(event.tool_response),
+    outputOf(event.tool_response),
   );
+  const parts: string[] = [];
+  if (res.transitioned)
+    parts.push(`sddx: task ${res.taskId} → ${res.transitioned} (observed test run)`);
+  if (res.stuck)
+    parts.push(
+      `sddx: task ${res.taskId} has failed identically ${res.stuck.count}× (threshold ${res.stuck.threshold}) — stuck; stop and escalate to the human instead of iterating.`,
+    );
+  emit(parts.length > 0 ? { systemMessage: parts.join("\n") } : {});
 }
 
 function cmdStopGate(event: HookEvent): void {
   const decision = stopGate({ cwd: event.cwd, stop_hook_active: event.stop_hook_active });
-  emit(decision.block ? { decision: "block", reason: decision.reason } : {});
+  emit(
+    decision.block
+      ? { decision: "block", reason: decision.reason }
+      : decision.note
+        ? { systemMessage: decision.note }
+        : {},
+  );
 }
 
 function boardEnabled(cwd: string, env = process.env): boolean {

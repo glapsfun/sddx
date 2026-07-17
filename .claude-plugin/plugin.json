@@ -50,6 +50,12 @@
       "title": "RED Bash allow-list",
       "default": "",
       "description": "Space-separated extra commands the RED-phase Bash gate allows (extends the built-in list, never replaces it)"
+    },
+    "stuck_threshold": {
+      "type": "number",
+      "title": "Stuck threshold",
+      "default": 3,
+      "description": "Consecutive identical test failures before a task is flagged stuck and escalation is requested"
     }
   }
 }

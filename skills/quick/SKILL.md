@@ -7,7 +7,8 @@ description: Run a single sddx task through the PLAN → RED → GREEN → REFAC
 
 CLI: `"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "${CLAUDE_PLUGIN_ROOT}/dist/cli.mjs"` (run from the repo root).
 
-No task yet? Follow /sddx:plan first — `task create` registers the spec and
+No task yet? Follow /sddx:plan first — `task create --workspace branch`
+registers the spec and
 switches to the `sddx/<id>` branch.
 
 Then loop, recording every phase in the task file:

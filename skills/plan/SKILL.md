@@ -31,7 +31,8 @@ CLI: `"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "${CLAUDE_PLUGIN_ROOT}/dist/cli.mjs"`
    ```
 
 4. **Register it.** Save the YAML to a file and run:
-   `... task create --spec <file>`
+   `... task create --spec <file> --workspace branch`
+   (in-session flow; /sddx:run uses `--workspace auto` for worktrees instead).
    The CLI rejects any spec without a valid oracle — fix the spec, never work
    around the rejection. On success it prints the task id and switches to the
    `sddx/<id>` branch.

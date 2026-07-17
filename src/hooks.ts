@@ -7,6 +7,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeBoard } from "./board";
+import { bashGate } from "./lib/bashgate";
 import { recordTestRun } from "./lib/recorder";
 import { stopGate } from "./lib/stopgate";
 import { isTerminal, type TaskState } from "./lib/task";
@@ -49,6 +50,21 @@ function cmdTddGate(event: HookEvent): void {
   if (decision.allow) {
     // pass-through: no permissionDecision — never auto-approve, just don't deny
     emit(decision.diagnostic ? { systemMessage: decision.diagnostic } : {});
+    return;
+  }
+  emit({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: decision.reason,
+    },
+  });
+}
+
+function cmdBashGate(event: HookEvent): void {
+  const decision = bashGate({ command: event.tool_input?.command, cwd: event.cwd });
+  if (decision.allow) {
+    emit({});
     return;
   }
   emit({
@@ -147,6 +163,7 @@ function main(): void {
   const event = readEvent();
   try {
     if (sub === "tdd-gate") cmdTddGate(event);
+    else if (sub === "bash-gate") cmdBashGate(event);
     else if (sub === "record-test") cmdRecordTest(event);
     else if (sub === "stop-gate") cmdStopGate(event);
     else if (sub === "session-start") cmdSessionStart(event);

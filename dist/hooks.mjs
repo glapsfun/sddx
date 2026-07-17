@@ -3,8 +3,8 @@ var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, 
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
 // src/hooks.ts
-import { existsSync as existsSync7, readdirSync as readdirSync4, readFileSync as readFileSync6 } from "node:fs";
-import { join as join7 } from "node:path";
+import { existsSync as existsSync8, readdirSync as readdirSync4, readFileSync as readFileSync7 } from "node:fs";
+import { join as join8 } from "node:path";
 
 // src/board.ts
 import { existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync as readdirSync2, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
@@ -367,13 +367,34 @@ function writeBoard(cwd) {
   return { path, changed: true };
 }
 
+// src/lib/config.ts
+import { existsSync as existsSync3, readFileSync as readFileSync3 } from "node:fs";
+import { join as join3 } from "node:path";
+function readConfig(root) {
+  const path = join3(root, ".sddx", "config.json");
+  if (!existsSync3(path))
+    return {};
+  try {
+    const parsed = JSON.parse(readFileSync3(path, "utf8"));
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+var positiveInt = (v) => typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : null;
+function oracleRuns(root, specRuns, env = process.env) {
+  if (specRuns !== undefined)
+    return specRuns;
+  return positiveInt(Number(env.SDDX_ORACLE_RUNS)) ?? positiveInt(readConfig(root).oracle_runs_default) ?? 1;
+}
+
 // src/lib/resolve.ts
-import { existsSync as existsSync4, readdirSync as readdirSync3, readFileSync as readFileSync4, statSync as statSync2 } from "node:fs";
-import { basename, dirname, join as join4, resolve as resolvePath } from "node:path";
+import { existsSync as existsSync5, readdirSync as readdirSync3, readFileSync as readFileSync5, statSync as statSync2 } from "node:fs";
+import { basename, dirname, join as join5, resolve as resolvePath } from "node:path";
 
 // src/lib/task.ts
-import { existsSync as existsSync3, mkdirSync as mkdirSync3, readFileSync as readFileSync3, writeFileSync as writeFileSync3 } from "node:fs";
-import { join as join3 } from "node:path";
+import { existsSync as existsSync4, mkdirSync as mkdirSync3, readFileSync as readFileSync4, writeFileSync as writeFileSync3 } from "node:fs";
+import { join as join4 } from "node:path";
 
 // src/lib/glob.ts
 function segmentToRegex(segment) {
@@ -453,8 +474,8 @@ var TRANSITIONS = {
   DONE: [],
   ABANDONED: []
 };
-var sddxDir = (cwd) => join3(cwd, ".sddx");
-var taskPath = (cwd, id) => join3(sddxDir(cwd), "tasks", `${id}.json`);
+var sddxDir = (cwd) => join4(cwd, ".sddx");
+var taskPath = (cwd, id) => join4(sddxDir(cwd), "tasks", `${id}.json`);
 function taskId(sentence, date = new Date) {
   const slug = sentence.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
   const ymd = date.toISOString().slice(0, 10).replace(/-/g, "");
@@ -477,18 +498,18 @@ function createTask(cwd, spec, specPath, workspace) {
     updated_at: now
   };
   const path = taskPath(cwd, t.id);
-  if (existsSync3(path))
+  if (existsSync4(path))
     throw new Error(`task ${t.id} already exists at ${path}`);
-  mkdirSync3(join3(sddxDir(cwd), "tasks"), { recursive: true });
+  mkdirSync3(join4(sddxDir(cwd), "tasks"), { recursive: true });
   writeFileSync3(path, `${JSON.stringify(t, null, 2)}
 `);
   return t;
 }
 function readTask(cwd, id) {
   const path = taskPath(cwd, id);
-  if (!existsSync3(path))
+  if (!existsSync4(path))
     throw new Error(`no such task: ${id} (${path})`);
-  return JSON.parse(readFileSync3(path, "utf8"));
+  return JSON.parse(readFileSync4(path, "utf8"));
 }
 function writeTask(cwd, t) {
   t.updated_at = new Date().toISOString();
@@ -545,7 +566,7 @@ function workspaceRoot(startPath) {
     dir = dirname(dir);
   }
   while (true) {
-    if (existsSync4(join4(dir, ".git")))
+    if (existsSync5(join5(dir, ".git")))
       return dir;
     const parent = dirname(dir);
     if (parent === dir)
@@ -555,15 +576,15 @@ function workspaceRoot(startPath) {
 }
 function headBranch(root) {
   try {
-    const dotGit = join4(root, ".git");
+    const dotGit = join5(root, ".git");
     let gitDir = dotGit;
     if (statSync2(dotGit).isFile()) {
-      const m = /^gitdir:\s*(.+)\s*$/m.exec(readFileSync4(dotGit, "utf8"));
+      const m = /^gitdir:\s*(.+)\s*$/m.exec(readFileSync5(dotGit, "utf8"));
       if (!m)
         return null;
       gitDir = resolvePath(root, m[1].trim());
     }
-    const head = readFileSync4(join4(gitDir, "HEAD"), "utf8").trim();
+    const head = readFileSync5(join5(gitDir, "HEAD"), "utf8").trim();
     const ref = /^ref:\s*refs\/heads\/(.+)$/.exec(head);
     return ref ? ref[1] : null;
   } catch {
@@ -571,18 +592,18 @@ function headBranch(root) {
   }
 }
 function readTaskFile(root, id) {
-  const path = join4(root, ".sddx", "tasks", `${id}.json`);
-  if (!existsSync4(path))
+  const path = join5(root, ".sddx", "tasks", `${id}.json`);
+  if (!existsSync5(path))
     return null;
   try {
-    return { kind: "task", root, task: JSON.parse(readFileSync4(path, "utf8")) };
+    return { kind: "task", root, task: JSON.parse(readFileSync5(path, "utf8")) };
   } catch (e) {
     return { kind: "corrupt", root, path, error: e.message };
   }
 }
 function resolveTask(startPath) {
   const root = workspaceRoot(startPath);
-  if (!root || !existsSync4(join4(root, ".sddx")))
+  if (!root || !existsSync5(join5(root, ".sddx")))
     return { kind: "none" };
   if (basename(dirname(root)) === ".sddx-worktrees") {
     const byName = readTaskFile(root, basename(root));
@@ -595,15 +616,15 @@ function resolveTask(startPath) {
     if (byBranch)
       return byBranch;
   }
-  const tasksDir = join4(root, ".sddx", "tasks");
-  if (!existsSync4(tasksDir))
+  const tasksDir = join5(root, ".sddx", "tasks");
+  if (!existsSync5(tasksDir))
     return { kind: "none" };
   const candidates = [];
   for (const file of readdirSync3(tasksDir).filter((f) => f.endsWith(".json"))) {
-    const path = join4(tasksDir, file);
+    const path = join5(tasksDir, file);
     let task;
     try {
-      task = JSON.parse(readFileSync4(path, "utf8"));
+      task = JSON.parse(readFileSync5(path, "utf8"));
     } catch (e) {
       return { kind: "corrupt", root, path, error: e.message };
     }
@@ -615,6 +636,100 @@ function resolveTask(startPath) {
   if (candidates.length === 1)
     return { kind: "task", root, task: candidates[0] };
   return { kind: "ambiguous", root, ids: candidates.map((t) => t.id).sort() };
+}
+
+// src/lib/bashgate.ts
+var BASH_ALLOW_BASE = [
+  "bun",
+  "npm",
+  "npx",
+  "pnpm",
+  "yarn",
+  "pytest",
+  "go",
+  "cargo",
+  "make",
+  "ls",
+  "cat",
+  "grep",
+  "rg",
+  "find",
+  "head",
+  "tail",
+  "wc"
+];
+var GIT_READ_SUBCOMMANDS = ["status", "diff", "log", "show"];
+var splitList = (value) => (value ?? "").split(/\s+/).filter((s) => s !== "");
+function commandWords(segment) {
+  const words = segment.trim().split(/\s+/).filter((w) => w !== "");
+  let i = 0;
+  while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i]))
+    i += 1;
+  return words.slice(i);
+}
+function checkBashCommand(command, extraAllow) {
+  if (command.includes(">")) {
+    return {
+      allow: false,
+      reason: "redirection (>) writes files; the gate does not parse targets"
+    };
+  }
+  const allowed = new Set([...BASH_ALLOW_BASE, ...extraAllow]);
+  for (const segment of command.split(/\|\||&&|;|\|/)) {
+    const words = commandWords(segment);
+    if (words.length === 0)
+      continue;
+    const cmd = words[0];
+    if (cmd === "git") {
+      const sub = words.slice(1).find((w) => !w.startsWith("-"));
+      if (sub === undefined || !GIT_READ_SUBCOMMANDS.includes(sub)) {
+        return {
+          allow: false,
+          reason: `git ${sub ?? "(none)"}: only git ${GIT_READ_SUBCOMMANDS.join("|")} are allowed pre-GREEN`
+        };
+      }
+      continue;
+    }
+    if (!allowed.has(cmd)) {
+      return { allow: false, reason: `"${cmd}" is not on the RED-phase Bash allow-list` };
+    }
+  }
+  return { allow: true };
+}
+function blockMessage(task, why) {
+  return [
+    `sddx TDD gate: blocked Bash command — task ${task.id} is in ${task.phase} (${why}).`,
+    `Pre-GREEN, Bash may only run tests or read state: ${BASH_ALLOW_BASE.join(", ")}, git ${GIT_READ_SUBCOMMANDS.join("|")}.`,
+    "Write the failing test with Edit/Write under a test path and run the test runner so the failure is recorded (the gate lifts in GREEN).",
+    "A legitimately needed read-only tool can be added via userConfig red_bash_allow."
+  ].join(`
+`);
+}
+function bashGate(input, env = process.env) {
+  if (typeof input.command !== "string" || input.command.trim() === "")
+    return { allow: true };
+  const res = resolveTask(input.cwd ?? process.cwd());
+  if (res.kind === "none")
+    return { allow: true };
+  if (res.kind === "ambiguous") {
+    return {
+      allow: false,
+      reason: `sddx TDD gate: ambiguous governing task — ${res.ids.join(" and ")} are both active in this workspace. ` + "The gate refuses to guess. Abandon or finish one, or work in each task's own worktree."
+    };
+  }
+  if (res.kind === "corrupt") {
+    return {
+      allow: false,
+      reason: `sddx TDD gate: task state at ${res.path} is unreadable (${res.error}). Fix or remove it before running commands — a broken state file must not silently disable the gate.`
+    };
+  }
+  if (res.task.phase !== "PLAN" && res.task.phase !== "RED")
+    return { allow: true };
+  const extra = splitList(env.SDDX_RED_BASH_ALLOW ?? readConfig(res.root).red_bash_allow);
+  const decision = checkBashCommand(input.command, extra);
+  if (decision.allow)
+    return decision;
+  return { allow: false, reason: blockMessage(res.task, decision.reason) };
 }
 
 // src/lib/recorder.ts
@@ -661,8 +776,8 @@ function recordTestRun(cwd, command, exitCode) {
 }
 
 // src/lib/stopgate.ts
-import { existsSync as existsSync5 } from "node:fs";
-import { join as join5 } from "node:path";
+import { existsSync as existsSync6 } from "node:fs";
+import { join as join6 } from "node:path";
 var NEXT_STEP = {
   PLAN: "write a failing test and run it to enter RED",
   RED: "run sddx red-check <id>, then make the failing test pass (run the test runner to enter GREEN)",
@@ -692,8 +807,8 @@ function stopGate(event) {
   }
   const { task } = res;
   if (isTerminal(task.phase)) {
-    const receipt = join5(res.root, ".sddx", "receipts", `${task.id}.json`);
-    if (task.phase === "DONE" && !existsSync5(receipt)) {
+    const receipt = join6(res.root, ".sddx", "receipts", `${task.id}.json`);
+    if (task.phase === "DONE" && !existsSync6(receipt)) {
       return {
         block: true,
         reason: `sddx: task ${task.id} is DONE but .sddx/receipts/${task.id}.json is missing — completion is unproven. Restore the receipt or abandon the task.`
@@ -709,14 +824,14 @@ function stopGate(event) {
 }
 
 // src/tdd-gate.ts
-import { existsSync as existsSync6, readFileSync as readFileSync5 } from "node:fs";
-import { isAbsolute, join as join6, relative as relative2, resolve } from "node:path";
+import { existsSync as existsSync7, readFileSync as readFileSync6 } from "node:fs";
+import { isAbsolute, join as join7, relative as relative2, resolve } from "node:path";
 function loadGateConfig(root, env = process.env) {
   let fileConfig = {};
-  const path = join6(root, ".sddx", "config.json");
-  if (existsSync6(path)) {
+  const path = join7(root, ".sddx", "config.json");
+  if (existsSync7(path)) {
     try {
-      fileConfig = JSON.parse(readFileSync5(path, "utf8"));
+      fileConfig = JSON.parse(readFileSync6(path, "utf8"));
     } catch {}
   }
   return {
@@ -724,7 +839,7 @@ function loadGateConfig(root, env = process.env) {
     exemptGlobs: env.SDDX_EXEMPT_GLOBS ?? fileConfig.exempt_globs
   };
 }
-function blockMessage(task, relPath, config) {
+function blockMessage2(task, relPath, config) {
   const testGlobs = [
     ...BUILTIN_TEST_GLOBS,
     ...(config.testGlobs ?? "").split(/\s+/).filter((g) => g !== "")
@@ -764,13 +879,13 @@ function tddGate(input, env = process.env) {
   const cls = classify(relPath, res.task.allow, config);
   if (cls.rule !== "implementation")
     return { allow: true };
-  return { allow: false, reason: blockMessage(res.task, relPath, config) };
+  return { allow: false, reason: blockMessage2(res.task, relPath, config) };
 }
 
 // src/hooks.ts
 function readEvent() {
   try {
-    const raw = readFileSync6(0, "utf8");
+    const raw = readFileSync7(0, "utf8");
     const parsed = raw.trim() === "" ? {} : JSON.parse(raw);
     return typeof parsed === "object" && parsed !== null ? parsed : {};
   } catch {
@@ -787,6 +902,20 @@ function cmdTddGate(event) {
   });
   if (decision.allow) {
     emit(decision.diagnostic ? { systemMessage: decision.diagnostic } : {});
+    return;
+  }
+  emit({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: decision.reason
+    }
+  });
+}
+function cmdBashGate(event) {
+  const decision = bashGate({ command: event.tool_input?.command, cwd: event.cwd });
+  if (decision.allow) {
+    emit({});
     return;
   }
   emit({
@@ -822,10 +951,10 @@ function boardEnabled(cwd, env = process.env) {
   if (env.SDDX_BOARD_ENABLED !== undefined) {
     return !["false", "0"].includes(env.SDDX_BOARD_ENABLED);
   }
-  const path = join7(cwd, ".sddx", "config.json");
-  if (existsSync7(path)) {
+  const path = join8(cwd, ".sddx", "config.json");
+  if (existsSync8(path)) {
     try {
-      const cfg = JSON.parse(readFileSync6(path, "utf8"));
+      const cfg = JSON.parse(readFileSync7(path, "utf8"));
       if (typeof cfg.board_enabled === "boolean")
         return cfg.board_enabled;
     } catch {}
@@ -835,7 +964,7 @@ function boardEnabled(cwd, env = process.env) {
 function cmdSessionStart(event) {
   const cwd = event.cwd ?? process.cwd();
   const lines = [];
-  if (existsSync7(join7(cwd, ".sddx"))) {
+  if (existsSync8(join8(cwd, ".sddx"))) {
     try {
       const res = sweep(cwd);
       if (res.removed.length > 0)
@@ -848,11 +977,11 @@ function cmdSessionStart(event) {
         lines.push(`sddx: board refresh failed: ${e.message}`);
       }
     }
-    const tasksDir = join7(cwd, ".sddx", "tasks");
-    if (existsSync7(tasksDir)) {
+    const tasksDir = join8(cwd, ".sddx", "tasks");
+    if (existsSync8(tasksDir)) {
       for (const file of readdirSync4(tasksDir).filter((f) => f.endsWith(".json"))) {
         try {
-          const t = JSON.parse(readFileSync6(join7(tasksDir, file), "utf8"));
+          const t = JSON.parse(readFileSync7(join8(tasksDir, file), "utf8"));
           if (!isTerminal(t.phase))
             lines.push(`sddx task ${t.id}: phase ${t.phase} — ${t.task}`);
         } catch {
@@ -876,6 +1005,8 @@ function main() {
   try {
     if (sub === "tdd-gate")
       cmdTddGate(event);
+    else if (sub === "bash-gate")
+      cmdBashGate(event);
     else if (sub === "record-test")
       cmdRecordTest(event);
     else if (sub === "stop-gate")

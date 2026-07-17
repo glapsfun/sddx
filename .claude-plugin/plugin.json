@@ -44,6 +44,12 @@
       "title": "Oracle runs",
       "default": 1,
       "description": "How many times verify executes the oracle; every run must pass (flakiness detection)"
+    },
+    "red_bash_allow": {
+      "type": "string",
+      "title": "RED Bash allow-list",
+      "default": "",
+      "description": "Space-separated extra commands the RED-phase Bash gate allows (extends the built-in list, never replaces it)"
     }
   }
 }

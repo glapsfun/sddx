@@ -6,6 +6,8 @@ export interface Oracle {
   type: OracleType;
   run: string;
   expect: string;
+  /** Verify executes the oracle this many times; every run must pass. Default 1. */
+  runs?: number;
 }
 
 export interface Spec {
@@ -60,6 +62,12 @@ export function parseSpec(yamlText: string): { spec?: Spec; errors: string[] } {
     if (or.type !== "manual" && (typeof or.run !== "string" || or.run.trim() === "")) {
       errors.push("oracle.run: command required for non-manual oracles");
     }
+    if (
+      or.runs !== undefined &&
+      (typeof or.runs !== "number" || !Number.isInteger(or.runs) || or.runs < 1)
+    ) {
+      errors.push("oracle.runs: must be an integer >= 1");
+    }
   }
   if (errors.length > 0) return { errors };
 
@@ -74,6 +82,7 @@ export function parseSpec(yamlText: string): { spec?: Spec; errors: string[] } {
         type: or.type as OracleType,
         run: typeof or.run === "string" ? or.run.trim() : "",
         expect: typeof or.expect === "string" ? or.expect.trim() : "exit 0",
+        ...(typeof or.runs === "number" ? { runs: or.runs } : {}),
       },
       stop_rules: Array.isArray(r.stop_rules)
         ? (r.stop_rules as Array<string | Record<string, unknown>>)

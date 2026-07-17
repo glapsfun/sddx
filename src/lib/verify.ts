@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { oracleRuns } from "./config";
 import { captureEnv } from "./envinfo";
 import { commit, stageAll, writeTree } from "./git";
 import { chainHead, type OracleRun, type Receipt, sha256, writeReceipt } from "./receipt";
@@ -36,14 +37,24 @@ export function verifyTask(
   }
   const want = expectedExit(task.oracle.expect);
 
+  const wanted = oracleRuns(cwd, task.oracle.runs);
+  const runs: OracleRun[] = [];
   const started = Date.now();
-  const run = spawnSync("sh", ["-c", task.oracle.run], {
-    cwd,
-    timeout: ORACLE_TIMEOUT_MS,
-  });
-  if (run.error) throw new Error(`oracle could not run: ${run.error.message}`);
+  let exitCode = 0;
+  for (let i = 0; i < wanted; i += 1) {
+    const runStarted = Date.now();
+    const run = spawnSync("sh", ["-c", task.oracle.run], { cwd, timeout: ORACLE_TIMEOUT_MS });
+    if (run.error) throw new Error(`oracle could not run: ${run.error.message}`);
+    exitCode = run.status ?? -1;
+    runs.push({
+      exit_code: exitCode,
+      duration_ms: Date.now() - runStarted,
+      stdout_sha256: sha256(run.stdout ?? Buffer.alloc(0)),
+      stderr_sha256: sha256(run.stderr ?? Buffer.alloc(0)),
+    });
+    if (exitCode !== want) break; // fail fast — one bad run fails the whole verification
+  }
   const durationMs = Date.now() - started;
-  const exitCode = run.status ?? -1;
 
   task.iterations += 1;
   if (exitCode !== want) {
@@ -71,14 +82,7 @@ export function verifyTask(
     model: opts.model ?? null,
     plugin_version: opts.pluginVersion,
     oracle: { run: task.oracle.run, expect: task.oracle.expect },
-    runs: [
-      {
-        exit_code: exitCode,
-        duration_ms: durationMs,
-        stdout_sha256: sha256(run.stdout ?? Buffer.alloc(0)),
-        stderr_sha256: sha256(run.stderr ?? Buffer.alloc(0)),
-      },
-    ] satisfies OracleRun[],
+    runs,
     env,
     base_sha: task.workspace.base_sha,
     tree_sha: treeSha,

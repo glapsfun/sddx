@@ -6944,8 +6944,8 @@ var require_public_api = __commonJS((exports) => {
 });
 
 // src/cli.ts
-import { copyFileSync, existsSync as existsSync6, mkdirSync as mkdirSync5, readFileSync as readFileSync5 } from "node:fs";
-import { join as join6 } from "node:path";
+import { copyFileSync, existsSync as existsSync7, mkdirSync as mkdirSync5, readFileSync as readFileSync6 } from "node:fs";
+import { join as join7 } from "node:path";
 
 // src/audit.ts
 import { spawnSync } from "node:child_process";
@@ -7562,6 +7562,9 @@ function parseSpec(yamlText) {
     if (or2.type !== "manual" && (typeof or2.run !== "string" || or2.run.trim() === "")) {
       errors2.push("oracle.run: command required for non-manual oracles");
     }
+    if (or2.runs !== undefined && (typeof or2.runs !== "number" || !Number.isInteger(or2.runs) || or2.runs < 1)) {
+      errors2.push("oracle.runs: must be an integer >= 1");
+    }
   }
   if (errors2.length > 0)
     return { errors: errors2 };
@@ -7575,7 +7578,8 @@ function parseSpec(yamlText) {
       oracle: {
         type: or.type,
         run: typeof or.run === "string" ? or.run.trim() : "",
-        expect: typeof or.expect === "string" ? or.expect.trim() : "exit 0"
+        expect: typeof or.expect === "string" ? or.expect.trim() : "exit 0",
+        ...typeof or.runs === "number" ? { runs: or.runs } : {}
       },
       stop_rules: Array.isArray(r.stop_rules) ? r.stop_rules : [],
       out_of_scope: toList(r.out_of_scope)
@@ -7750,6 +7754,27 @@ function allowPath(t, path) {
 // src/lib/verify.ts
 import { spawnSync as spawnSync5 } from "node:child_process";
 
+// src/lib/config.ts
+import { existsSync as existsSync6, readFileSync as readFileSync5 } from "node:fs";
+import { join as join6 } from "node:path";
+function readConfig(root) {
+  const path = join6(root, ".sddx", "config.json");
+  if (!existsSync6(path))
+    return {};
+  try {
+    const parsed = JSON.parse(readFileSync5(path, "utf8"));
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+var positiveInt = (v) => typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : null;
+function oracleRuns(root, specRuns, env = process.env) {
+  if (specRuns !== undefined)
+    return specRuns;
+  return positiveInt(Number(env.SDDX_ORACLE_RUNS)) ?? positiveInt(readConfig(root).oracle_runs_default) ?? 1;
+}
+
 // src/lib/envinfo.ts
 import { spawnSync as spawnSync4 } from "node:child_process";
 import { arch, platform } from "node:os";
@@ -7783,15 +7808,26 @@ function verifyTask(cwd, id, opts) {
     throw new Error("manual oracles need a human decision; M1 verify supports command oracles");
   }
   const want = expectedExit(task.oracle.expect);
+  const wanted = oracleRuns(cwd, task.oracle.runs);
+  const runs = [];
   const started = Date.now();
-  const run = spawnSync5("sh", ["-c", task.oracle.run], {
-    cwd,
-    timeout: ORACLE_TIMEOUT_MS
-  });
-  if (run.error)
-    throw new Error(`oracle could not run: ${run.error.message}`);
+  let exitCode = 0;
+  for (let i = 0;i < wanted; i += 1) {
+    const runStarted = Date.now();
+    const run = spawnSync5("sh", ["-c", task.oracle.run], { cwd, timeout: ORACLE_TIMEOUT_MS });
+    if (run.error)
+      throw new Error(`oracle could not run: ${run.error.message}`);
+    exitCode = run.status ?? -1;
+    runs.push({
+      exit_code: exitCode,
+      duration_ms: Date.now() - runStarted,
+      stdout_sha256: sha256(run.stdout ?? Buffer.alloc(0)),
+      stderr_sha256: sha256(run.stderr ?? Buffer.alloc(0))
+    });
+    if (exitCode !== want)
+      break;
+  }
   const durationMs = Date.now() - started;
-  const exitCode = run.status ?? -1;
   task.iterations += 1;
   if (exitCode !== want) {
     task.evidence.last_verify = { exit_code: exitCode, at: new Date().toISOString() };
@@ -7814,14 +7850,7 @@ function verifyTask(cwd, id, opts) {
     model: opts.model ?? null,
     plugin_version: opts.pluginVersion,
     oracle: { run: task.oracle.run, expect: task.oracle.expect },
-    runs: [
-      {
-        exit_code: exitCode,
-        duration_ms: durationMs,
-        stdout_sha256: sha256(run.stdout ?? Buffer.alloc(0)),
-        stderr_sha256: sha256(run.stderr ?? Buffer.alloc(0))
-      }
-    ],
+    runs,
     env,
     base_sha: task.workspace.base_sha,
     tree_sha: treeSha,
@@ -7862,7 +7891,7 @@ function flag(args, name) {
 function pluginVersion() {
   try {
     const manifest = new URL("../.claude-plugin/plugin.json", import.meta.url);
-    return JSON.parse(readFileSync5(manifest, "utf8")).version;
+    return JSON.parse(readFileSync6(manifest, "utf8")).version;
   } catch {
     return "unknown";
   }
@@ -7891,7 +7920,7 @@ function cmdTaskCreate(cwd, args) {
     fail(USAGE, 2);
   let yamlText;
   try {
-    yamlText = readFileSync5(join6(cwd, specArg), "utf8");
+    yamlText = readFileSync6(join7(cwd, specArg), "utf8");
   } catch {
     fail(`cannot read spec file: ${specArg}`);
   }
@@ -7908,10 +7937,10 @@ function cmdTaskCreate(cwd, args) {
     if (base2.source === "HEAD")
       console.log("no origin remote — forking from local HEAD");
     const wtPath = createWorktree(cwd, id, base2.sha);
-    const relPath = join6(".sddx-worktrees", id);
-    mkdirSync5(join6(sddxDir(wtPath), "specs"), { recursive: true });
-    const specPath2 = join6(".sddx", "specs", `${id}.yaml`);
-    copyFileSync(join6(cwd, specArg), join6(wtPath, specPath2));
+    const relPath = join7(".sddx-worktrees", id);
+    mkdirSync5(join7(sddxDir(wtPath), "specs"), { recursive: true });
+    const specPath2 = join7(".sddx", "specs", `${id}.yaml`);
+    copyFileSync(join7(cwd, specArg), join7(wtPath, specPath2));
     createTask(wtPath, spec, specPath2, {
       mode: "worktree",
       branch: `sddx/${id}`,
@@ -7925,9 +7954,9 @@ function cmdTaskCreate(cwd, args) {
   const base = headSha(cwd);
   if (useBranch)
     createBranch(cwd, `sddx/${id}`);
-  mkdirSync5(join6(sddxDir(cwd), "specs"), { recursive: true });
-  const specPath = join6(".sddx", "specs", `${id}.yaml`);
-  copyFileSync(join6(cwd, specArg), join6(cwd, specPath));
+  mkdirSync5(join7(sddxDir(cwd), "specs"), { recursive: true });
+  const specPath = join7(".sddx", "specs", `${id}.yaml`);
+  copyFileSync(join7(cwd, specArg), join7(cwd, specPath));
   createTask(cwd, spec, specPath, {
     mode,
     branch: useBranch ? `sddx/${id}` : null,
@@ -7967,13 +7996,13 @@ function cmdCleanup(cwd, args) {
   if (!id)
     fail(USAGE, 2);
   const branch = `sddx/${id}`;
-  const wtPath = join6(worktreesDir(cwd), id);
-  if (existsSync6(wtPath)) {
+  const wtPath = join7(worktreesDir(cwd), id);
+  if (existsSync7(wtPath)) {
     if (isDirty(wtPath)) {
-      fail(`refusing: worktree ${join6(".sddx-worktrees", id)} has uncommitted changes`);
+      fail(`refusing: worktree ${join7(".sddx-worktrees", id)} has uncommitted changes`);
     }
     removeWorktree(cwd, wtPath);
-    console.log(`removed worktree ${join6(".sddx-worktrees", id)}`);
+    console.log(`removed worktree ${join7(".sddx-worktrees", id)}`);
   }
   if (!branchExists(cwd, branch)) {
     console.log(`no branch ${branch} — nothing to clean up`);

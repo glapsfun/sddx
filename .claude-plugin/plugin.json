@@ -38,6 +38,12 @@
       "title": "Board enabled",
       "default": true,
       "description": "Regenerate .sddx/BOARD.md automatically"
+    },
+    "oracle_runs_default": {
+      "type": "number",
+      "title": "Oracle runs",
+      "default": 1,
+      "description": "How many times verify executes the oracle; every run must pass (flakiness detection)"
     }
   }
 }

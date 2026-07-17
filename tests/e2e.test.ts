@@ -22,7 +22,7 @@ function completeTask(cwd: string, runtime: string[], n: number): string {
     `task: add greet ${n}\nsuccess_criteria:\n  - "node check${n}.js exits 0"\noracle:\n  type: command\n  run: "node check${n}.js"\n`,
   );
   const id = /created (\S+)/.exec(
-    run(cwd, runtime, "task", "create", "--spec", `spec${n}.yaml`),
+    run(cwd, runtime, "task", "create", "--spec", `spec${n}.yaml`, "--workspace", "branch"),
   )![1]!;
 
   writeFileSync(join(cwd, `check${n}.js`), `require("./greet${n}.js");\n`);

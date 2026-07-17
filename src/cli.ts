@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   branchExists,
@@ -19,13 +19,24 @@ import {
   writeTask,
 } from "./lib/task";
 import { verifyTask } from "./lib/verify";
+import {
+  createWorktree,
+  hasSubmodules,
+  isDirty,
+  removeWorktree,
+  resolveBaseRef,
+  sweep,
+  worktreeAvailable,
+  worktreesDir,
+} from "./lib/worktree";
 
 const USAGE = `usage:
-  sddx task create --spec <path> [--no-branch]
+  sddx task create --spec <path> [--workspace auto|worktree|branch|none] [--no-branch]
   sddx task phase <id> <PHASE> [--test-exit <n>]
   sddx task show <id>
   sddx verify <id> [--model <m>] [--harness <h>]
-  sddx cleanup <id>`;
+  sddx cleanup <id>
+  sddx sweep`;
 
 function fail(message: string, code: 1 | 2 = 1): never {
   console.error(message);
@@ -49,9 +60,29 @@ function pluginVersion(): string {
   }
 }
 
+const WORKSPACE_MODES = ["auto", "worktree", "branch", "none"] as const;
+type WorkspaceFlag = (typeof WORKSPACE_MODES)[number];
+
+function pickWorkspace(cwd: string, requested: WorkspaceFlag): "worktree" | "branch" | "none" {
+  if (requested !== "auto") return requested;
+  if (!worktreeAvailable(cwd)) {
+    console.log("git worktree unavailable → branch mode");
+    return "branch";
+  }
+  const base = resolveBaseRef(cwd);
+  if (hasSubmodules(cwd, base.sha)) {
+    console.log("submodules detected → branch mode");
+    return "branch";
+  }
+  return "worktree";
+}
+
 function cmdTaskCreate(cwd: string, args: string[]): void {
   const specArg = flag(args, "--spec");
   if (!specArg) fail(USAGE, 2);
+  const requested = (flag(args, "--workspace") ??
+    (args.includes("--no-branch") ? "none" : "auto")) as WorkspaceFlag;
+  if (!WORKSPACE_MODES.includes(requested)) fail(USAGE, 2);
   let yamlText: string;
   try {
     yamlText = readFileSync(join(cwd, specArg), "utf8");
@@ -64,7 +95,27 @@ function cmdTaskCreate(cwd: string, args: string[]): void {
     process.exit(1);
   }
   const id = taskId(spec.task);
-  const useBranch = !args.includes("--no-branch");
+  const mode = pickWorkspace(cwd, requested);
+
+  if (mode === "worktree") {
+    const base = resolveBaseRef(cwd);
+    if (base.source === "HEAD") console.log("no origin remote — forking from local HEAD");
+    const wtPath = createWorktree(cwd, id, base.sha);
+    const relPath = join(".sddx-worktrees", id);
+    mkdirSync(join(sddxDir(wtPath), "specs"), { recursive: true });
+    const specPath = join(".sddx", "specs", `${id}.yaml`);
+    copyFileSync(join(cwd, specArg), join(wtPath, specPath));
+    createTask(wtPath, spec, specPath, {
+      mode: "worktree",
+      branch: `sddx/${id}`,
+      base_sha: base.sha,
+      path: relPath,
+    });
+    console.log(`created ${id} phase=PLAN worktree=${relPath} branch=sddx/${id} base=${base.sha}`);
+    return;
+  }
+
+  const useBranch = mode === "branch";
   const base = headSha(cwd);
   if (useBranch) createBranch(cwd, `sddx/${id}`);
 
@@ -73,7 +124,7 @@ function cmdTaskCreate(cwd: string, args: string[]): void {
   copyFileSync(join(cwd, specArg), join(cwd, specPath));
 
   createTask(cwd, spec, specPath, {
-    mode: useBranch ? "branch" : "none",
+    mode,
     branch: useBranch ? `sddx/${id}` : null,
     base_sha: base,
   });
@@ -115,6 +166,14 @@ function cmdCleanup(cwd: string, args: string[]): void {
   const [id] = args;
   if (!id) fail(USAGE, 2);
   const branch = `sddx/${id}`;
+  const wtPath = join(worktreesDir(cwd), id);
+  if (existsSync(wtPath)) {
+    if (isDirty(wtPath)) {
+      fail(`refusing: worktree ${join(".sddx-worktrees", id)} has uncommitted changes`);
+    }
+    removeWorktree(cwd, wtPath);
+    console.log(`removed worktree ${join(".sddx-worktrees", id)}`);
+  }
   if (!branchExists(cwd, branch)) {
     console.log(`no branch ${branch} — nothing to clean up`);
     return;
@@ -127,6 +186,17 @@ function cmdCleanup(cwd: string, args: string[]): void {
   }
   deleteBranch(cwd, branch);
   console.log(`deleted merged branch ${branch}`);
+}
+
+function cmdSweep(cwd: string): void {
+  const res = sweep(cwd);
+  if (res.locked) {
+    console.log("sweep: another sweep holds the lock — skipped");
+    return;
+  }
+  for (const path of res.removed) console.log(`swept ${path}`);
+  for (const s of res.skipped) console.log(`skipped ${s.path} (${s.reason})`);
+  console.log(`sweep: ${res.removed.length} removed, ${res.skipped.length} skipped`);
 }
 
 function main(argv: string[]): void {
@@ -152,6 +222,10 @@ function main(argv: string[]): void {
     }
     if (cmd === "cleanup") {
       cmdCleanup(cwd, rest);
+      return;
+    }
+    if (cmd === "sweep") {
+      cmdSweep(cwd);
       return;
     }
     fail(USAGE, 2);

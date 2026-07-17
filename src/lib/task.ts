@@ -15,9 +15,11 @@ export const TRANSITIONS: Record<Phase, Phase[]> = {
 };
 
 export interface Workspace {
-  mode: "branch" | "none";
+  mode: "worktree" | "branch" | "none";
   branch: string | null;
   base_sha: string;
+  /** Worktree path relative to the main repo root; absent for branch/none (M1 files). */
+  path?: string;
 }
 
 export interface TaskState {

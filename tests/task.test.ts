@@ -61,6 +61,23 @@ describe("task state", () => {
     expect(transition(v, "DONE", { internal: true }).phase).toBe("DONE");
   });
 
+  test("M1 task files (no workspace.path) still parse; worktree mode records one", () => {
+    const cwd = tmpCwd();
+    const m1 = createTask(cwd, spec, "s", { mode: "branch", branch: "sddx/x", base_sha: "a" });
+    expect(readTask(cwd, m1.id).workspace.path).toBeUndefined();
+
+    const cwd2 = tmpCwd();
+    const m2 = createTask(cwd2, spec, "s", {
+      mode: "worktree",
+      branch: "sddx/y",
+      base_sha: "b",
+      path: ".sddx-worktrees/y",
+    });
+    const back = readTask(cwd2, m2.id);
+    expect(back.workspace.mode).toBe("worktree");
+    expect(back.workspace.path).toBe(".sddx-worktrees/y");
+  });
+
   test("writeTask bumps updated_at", async () => {
     const cwd = tmpCwd();
     const t = createTask(cwd, spec, "s", { mode: "none", branch: null, base_sha: "a" });

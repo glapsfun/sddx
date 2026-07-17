@@ -110,19 +110,33 @@ export function validateReceipt(raw: unknown): string[] {
   return errors;
 }
 
+/**
+ * Receipts form a hash tree rooted at "genesis": parallel worktrees legitimately
+ * write siblings sharing one parent, so validation requires every `prev` to match
+ * the file hash of a receipt with strictly smaller `seq` — the linear chain is the
+ * sequential special case. Tampering with any parent orphans its children loudly.
+ */
 export function verifyChain(cwd: string): string[] {
   const errors: string[] = [];
   const receipts = listReceipts(cwd);
-  let prevFileHash = "genesis";
-  receipts.forEach(({ file, receipt }, i) => {
+  const seqByHash = new Map<string, number>();
+  for (const { file, receipt } of receipts) {
+    seqByHash.set(sha256(readFileSync(file)), receipt.seq);
+  }
+  for (const { file, receipt } of receipts) {
     for (const e of validateReceipt(receipt)) errors.push(`${file}: ${e}`);
-    if (receipt.seq !== i + 1) {
-      errors.push(`${file}: seq ${receipt.seq}, expected ${i + 1} (gap or duplicate)`);
+    if (receipt.prev === "genesis") {
+      if (receipt.seq !== 1) {
+        errors.push(`${file}: genesis-linked receipt must have seq 1, got ${receipt.seq}`);
+      }
+      continue;
     }
-    if (receipt.prev !== prevFileHash) {
-      errors.push(`${file}: prev hash mismatch — chain broken (tampered or deleted receipt)`);
+    const parentSeq = seqByHash.get(receipt.prev);
+    if (parentSeq === undefined) {
+      errors.push(`${file}: prev hash matches no receipt — chain broken (tampered or deleted)`);
+    } else if (parentSeq >= receipt.seq) {
+      errors.push(`${file}: seq ${receipt.seq} must exceed parent seq ${parentSeq}`);
     }
-    prevFileHash = sha256(readFileSync(file));
-  });
+  }
   return errors;
 }

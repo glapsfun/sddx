@@ -80,4 +80,43 @@ describe("receipt chain", () => {
     writeReceipt(cwd, r);
     expect(verifyChain(cwd).join(" ")).toContain("seq");
   });
+
+  test("parallel writers: two receipts sharing one parent validate (hash tree)", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "sddx-receipt-"));
+    writeReceipt(cwd, makeReceipt(cwd, "base"));
+    // both parallel tasks saw the same chain head, as sibling worktrees do
+    const a = makeReceipt(cwd, "par-a");
+    writeReceipt(cwd, a);
+    const b = { ...makeReceipt(cwd, "par-b"), seq: a.seq, prev: a.prev };
+    writeReceipt(cwd, b);
+    expect(verifyChain(cwd)).toEqual([]);
+  });
+
+  test("two genesis roots with seq 1 validate (parallel from empty base)", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "sddx-receipt-"));
+    const a = makeReceipt(cwd, "root-a");
+    writeReceipt(cwd, a);
+    const b = { ...makeReceipt(cwd, "root-b"), seq: 1, prev: "genesis" };
+    writeReceipt(cwd, b);
+    expect(verifyChain(cwd)).toEqual([]);
+  });
+
+  test("prev matching no receipt fails naming the broken link", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "sddx-receipt-"));
+    writeReceipt(cwd, makeReceipt(cwd, "t1"));
+    const orphan = { ...makeReceipt(cwd, "t2"), prev: sha256("nonexistent parent") };
+    writeReceipt(cwd, orphan);
+    const errors = verifyChain(cwd);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("t2.json");
+    expect(errors[0]).toContain("prev");
+  });
+
+  test("a parent with seq >= child seq is rejected", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "sddx-receipt-"));
+    const p1 = writeReceipt(cwd, makeReceipt(cwd, "t1"));
+    const child = { ...makeReceipt(cwd, "t2"), seq: 1, prev: sha256(readFileSync(p1)) };
+    writeReceipt(cwd, child);
+    expect(verifyChain(cwd).join(" ")).toContain("seq");
+  });
 });

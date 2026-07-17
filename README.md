@@ -1,27 +1,32 @@
 # sddx
 
+[![ci](https://img.shields.io/github/actions/workflow/status/glapsfun/sddx/ci.yml?branch=main&label=ci)](https://github.com/glapsfun/sddx/actions/workflows/ci.yml)
+[![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fglapsfun%2Fsddx%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&prefix=v&label=version)](https://github.com/glapsfun/sddx)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![bun](https://img.shields.io/badge/runtime-bun-black?logo=bun)](https://bun.sh)
+[![typescript](https://img.shields.io/badge/lang-TypeScript-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+
 Loop-based Spec-Driven Development for Claude Code: dense specs with mandatory
 oracles, hook-enforced TDD, parallel git worktrees, and hash-chained receipts.
 Process over intelligence, proof over promises.
 
-## Install
+| Problem with agentic dev frameworks | sddx mechanism                                                                             |
+| ----------------------- | ------------------------------------------------------------------------------------------ |
+| Token bloat             | Minimal skill surface; lazy-loaded references; measured token budget                       |
+| Prompt-level discipline | **Hooks hard-block** implementation writes before a failing test exists                    |
+| Unverifiable completion | Every goal requires an **oracle** — an observable success signal; the verifier executes it |
+| Transient state         | Per-task JSON state + receipts committed **in the repo**; survives restarts and compaction |
+| Compounding tasks       | **Worktree-per-task** isolation, forked from `origin/HEAD`, parallel by default            |
 
-**Marketplace (recommended):**
+## Install
 
 ```sh
 claude plugin marketplace add glapsfun/sddx
 claude plugin install sddx@sddx
 ```
 
-**Local development** — run Claude Code with the plugin loaded from a checkout:
-
-```sh
-claude --plugin-dir /path/to/sddx
-```
-
-**Skills only** — copy the `skills/` subdirectories into your project's
-`.claude/skills/`; skills auto-load, but hook enforcement (the TDD gate) only
-ships with the full plugin.
+Local development, skills-only mode, prerequisites, and verifying the install:
+see [docs/installation.md](docs/installation.md).
 
 ## Quickstart (first verified task in ~5 minutes)
 
@@ -55,88 +60,25 @@ Inside Claude Code the same loop is driven by `/sddx:quick` (single task) or
 `/sddx:run` (parallel tasks in worktrees); `sddx` here means
 `bin/sddx-run dist/cli.mjs` from the plugin root.
 
-## CLI at a glance
+## Documentation
 
-`sddx task create --spec <file> [--workspace auto|worktree|branch|none]` registers
-a task; `auto` (default) runs it in an isolated worktree under `.sddx-worktrees/`
-forked from `origin/HEAD`, downgrading to a `sddx/<id>` branch when submodules
-make worktrees unsafe. `sddx sweep` removes leftover worktrees whose tasks are
-verified DONE (lock-guarded; never touches dirty trees). `sddx cleanup <id>`
-tears down a single task's worktree and merged branch. `sddx task allow <id>
-<path>` grants the sole, audited TDD-gate exemption for one file — it is copied
-into the task's receipt at verification. `sddx board` regenerates the
-deterministic `.sddx/BOARD.md`; `sddx audit [--signatures]` verifies the receipt
-chain, commit bindings, and optionally commit signatures (exit 1 on any finding
-— CI-friendly).
-
-## Spec reference
-
-Task specs are one YAML file; every field below is required.
-
-| Field              | Meaning                                                                                                       |
-| ------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `task`             | One sentence stating the goal; also the source of the task id (`YYYYMMDD-<slug>`)                             |
-| `context`          | List of pointers (files, CONTEXT.md sections) — links, not prose                                              |
-| `success_criteria` | List of binary, observable statements; no "improve"/"better"                                                  |
-| `oracle`           | The mandatory proof: `type` (`command` \| `test-suite` \| `browser` \| `manual`), `run` (shell command), `expect` (`exit <code>`) |
-| `stop_rules`       | Loop bounds, e.g. `max_iterations: 5`, escalation conditions                                                  |
-| `out_of_scope`     | Explicit exclusions so the loop doesn't wander                                                                |
-
-A spec without an oracle is rejected at registration — no oracle, no goal.
-
-## Hook-enforced TDD
-
-The plugin registers five hooks (`hooks/hooks.json` → `dist/hooks.mjs`, one
-dependency-free bundle launched via bun-or-node):
-
-| Hook                    | Job                                                                                      |
-| ----------------------- | ---------------------------------------------------------------------------------------- |
-| `SessionStart`          | Bootstrap: orphan-worktree sweep, board refresh, active tasks surfaced as session context |
-| `PreToolUse` (Edit/Write) | **TDD gate** — before GREEN (phases PLAN/RED), writes to implementation paths are denied |
-| `PostToolUse` (Bash)    | Test-result recorder: observed test-runner exit codes drive PLAN→RED→GREEN               |
-| `Stop` / `SubagentStop` | Refuses to conclude a session whose task lacks a verified receipt                        |
-
-The gate classifies the target path in order: task `allow` list → exempt globs
-(built-ins like `.sddx/**`, `docs/**`, `**/*.md`, plus userConfig
-`exempt_globs`) → test globs (per-language defaults like `**/*.test.*`,
-`tests/**`, `**/test_*.py`, plus userConfig `test_globs`) → otherwise
-implementation, which is blocked pre-GREEN. Phase transitions are written by
-hooks from observed exit codes — never claimed by the model. The gate resolves
-its governing task from the written file's own workspace, so it behaves
-identically in the main checkout, task worktrees, and subagents.
-
-## Privacy
-
-sddx makes **zero network calls**. Everything is local files (`.sddx/` under
-version control) and local git. No telemetry, no phoning home, no remote
-fetches — the bundles ship dependency-free and never import a network API.
+| Page                                                     | What it covers                                                        |
+| -------------------------------------------------------- | --------------------------------------------------------------------- |
+| [Installation](docs/installation.md)                     | Every install path, verification, uninstall, privacy                  |
+| [Usage](docs/usage.md)                                   | The task loop, `/sddx:run` and `/sddx:quick`, worktrees, the board    |
+| [Spec reference](docs/spec-reference.md)                 | Every spec field, good/bad criteria, the four oracle types            |
+| [Hooks & the TDD gate](docs/hooks.md)                    | The five hooks, gate classification, default globs, the escape hatch  |
+| [CLI reference](docs/cli.md)                             | Every `sddx` command, flag, and exit code                             |
+| [Receipts & audit](docs/receipts-and-audit.md)           | Receipt schema, the hash chain, audit findings and remediation        |
+| [Architecture](docs/architecture.md)                     | Codebase map, build pipeline, state model, design principles          |
+| [Troubleshooting](docs/troubleshooting.md)               | Gate blocks, stuck tasks, orphan worktrees, audit failures            |
+| [Releasing](docs/RELEASING.md)                           | The release checklist                                                 |
+| [Contributing](CONTRIBUTING.md)                          | Dev setup, quality gates, PR expectations                             |
+| [Changelog](CHANGELOG.md)                                | Release history                                                       |
+| [Security](SECURITY.md)                                  | Zero-network design and vulnerability reporting                       |
 
 ## Development
 
-Prerequisites: [Bun](https://bun.sh) (version pinned in `.bun-version`) and
-[pre-commit](https://pre-commit.com) (`brew install pre-commit`).
-
-One-time setup after cloning:
-
-```sh
-bun install
-pre-commit install --install-hooks
-```
-
-That installs both hook stages: fast hygiene + lint checks on `git commit`,
-typecheck + tests on `git push`.
-
-Everyday commands:
-
-| Command            | What it does                               |
-| ------------------ | ------------------------------------------ |
-| `bun run lint`     | Biome lint + format check (TS/JS/JSON)     |
-| `bun run lint:fix` | Auto-fix lint and formatting issues        |
-| `bun test`         | Run the test suite                         |
-| `bun run check`    | Full gate: lint → typecheck → test → build |
-
-CI runs the same gates (`pre-commit run --all-files` plus typecheck, tests,
-build, dist drift check, and strict plugin validation), so a clean local
-`bun run check` and pre-commit pass means CI will agree.
-
-Releases follow the checklist in [docs/RELEASING.md](docs/RELEASING.md).
+Dev setup, everyday commands, and the quality gates live in
+[CONTRIBUTING.md](CONTRIBUTING.md); the release process is in
+[docs/RELEASING.md](docs/RELEASING.md).

@@ -6945,12 +6945,12 @@ var require_public_api = __commonJS((exports) => {
 
 // src/cli.ts
 import { copyFileSync, existsSync as existsSync7, mkdirSync as mkdirSync5, readFileSync as readFileSync7 } from "node:fs";
-import { join as join7 } from "node:path";
+import { join as join8 } from "node:path";
 
 // src/audit.ts
-import { spawnSync } from "node:child_process";
+import { spawnSync as spawnSync2 } from "node:child_process";
 import { existsSync as existsSync2, readdirSync as readdirSync2, readFileSync as readFileSync2 } from "node:fs";
-import { join as join2 } from "node:path";
+import { join as join3 } from "node:path";
 
 // src/lib/receipt.ts
 import { createHash } from "node:crypto";
@@ -7070,9 +7070,58 @@ function verifyChain(cwd) {
   return errors;
 }
 
+// src/lib/sign.ts
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join as join2 } from "node:path";
+var NAMESPACE = "sddx-receipt";
+function gitConfig(cwd, key) {
+  const r = spawnSync("git", ["config", "--get", key], { cwd, encoding: "utf8" });
+  if (r.status !== 0)
+    return null;
+  const v = (r.stdout ?? "").trim();
+  return v === "" ? null : v;
+}
+var expandHome = (p) => p.startsWith("~/") ? join2(homedir(), p.slice(2)) : p;
+function signPayload(cwd, payload) {
+  if (gitConfig(cwd, "gpg.format") !== "ssh")
+    return null;
+  const key = gitConfig(cwd, "user.signingkey");
+  if (!key || key.startsWith("ssh-"))
+    return null;
+  const signer = gitConfig(cwd, "user.email");
+  if (!signer)
+    return null;
+  const r = spawnSync("ssh-keygen", ["-Y", "sign", "-n", NAMESPACE, "-f", expandHome(key)], {
+    cwd,
+    input: payload,
+    encoding: "utf8"
+  });
+  if (r.status !== 0)
+    return null;
+  const signature = (r.stdout ?? "").trim();
+  return signature.startsWith("-----BEGIN SSH SIGNATURE-----") ? { signature, signer } : null;
+}
+function verifySignature(cwd, payload, sig) {
+  const allowed = gitConfig(cwd, "gpg.ssh.allowedSignersFile");
+  if (!allowed)
+    return "unverifiable";
+  const tmp = mkdtempSync(join2(tmpdir(), "sddx-sig-"));
+  try {
+    const sigFile = join2(tmp, "receipt.sig");
+    writeFileSync2(sigFile, `${sig.signature}
+`);
+    const r = spawnSync("ssh-keygen", ["-Y", "verify", "-f", expandHome(allowed), "-I", sig.signer, "-n", NAMESPACE, "-s", sigFile], { cwd, input: payload, encoding: "utf8" });
+    return r.status === 0 ? "valid" : "invalid";
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 // src/audit.ts
 function gitLines(cwd, ...args) {
-  const r = spawnSync("git", args, { cwd, encoding: "utf8" });
+  const r = spawnSync2("git", args, { cwd, encoding: "utf8" });
   if (r.status !== 0)
     return { ok: false, lines: [], err: (r.stderr ?? "").trim() };
   return { ok: true, lines: (r.stdout ?? "").split(`
@@ -7080,18 +7129,19 @@ function gitLines(cwd, ...args) {
 }
 function auditReceipts(cwd, opts = {}) {
   const findings = verifyChain(cwd).map((f) => `chain: ${f}`);
+  const notes = [];
   const dir = receiptsDir(cwd);
   const files = existsSync2(dir) ? readdirSync2(dir).filter((f) => f.endsWith(".json")).sort() : [];
   const tracked = gitLines(cwd, "ls-tree", "-r", "--name-only", "HEAD", "--", ".sddx/receipts");
   if (tracked.ok) {
     for (const rel of tracked.lines) {
-      if (rel.endsWith(".json") && !existsSync2(join2(cwd, rel))) {
+      if (rel.endsWith(".json") && !existsSync2(join3(cwd, rel))) {
         findings.push(`${rel}: committed receipt missing from working tree — receipt deleted`);
       }
     }
   }
   for (const file of files) {
-    const rel = join2(".sddx", "receipts", file);
+    const rel = join3(".sddx", "receipts", file);
     const log = gitLines(cwd, "log", "--format=%H", "--", rel);
     if (!log.ok) {
       findings.push(`${rel}: commit binding failed: ${log.err}`);
@@ -7106,21 +7156,40 @@ function auditReceipts(cwd, opts = {}) {
     if (dirty.ok && dirty.lines.length > 0) {
       findings.push(`${rel}: working tree differs from committed state — receipt bytes tampered`);
     }
+    let parsed = null;
+    try {
+      parsed = JSON.parse(readFileSync2(join3(cwd, rel), "utf8"));
+    } catch {}
+    if (parsed && typeof parsed.signature === "string" && typeof parsed.signer === "string") {
+      const { signature, signer, ...unsigned } = parsed;
+      const payload = sha256(`${JSON.stringify(unsigned, null, 2)}
+`);
+      const verdict = verifySignature(cwd, payload, {
+        signature,
+        signer
+      });
+      if (verdict === "invalid")
+        findings.push(`${rel}: embedded receipt signature is invalid`);
+      if (verdict === "unverifiable")
+        notes.push(`${rel}: signed by ${signer} — set gpg.ssh.allowedSignersFile to verify`);
+    } else {
+      notes.push(`${rel}: unsigned`);
+    }
     if (opts.signatures) {
-      const v = spawnSync("git", ["verify-commit", introducing], { cwd });
+      const v = spawnSync2("git", ["verify-commit", introducing], { cwd });
       if (v.status !== 0) {
         findings.push(`${rel}: binding commit ${introducing.slice(0, 12)} has no valid signature`);
       }
     }
   }
   if (opts.ci) {
-    const tasksDir = join2(cwd, ".sddx", "tasks");
+    const tasksDir = join3(cwd, ".sddx", "tasks");
     if (existsSync2(tasksDir)) {
       for (const f of readdirSync2(tasksDir).filter((x) => x.endsWith(".json"))) {
-        const rel = join2(".sddx", "tasks", f);
+        const rel = join3(".sddx", "tasks", f);
         try {
-          const t = JSON.parse(readFileSync2(join2(tasksDir, f), "utf8"));
-          if (t.phase === "DONE" && !existsSync2(join2(dir, `${t.id}.json`))) {
+          const t = JSON.parse(readFileSync2(join3(tasksDir, f), "utf8"));
+          if (t.phase === "DONE" && !existsSync2(join3(dir, `${t.id}.json`))) {
             findings.push(`${rel}: task is DONE without a receipt — completion unproven`);
           }
         } catch {
@@ -7129,18 +7198,18 @@ function auditReceipts(cwd, opts = {}) {
       }
     }
   }
-  return { receipts: files.length, findings };
+  return { receipts: files.length, findings, notes };
 }
 
 // src/board.ts
-import { existsSync as existsSync5, mkdirSync as mkdirSync3, readdirSync as readdirSync4, readFileSync as readFileSync5, writeFileSync as writeFileSync3 } from "node:fs";
-import { join as join5 } from "node:path";
+import { existsSync as existsSync5, mkdirSync as mkdirSync3, readdirSync as readdirSync4, readFileSync as readFileSync5, writeFileSync as writeFileSync4 } from "node:fs";
+import { join as join6 } from "node:path";
 
 // src/lib/config.ts
 import { existsSync as existsSync3, readFileSync as readFileSync3 } from "node:fs";
-import { join as join3 } from "node:path";
+import { join as join4 } from "node:path";
 function readConfig(root) {
-  const path = join3(root, ".sddx", "config.json");
+  const path = join4(root, ".sddx", "config.json");
   if (!existsSync3(path))
     return {};
   try {
@@ -7161,7 +7230,7 @@ function oracleRuns(root, specRuns, env = process.env) {
 }
 
 // src/lib/worktree.ts
-import { spawnSync as spawnSync3 } from "node:child_process";
+import { spawnSync as spawnSync4 } from "node:child_process";
 import {
   appendFileSync,
   existsSync as existsSync4,
@@ -7171,14 +7240,14 @@ import {
   realpathSync,
   rmdirSync,
   statSync,
-  writeFileSync as writeFileSync2
+  writeFileSync as writeFileSync3
 } from "node:fs";
-import { join as join4, relative } from "node:path";
+import { join as join5, relative } from "node:path";
 
 // src/lib/git.ts
-import { spawnSync as spawnSync2 } from "node:child_process";
+import { spawnSync as spawnSync3 } from "node:child_process";
 function git(cwd, ...args) {
-  const r = spawnSync2("git", args, { cwd, encoding: "utf8" });
+  const r = spawnSync3("git", args, { cwd, encoding: "utf8" });
   if (r.error)
     throw new Error(`git not runnable: ${r.error.message}`);
   if (r.status !== 0) {
@@ -7192,7 +7261,7 @@ var createBranch = (cwd, name) => {
   git(cwd, "switch", "-c", name);
 };
 function branchExists(cwd, name) {
-  const r = spawnSync2("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${name}`], {
+  const r = spawnSync3("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${name}`], {
     cwd
   });
   return r.status === 0;
@@ -7214,16 +7283,16 @@ function commit(cwd, message) {
 }
 
 // src/lib/worktree.ts
-var worktreesDir = (cwd) => join4(cwd, ".sddx-worktrees");
+var worktreesDir = (cwd) => join5(cwd, ".sddx-worktrees");
 function tryRev(cwd, ref) {
-  const r = spawnSync3("git", ["rev-parse", "--verify", "--quiet", ref], {
+  const r = spawnSync4("git", ["rev-parse", "--verify", "--quiet", ref], {
     cwd,
     encoding: "utf8"
   });
   return r.status === 0 ? r.stdout.trim() : null;
 }
 function resolveBaseRef(cwd) {
-  const symref = spawnSync3("git", ["symbolic-ref", "-q", "refs/remotes/origin/HEAD"], {
+  const symref = spawnSync4("git", ["symbolic-ref", "-q", "refs/remotes/origin/HEAD"], {
     cwd,
     encoding: "utf8"
   });
@@ -7244,13 +7313,13 @@ function resolveBaseRef(cwd) {
 }
 var gitCommonDir = (cwd) => {
   const dir = git(cwd, "rev-parse", "--git-common-dir");
-  return join4(cwd, dir);
+  return join5(cwd, dir);
 };
 var EXCLUDE_LINE = ".sddx-worktrees/";
 function ensureExcluded(cwd) {
-  const infoDir = join4(gitCommonDir(cwd), "info");
+  const infoDir = join5(gitCommonDir(cwd), "info");
   mkdirSync2(infoDir, { recursive: true });
-  const exclude = join4(infoDir, "exclude");
+  const exclude = join5(infoDir, "exclude");
   const current = existsSync4(exclude) ? readFileSync4(exclude, "utf8") : "";
   if (current.split(`
 `).includes(EXCLUDE_LINE))
@@ -7262,7 +7331,7 @@ function ensureExcluded(cwd) {
 `);
 }
 function worktreeAvailable(cwd) {
-  const r = spawnSync3("git", ["worktree", "list"], { cwd });
+  const r = spawnSync4("git", ["worktree", "list"], { cwd });
   if (r.status !== 0)
     return false;
   const gitDir = git(cwd, "rev-parse", "--git-dir");
@@ -7272,7 +7341,7 @@ function worktreeAvailable(cwd) {
 function createWorktree(cwd, id, baseSha) {
   ensureExcluded(cwd);
   mkdirSync2(worktreesDir(cwd), { recursive: true });
-  const path = join4(worktreesDir(cwd), id);
+  const path = join5(worktreesDir(cwd), id);
   git(cwd, "worktree", "add", "-q", path, "-b", `sddx/${id}`, baseSha);
   return path;
 }
@@ -7310,7 +7379,7 @@ function listSddxWorktrees(cwd) {
   return entries;
 }
 function hasSubmodules(cwd, baseSha) {
-  const r = spawnSync3("git", ["cat-file", "-e", `${baseSha}:.gitmodules`], { cwd });
+  const r = spawnSync4("git", ["cat-file", "-e", `${baseSha}:.gitmodules`], { cwd });
   return r.status === 0;
 }
 var LOCK_STALE_MS = 10 * 60000;
@@ -7342,7 +7411,7 @@ function acquireLock(lockPath, now) {
   }
 }
 function readWorktreeTask(worktreePath, id) {
-  const path = join4(worktreePath, ".sddx", "tasks", `${id}.json`);
+  const path = join5(worktreePath, ".sddx", "tasks", `${id}.json`);
   try {
     return JSON.parse(readFileSync4(path, "utf8"));
   } catch {
@@ -7352,13 +7421,13 @@ function readWorktreeTask(worktreePath, id) {
 var DISPOSABLE = new Set(["DONE", "ABANDONED"]);
 function writeSweepState(cwd, skipped) {
   const entries = skipped.map((s) => ({ path: relative(cwd, s.path), reason: s.reason })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-  mkdirSync2(join4(cwd, ".sddx"), { recursive: true });
-  writeFileSync2(join4(cwd, ".sddx", "sweep.json"), `${JSON.stringify({ skipped: entries }, null, 2)}
+  mkdirSync2(join5(cwd, ".sddx"), { recursive: true });
+  writeFileSync3(join5(cwd, ".sddx", "sweep.json"), `${JSON.stringify({ skipped: entries }, null, 2)}
 `);
 }
 function sweep(cwd, opts = {}) {
   const now = opts.now ?? Date.now();
-  const lockPath = join4(gitCommonDir(cwd), "sddx-sweep.lock");
+  const lockPath = join5(gitCommonDir(cwd), "sddx-sweep.lock");
   if (!acquireLock(lockPath, now)) {
     return { removed: [], skipped: [], locked: true };
   }
@@ -7384,7 +7453,7 @@ function sweep(cwd, opts = {}) {
         skipped.push({ path: wt.path, reason: "dirty" });
         continue;
       }
-      if (task.phase === "DONE" && !existsSync4(join4(wt.path, ".sddx", "receipts", `${id}.json`))) {
+      if (task.phase === "DONE" && !existsSync4(join5(wt.path, ".sddx", "receipts", `${id}.json`))) {
         skipped.push({ path: wt.path, reason: "DONE without receipt" });
         continue;
       }
@@ -7408,7 +7477,7 @@ function sweep(cwd, opts = {}) {
 var DASH = "—";
 var cell = (s) => s.replace(/\|/g, "\\|").replace(/\n/g, " ");
 function receiptRef(dir, id) {
-  const path = join5(dir, `${id}.json`);
+  const path = join6(dir, `${id}.json`);
   if (!existsSync5(path))
     return DASH;
   try {
@@ -7449,7 +7518,7 @@ function taskRow(taskPath, id, receiptsDirs, threshold) {
   };
 }
 function flagLines(cwd) {
-  const path = join5(cwd, ".sddx", "sweep.json");
+  const path = join6(cwd, ".sddx", "sweep.json");
   if (!existsSync5(path))
     return [];
   let entries;
@@ -7477,18 +7546,18 @@ function flagLines(cwd) {
 var jsonIds = (dir) => existsSync5(dir) ? readdirSync4(dir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length)).sort() : [];
 function renderBoard(cwd) {
   const rows = new Map;
-  const mainReceipts = join5(cwd, ".sddx", "receipts");
+  const mainReceipts = join6(cwd, ".sddx", "receipts");
   const threshold = stuckThreshold(cwd);
-  for (const id of jsonIds(join5(cwd, ".sddx", "tasks"))) {
-    rows.set(id, taskRow(join5(cwd, ".sddx", "tasks", `${id}.json`), id, [mainReceipts], threshold));
+  for (const id of jsonIds(join6(cwd, ".sddx", "tasks"))) {
+    rows.set(id, taskRow(join6(cwd, ".sddx", "tasks", `${id}.json`), id, [mainReceipts], threshold));
   }
   const wtDir = worktreesDir(cwd);
   if (existsSync5(wtDir)) {
     for (const id of readdirSync4(wtDir).sort()) {
-      const taskPath = join5(wtDir, id, ".sddx", "tasks", `${id}.json`);
+      const taskPath = join6(wtDir, id, ".sddx", "tasks", `${id}.json`);
       if (!existsSync5(taskPath))
         continue;
-      rows.set(id, taskRow(taskPath, id, [join5(wtDir, id, ".sddx", "receipts"), mainReceipts], threshold));
+      rows.set(id, taskRow(taskPath, id, [join6(wtDir, id, ".sddx", "receipts"), mainReceipts], threshold));
     }
   }
   const lines = ["<!-- generated by sddx — do not edit -->", "", "# sddx board", ""];
@@ -7506,24 +7575,24 @@ function renderBoard(cwd) {
   return lines.join(`
 `);
 }
-var boardPath = (cwd) => join5(cwd, ".sddx", "BOARD.md");
+var boardPath = (cwd) => join6(cwd, ".sddx", "BOARD.md");
 function writeBoard(cwd) {
   const path = boardPath(cwd);
   const rendered = renderBoard(cwd);
   const current = existsSync5(path) ? readFileSync5(path, "utf8") : null;
   if (current === rendered)
     return { path, changed: false };
-  mkdirSync3(join5(cwd, ".sddx"), { recursive: true });
-  writeFileSync3(path, rendered);
+  mkdirSync3(join6(cwd, ".sddx"), { recursive: true });
+  writeFileSync4(path, rendered);
   return { path, changed: true };
 }
 
 // src/lib/redcheck.ts
-import { spawnSync as spawnSync4 } from "node:child_process";
+import { spawnSync as spawnSync5 } from "node:child_process";
 
 // src/lib/task.ts
-import { existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync6, writeFileSync as writeFileSync4 } from "node:fs";
-import { join as join6 } from "node:path";
+import { existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync6, writeFileSync as writeFileSync5 } from "node:fs";
+import { join as join7 } from "node:path";
 
 // src/lib/glob.ts
 function segmentToRegex(segment) {
@@ -7603,8 +7672,8 @@ var TRANSITIONS = {
   DONE: [],
   ABANDONED: []
 };
-var sddxDir = (cwd) => join6(cwd, ".sddx");
-var taskPath = (cwd, id) => join6(sddxDir(cwd), "tasks", `${id}.json`);
+var sddxDir = (cwd) => join7(cwd, ".sddx");
+var taskPath = (cwd, id) => join7(sddxDir(cwd), "tasks", `${id}.json`);
 function taskId(sentence, date = new Date) {
   const slug = sentence.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
   const ymd = date.toISOString().slice(0, 10).replace(/-/g, "");
@@ -7629,8 +7698,8 @@ function createTask(cwd, spec, specPath, workspace) {
   const path = taskPath(cwd, t.id);
   if (existsSync6(path))
     throw new Error(`task ${t.id} already exists at ${path}`);
-  mkdirSync4(join6(sddxDir(cwd), "tasks"), { recursive: true });
-  writeFileSync4(path, `${JSON.stringify(t, null, 2)}
+  mkdirSync4(join7(sddxDir(cwd), "tasks"), { recursive: true });
+  writeFileSync5(path, `${JSON.stringify(t, null, 2)}
 `);
   return t;
 }
@@ -7642,7 +7711,7 @@ function readTask(cwd, id) {
 }
 function writeTask(cwd, t) {
   t.updated_at = new Date().toISOString();
-  writeFileSync4(taskPath(cwd, t.id), `${JSON.stringify(t, null, 2)}
+  writeFileSync5(taskPath(cwd, t.id), `${JSON.stringify(t, null, 2)}
 `);
 }
 function transition(t, to, opts = {}) {
@@ -7695,7 +7764,7 @@ function redCheck(cwd, id) {
   if (task.oracle.type === "manual") {
     throw new Error("manual oracles cannot be red-checked");
   }
-  const run = spawnSync4("sh", ["-c", task.oracle.run], { cwd, timeout: ORACLE_TIMEOUT_MS });
+  const run = spawnSync5("sh", ["-c", task.oracle.run], { cwd, timeout: ORACLE_TIMEOUT_MS });
   if (run.error)
     throw new Error(`oracle could not run: ${run.error.message}`);
   const exitCode = run.status ?? -1;
@@ -7822,14 +7891,14 @@ function parseSpec(yamlText) {
 }
 
 // src/lib/verify.ts
-import { spawnSync as spawnSync6 } from "node:child_process";
+import { spawnSync as spawnSync7 } from "node:child_process";
 
 // src/lib/envinfo.ts
-import { spawnSync as spawnSync5 } from "node:child_process";
+import { spawnSync as spawnSync6 } from "node:child_process";
 import { arch, platform } from "node:os";
 function captureEnv(cwd) {
   const bun = globalThis.Bun;
-  const status = spawnSync5("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
+  const status = spawnSync6("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
   return {
     os: platform(),
     arch: arch(),
@@ -7871,7 +7940,7 @@ function verifyTask(cwd, id, opts) {
   let exitCode = 0;
   for (let i = 0;i < wanted; i += 1) {
     const runStarted = Date.now();
-    const run = spawnSync6("sh", ["-c", task.oracle.run], { cwd, timeout: ORACLE_TIMEOUT_MS2 });
+    const run = spawnSync7("sh", ["-c", task.oracle.run], { cwd, timeout: ORACLE_TIMEOUT_MS2 });
     if (run.error)
       throw new Error(`oracle could not run: ${run.error.message}`);
     exitCode = run.status ?? -1;
@@ -7915,6 +7984,12 @@ function verifyTask(cwd, id, opts) {
     verified_at: new Date().toISOString(),
     allow: [...task.allow]
   };
+  const sig = signPayload(cwd, sha256(`${JSON.stringify(receipt, null, 2)}
+`));
+  if (sig) {
+    receipt.signature = sig.signature;
+    receipt.signer = sig.signer;
+  }
   const receiptPath2 = writeReceipt(cwd, receipt);
   stageAll(cwd);
   const commitSha = commit(cwd, `sddx(${id}): ${task.task}`);
@@ -7978,7 +8053,7 @@ function cmdTaskCreate(cwd, args) {
     fail(USAGE, 2);
   let yamlText;
   try {
-    yamlText = readFileSync7(join7(cwd, specArg), "utf8");
+    yamlText = readFileSync7(join8(cwd, specArg), "utf8");
   } catch {
     fail(`cannot read spec file: ${specArg}`);
   }
@@ -7995,10 +8070,10 @@ function cmdTaskCreate(cwd, args) {
     if (base2.source === "HEAD")
       console.log("no origin remote — forking from local HEAD");
     const wtPath = createWorktree(cwd, id, base2.sha);
-    const relPath = join7(".sddx-worktrees", id);
-    mkdirSync5(join7(sddxDir(wtPath), "specs"), { recursive: true });
-    const specPath2 = join7(".sddx", "specs", `${id}.yaml`);
-    copyFileSync(join7(cwd, specArg), join7(wtPath, specPath2));
+    const relPath = join8(".sddx-worktrees", id);
+    mkdirSync5(join8(sddxDir(wtPath), "specs"), { recursive: true });
+    const specPath2 = join8(".sddx", "specs", `${id}.yaml`);
+    copyFileSync(join8(cwd, specArg), join8(wtPath, specPath2));
     createTask(wtPath, spec, specPath2, {
       mode: "worktree",
       branch: `sddx/${id}`,
@@ -8012,9 +8087,9 @@ function cmdTaskCreate(cwd, args) {
   const base = headSha(cwd);
   if (useBranch)
     createBranch(cwd, `sddx/${id}`);
-  mkdirSync5(join7(sddxDir(cwd), "specs"), { recursive: true });
-  const specPath = join7(".sddx", "specs", `${id}.yaml`);
-  copyFileSync(join7(cwd, specArg), join7(cwd, specPath));
+  mkdirSync5(join8(sddxDir(cwd), "specs"), { recursive: true });
+  const specPath = join8(".sddx", "specs", `${id}.yaml`);
+  copyFileSync(join8(cwd, specArg), join8(cwd, specPath));
   createTask(cwd, spec, specPath, {
     mode,
     branch: useBranch ? `sddx/${id}` : null,
@@ -8054,13 +8129,13 @@ function cmdCleanup(cwd, args) {
   if (!id)
     fail(USAGE, 2);
   const branch = `sddx/${id}`;
-  const wtPath = join7(worktreesDir(cwd), id);
+  const wtPath = join8(worktreesDir(cwd), id);
   if (existsSync7(wtPath)) {
     if (isDirty(wtPath)) {
-      fail(`refusing: worktree ${join7(".sddx-worktrees", id)} has uncommitted changes`);
+      fail(`refusing: worktree ${join8(".sddx-worktrees", id)} has uncommitted changes`);
     }
     removeWorktree(cwd, wtPath);
-    console.log(`removed worktree ${join7(".sddx-worktrees", id)}`);
+    console.log(`removed worktree ${join8(".sddx-worktrees", id)}`);
   }
   if (!branchExists(cwd, branch)) {
     console.log(`no branch ${branch} — nothing to clean up`);
@@ -8143,6 +8218,9 @@ function main(argv) {
         signatures: rest.includes("--signatures"),
         ci: rest.includes("--ci")
       });
+      if (rest.includes("--signatures"))
+        for (const n of res.notes)
+          console.log(n);
       for (const f of res.findings)
         console.error(f);
       if (res.findings.length > 0)

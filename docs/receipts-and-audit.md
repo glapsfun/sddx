@@ -125,3 +125,13 @@ commits are signed like any other commit, and `sddx audit --signatures`
 verifies them. Signing adds **identity** on top; chain **integrity** is
 independent of it — an unsigned repository still gets full tamper-evidence
 from the hash tree.
+
+## Receipt signing
+
+When the repo has SSH commit signing configured (`gpg.format ssh` +
+`user.signingkey` as a key path), `sddx verify` also signs each receipt:
+`signature` is an SSH signature (namespace `sddx-receipt`) over the sha256 of
+the receipt's unsigned bytes; `signer` is the git `user.email`. `sddx audit`
+verifies embedded signatures against `gpg.ssh.allowedSignersFile`: invalid →
+audit fails; unsigned or unverifiable → informational only (`--signatures`
+prints the notes). Identity sits on top; chain integrity never depends on it.

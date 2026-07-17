@@ -263,6 +263,7 @@ function main(argv: string[]): void {
         signatures: rest.includes("--signatures"),
         ci: rest.includes("--ci"),
       });
+      if (rest.includes("--signatures")) for (const n of res.notes) console.log(n);
       for (const f of res.findings) console.error(f);
       if (res.findings.length > 0) fail(`audit: ${res.findings.length} finding(s)`);
       console.log(`audit: ${res.receipts} receipt(s) verified, chain intact`);

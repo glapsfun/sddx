@@ -3,6 +3,7 @@ import { oracleRuns } from "./config";
 import { captureEnv } from "./envinfo";
 import { commit, stageAll, writeTree } from "./git";
 import { chainHead, type OracleRun, type Receipt, sha256, writeReceipt } from "./receipt";
+import { signPayload } from "./sign";
 import { readTask, transition, writeTask } from "./task";
 
 const ORACLE_TIMEOUT_MS = 10 * 60_000;
@@ -102,6 +103,13 @@ export function verifyTask(
     verified_at: new Date().toISOString(),
     allow: [...task.allow],
   };
+  // sign the unsigned bytes, then append the two fields LAST — audit
+  // reconstructs the payload by deleting exactly these keys
+  const sig = signPayload(cwd, sha256(`${JSON.stringify(receipt, null, 2)}\n`));
+  if (sig) {
+    receipt.signature = sig.signature;
+    receipt.signer = sig.signer;
+  }
   const receiptPath = writeReceipt(cwd, receipt);
 
   stageAll(cwd);

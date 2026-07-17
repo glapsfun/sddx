@@ -6,11 +6,14 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { receiptsDir, verifyChain } from "./lib/receipt";
+import { receiptsDir, sha256, verifyChain } from "./lib/receipt";
+import { verifySignature } from "./lib/sign";
 
 export interface AuditResult {
   receipts: number;
   findings: string[];
+  /** Informational (never findings): unsigned or unverifiable receipts. */
+  notes: string[];
 }
 
 function gitLines(cwd: string, ...args: string[]): { ok: boolean; lines: string[]; err: string } {
@@ -24,6 +27,7 @@ export function auditReceipts(
   opts: { signatures?: boolean; ci?: boolean } = {},
 ): AuditResult {
   const findings = verifyChain(cwd).map((f) => `chain: ${f}`);
+  const notes: string[] = [];
   const dir = receiptsDir(cwd);
   const files = existsSync(dir)
     ? readdirSync(dir)
@@ -58,6 +62,27 @@ export function auditReceipts(
     if (dirty.ok && dirty.lines.length > 0) {
       findings.push(`${rel}: working tree differs from committed state — receipt bytes tampered`);
     }
+    let parsed: Record<string, unknown> | null = null;
+    try {
+      parsed = JSON.parse(readFileSync(join(cwd, rel), "utf8")) as Record<string, unknown>;
+    } catch {
+      // chain verification already reports unparseable receipts
+    }
+    if (parsed && typeof parsed.signature === "string" && typeof parsed.signer === "string") {
+      const { signature, signer, ...unsigned } = parsed; // rest spread keeps key order
+      const payload = sha256(`${JSON.stringify(unsigned, null, 2)}\n`);
+      // destructured bindings are `unknown` under Record<string, unknown> — the
+      // typeof guard above makes these casts safe
+      const verdict = verifySignature(cwd, payload, {
+        signature: signature as string,
+        signer: signer as string,
+      });
+      if (verdict === "invalid") findings.push(`${rel}: embedded receipt signature is invalid`);
+      if (verdict === "unverifiable")
+        notes.push(`${rel}: signed by ${signer} — set gpg.ssh.allowedSignersFile to verify`);
+    } else {
+      notes.push(`${rel}: unsigned`);
+    }
     if (opts.signatures) {
       const v = spawnSync("git", ["verify-commit", introducing], { cwd });
       if (v.status !== 0) {
@@ -84,5 +109,5 @@ export function auditReceipts(
       }
     }
   }
-  return { receipts: files.length, findings };
+  return { receipts: files.length, findings, notes };
 }

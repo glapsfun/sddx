@@ -44,3 +44,13 @@ jobs:
         run: |
           npm install -g @anthropic-ai/claude-code@2.1.211
           claude plugin validate --strict .
+
+  links:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Offline: only intra-repo links are checked, keeping CI network-independent.
+      - uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --no-progress README.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md CHANGELOG.md 'docs/**/*.md'
+          fail: true

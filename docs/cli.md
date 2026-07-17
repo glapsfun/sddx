@@ -14,7 +14,7 @@ usage:
   sddx red-check <id>
   sddx verify <id> [--model <m>] [--harness <h>]
   sddx board
-  sddx audit [--signatures]
+  sddx audit [--signatures] [--ci]
   sddx cleanup <id>
   sddx sweep
 ```
@@ -118,12 +118,14 @@ board — regenerate it.
 ## sddx audit
 
 ```sh
-sddx audit [--signatures]
+sddx audit [--signatures] [--ci]
 ```
 
 Re-walks and re-hashes the receipt chain and checks commit bindings;
-`--signatures` additionally verifies task-commit signatures. Prints one line
-per finding to stderr and exits 1 on any finding — CI-friendly. Clean run:
+`--signatures` additionally verifies task-commit signatures. `--ci` also
+fails when a task marked `DONE` has no receipt (tamper-only CI gate — see
+[receipts-and-audit.md](receipts-and-audit.md)). Prints one line per finding
+to stderr and exits 1 on any finding — CI-friendly. Clean run:
 `audit: <n> receipt(s) verified, chain intact`.
 
 ## sddx cleanup

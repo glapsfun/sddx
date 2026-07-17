@@ -91,6 +91,33 @@ Exit 1 on any finding, 0 on a clean chain — safe to wire into CI.
 If a finding survives restoration attempts, treat the receipt as untrusted and
 re-verify the task: the code may be fine, but its proof is gone.
 
+## CI receipt gate
+
+`sddx audit --ci` exits non-zero **only on tamper evidence**: a broken
+receipt hash chain; edited, deleted, uncommitted, or schema-invalid receipts;
+or a task marked `DONE` without a receipt. A repo or PR with no sddx activity
+passes clean — safe to add to any repository; sddx stays opt-in per task.
+
+Zero-install workflow (the committed `dist/` bundle needs no npm install):
+
+```yaml
+name: sddx-audit
+on: pull_request
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # audit binds receipts to their introducing commits
+      - uses: actions/checkout@v4
+        with:
+          repository: glapsfun/sddx
+          ref: v0.2.0
+          path: .sddx-tool
+      - run: node .sddx-tool/dist/cli.mjs audit --ci
+```
+
 ## Commit signing
 
 When you have git commit signing (SSH or GPG) configured, sddx's atomic task

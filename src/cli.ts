@@ -42,7 +42,7 @@ const USAGE = `usage:
   sddx red-check <id>
   sddx verify <id> [--model <m>] [--harness <h>]
   sddx board
-  sddx audit [--signatures]
+  sddx audit [--signatures] [--ci]
   sddx cleanup <id>
   sddx sweep`;
 
@@ -257,9 +257,12 @@ function main(argv: string[]): void {
       return;
     }
     if (cmd === "audit") {
-      const unknown = rest.filter((a) => a !== "--signatures");
+      const unknown = rest.filter((a) => a !== "--signatures" && a !== "--ci");
       if (unknown.length > 0) fail(USAGE, 2);
-      const res = auditReceipts(cwd, { signatures: rest.includes("--signatures") });
+      const res = auditReceipts(cwd, {
+        signatures: rest.includes("--signatures"),
+        ci: rest.includes("--ci"),
+      });
       for (const f of res.findings) console.error(f);
       if (res.findings.length > 0) fail(`audit: ${res.findings.length} finding(s)`);
       console.log(`audit: ${res.receipts} receipt(s) verified, chain intact`);

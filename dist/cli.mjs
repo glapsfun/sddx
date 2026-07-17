@@ -6944,12 +6944,12 @@ var require_public_api = __commonJS((exports) => {
 });
 
 // src/cli.ts
-import { copyFileSync, existsSync as existsSync7, mkdirSync as mkdirSync5, readFileSync as readFileSync6 } from "node:fs";
+import { copyFileSync, existsSync as existsSync7, mkdirSync as mkdirSync5, readFileSync as readFileSync7 } from "node:fs";
 import { join as join7 } from "node:path";
 
 // src/audit.ts
 import { spawnSync } from "node:child_process";
-import { existsSync as existsSync2, readdirSync as readdirSync2 } from "node:fs";
+import { existsSync as existsSync2, readdirSync as readdirSync2, readFileSync as readFileSync2 } from "node:fs";
 import { join as join2 } from "node:path";
 
 // src/lib/receipt.ts
@@ -7113,22 +7113,38 @@ function auditReceipts(cwd, opts = {}) {
       }
     }
   }
+  if (opts.ci) {
+    const tasksDir = join2(cwd, ".sddx", "tasks");
+    if (existsSync2(tasksDir)) {
+      for (const f of readdirSync2(tasksDir).filter((x) => x.endsWith(".json"))) {
+        const rel = join2(".sddx", "tasks", f);
+        try {
+          const t = JSON.parse(readFileSync2(join2(tasksDir, f), "utf8"));
+          if (t.phase === "DONE" && !existsSync2(join2(dir, `${t.id}.json`))) {
+            findings.push(`${rel}: task is DONE without a receipt — completion unproven`);
+          }
+        } catch {
+          findings.push(`${rel}: unreadable task file`);
+        }
+      }
+    }
+  }
   return { receipts: files.length, findings };
 }
 
 // src/board.ts
-import { existsSync as existsSync5, mkdirSync as mkdirSync3, readdirSync as readdirSync4, readFileSync as readFileSync4, writeFileSync as writeFileSync3 } from "node:fs";
+import { existsSync as existsSync5, mkdirSync as mkdirSync3, readdirSync as readdirSync4, readFileSync as readFileSync5, writeFileSync as writeFileSync3 } from "node:fs";
 import { join as join5 } from "node:path";
 
 // src/lib/config.ts
-import { existsSync as existsSync3, readFileSync as readFileSync2 } from "node:fs";
+import { existsSync as existsSync3, readFileSync as readFileSync3 } from "node:fs";
 import { join as join3 } from "node:path";
 function readConfig(root) {
   const path = join3(root, ".sddx", "config.json");
   if (!existsSync3(path))
     return {};
   try {
-    const parsed = JSON.parse(readFileSync2(path, "utf8"));
+    const parsed = JSON.parse(readFileSync3(path, "utf8"));
     return typeof parsed === "object" && parsed !== null ? parsed : {};
   } catch {
     return {};
@@ -7151,7 +7167,7 @@ import {
   existsSync as existsSync4,
   mkdirSync as mkdirSync2,
   readdirSync as readdirSync3,
-  readFileSync as readFileSync3,
+  readFileSync as readFileSync4,
   realpathSync,
   rmdirSync,
   statSync,
@@ -7235,7 +7251,7 @@ function ensureExcluded(cwd) {
   const infoDir = join4(gitCommonDir(cwd), "info");
   mkdirSync2(infoDir, { recursive: true });
   const exclude = join4(infoDir, "exclude");
-  const current = existsSync4(exclude) ? readFileSync3(exclude, "utf8") : "";
+  const current = existsSync4(exclude) ? readFileSync4(exclude, "utf8") : "";
   if (current.split(`
 `).includes(EXCLUDE_LINE))
     return;
@@ -7328,7 +7344,7 @@ function acquireLock(lockPath, now) {
 function readWorktreeTask(worktreePath, id) {
   const path = join4(worktreePath, ".sddx", "tasks", `${id}.json`);
   try {
-    return JSON.parse(readFileSync3(path, "utf8"));
+    return JSON.parse(readFileSync4(path, "utf8"));
   } catch {
     return null;
   }
@@ -7396,7 +7412,7 @@ function receiptRef(dir, id) {
   if (!existsSync5(path))
     return DASH;
   try {
-    return `#${JSON.parse(readFileSync4(path, "utf8")).seq}`;
+    return `#${JSON.parse(readFileSync5(path, "utf8")).seq}`;
   } catch {
     return "unreadable";
   }
@@ -7404,7 +7420,7 @@ function receiptRef(dir, id) {
 function taskRow(taskPath, id, receiptsDirs, threshold) {
   let t;
   try {
-    t = JSON.parse(readFileSync4(taskPath, "utf8"));
+    t = JSON.parse(readFileSync5(taskPath, "utf8"));
   } catch {
     return {
       id,
@@ -7438,7 +7454,7 @@ function flagLines(cwd) {
     return [];
   let entries;
   try {
-    const parsed = JSON.parse(readFileSync4(path, "utf8"));
+    const parsed = JSON.parse(readFileSync5(path, "utf8"));
     entries = Array.isArray(parsed.skipped) ? parsed.skipped : [];
   } catch {
     return [
@@ -7494,7 +7510,7 @@ var boardPath = (cwd) => join5(cwd, ".sddx", "BOARD.md");
 function writeBoard(cwd) {
   const path = boardPath(cwd);
   const rendered = renderBoard(cwd);
-  const current = existsSync5(path) ? readFileSync4(path, "utf8") : null;
+  const current = existsSync5(path) ? readFileSync5(path, "utf8") : null;
   if (current === rendered)
     return { path, changed: false };
   mkdirSync3(join5(cwd, ".sddx"), { recursive: true });
@@ -7506,7 +7522,7 @@ function writeBoard(cwd) {
 import { spawnSync as spawnSync4 } from "node:child_process";
 
 // src/lib/task.ts
-import { existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync5, writeFileSync as writeFileSync4 } from "node:fs";
+import { existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync6, writeFileSync as writeFileSync4 } from "node:fs";
 import { join as join6 } from "node:path";
 
 // src/lib/glob.ts
@@ -7622,7 +7638,7 @@ function readTask(cwd, id) {
   const path = taskPath(cwd, id);
   if (!existsSync6(path))
     throw new Error(`no such task: ${id} (${path})`);
-  return JSON.parse(readFileSync5(path, "utf8"));
+  return JSON.parse(readFileSync6(path, "utf8"));
 }
 function writeTask(cwd, t) {
   t.updated_at = new Date().toISOString();
@@ -7914,7 +7930,7 @@ var USAGE = `usage:
   sddx red-check <id>
   sddx verify <id> [--model <m>] [--harness <h>]
   sddx board
-  sddx audit [--signatures]
+  sddx audit [--signatures] [--ci]
   sddx cleanup <id>
   sddx sweep`;
 function fail(message, code = 1) {
@@ -7933,7 +7949,7 @@ function flag(args, name) {
 function pluginVersion() {
   try {
     const manifest = new URL("../.claude-plugin/plugin.json", import.meta.url);
-    return JSON.parse(readFileSync6(manifest, "utf8")).version;
+    return JSON.parse(readFileSync7(manifest, "utf8")).version;
   } catch {
     return "unknown";
   }
@@ -7962,7 +7978,7 @@ function cmdTaskCreate(cwd, args) {
     fail(USAGE, 2);
   let yamlText;
   try {
-    yamlText = readFileSync6(join7(cwd, specArg), "utf8");
+    yamlText = readFileSync7(join7(cwd, specArg), "utf8");
   } catch {
     fail(`cannot read spec file: ${specArg}`);
   }
@@ -8120,10 +8136,13 @@ function main(argv) {
       return;
     }
     if (cmd === "audit") {
-      const unknown = rest.filter((a) => a !== "--signatures");
+      const unknown = rest.filter((a) => a !== "--signatures" && a !== "--ci");
       if (unknown.length > 0)
         fail(USAGE, 2);
-      const res = auditReceipts(cwd, { signatures: rest.includes("--signatures") });
+      const res = auditReceipts(cwd, {
+        signatures: rest.includes("--signatures"),
+        ci: rest.includes("--ci")
+      });
       for (const f of res.findings)
         console.error(f);
       if (res.findings.length > 0)

@@ -4,7 +4,7 @@
 // receipt, which no child hash references yet). Signature verification is
 // opt-in and consumes only git exit codes.
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { receiptsDir, verifyChain } from "./lib/receipt";
 
@@ -19,7 +19,10 @@ function gitLines(cwd: string, ...args: string[]): { ok: boolean; lines: string[
   return { ok: true, lines: (r.stdout ?? "").split("\n").filter(Boolean), err: "" };
 }
 
-export function auditReceipts(cwd: string, opts: { signatures?: boolean } = {}): AuditResult {
+export function auditReceipts(
+  cwd: string,
+  opts: { signatures?: boolean; ci?: boolean } = {},
+): AuditResult {
   const findings = verifyChain(cwd).map((f) => `chain: ${f}`);
   const dir = receiptsDir(cwd);
   const files = existsSync(dir)
@@ -59,6 +62,25 @@ export function auditReceipts(cwd: string, opts: { signatures?: boolean } = {}):
       const v = spawnSync("git", ["verify-commit", introducing], { cwd });
       if (v.status !== 0) {
         findings.push(`${rel}: binding commit ${introducing.slice(0, 12)} has no valid signature`);
+      }
+    }
+  }
+  if (opts.ci) {
+    const tasksDir = join(cwd, ".sddx", "tasks");
+    if (existsSync(tasksDir)) {
+      for (const f of readdirSync(tasksDir).filter((x) => x.endsWith(".json"))) {
+        const rel = join(".sddx", "tasks", f);
+        try {
+          const t = JSON.parse(readFileSync(join(tasksDir, f), "utf8")) as {
+            id?: string;
+            phase?: string;
+          };
+          if (t.phase === "DONE" && !existsSync(join(dir, `${t.id}.json`))) {
+            findings.push(`${rel}: task is DONE without a receipt — completion unproven`);
+          }
+        } catch {
+          findings.push(`${rel}: unreadable task file`);
+        }
       }
     }
   }

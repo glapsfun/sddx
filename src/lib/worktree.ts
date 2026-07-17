@@ -8,8 +8,9 @@ import {
   realpathSync,
   rmdirSync,
   statSync,
+  writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { git } from "./git";
 import type { Phase, TaskState } from "./task";
 
@@ -177,6 +178,18 @@ function readWorktreeTask(worktreePath: string, id: string): TaskState | null {
 
 const DISPOSABLE: ReadonlySet<Phase> = new Set(["DONE", "ABANDONED"]);
 
+/** Persist skip results for the board: repo-relative paths, sorted, timestamp-free. */
+function writeSweepState(cwd: string, skipped: Array<{ path: string; reason: string }>): void {
+  const entries = skipped
+    .map((s) => ({ path: relative(cwd, s.path), reason: s.reason }))
+    .sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  mkdirSync(join(cwd, ".sddx"), { recursive: true });
+  writeFileSync(
+    join(cwd, ".sddx", "sweep.json"),
+    `${JSON.stringify({ skipped: entries }, null, 2)}\n`,
+  );
+}
+
 export function sweep(cwd: string, opts: { now?: number } = {}): SweepResult {
   const now = opts.now ?? Date.now();
   const lockPath = join(gitCommonDir(cwd), "sddx-sweep.lock");
@@ -216,6 +229,8 @@ export function sweep(cwd: string, opts: { now?: number } = {}): SweepResult {
         skipped.push({ path: wt.path, reason: `remove failed: ${(e as Error).message}` });
       }
     }
+    // scan completed — record what was refused so the board can flag it
+    writeSweepState(cwd, skipped);
   } finally {
     try {
       rmdirSync(lockPath);

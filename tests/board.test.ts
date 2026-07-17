@@ -74,6 +74,62 @@ describe("renderBoard", () => {
   });
 });
 
+describe("flagged worktrees", () => {
+  const writeSweepState = (repo: string, content: string) => {
+    mkdirSync(join(repo, ".sddx"), { recursive: true });
+    writeFileSync(join(repo, ".sddx", "sweep.json"), content);
+  };
+
+  test("skipped worktrees render as a flagged section, ordered by path", () => {
+    const repo = fixtureRepo();
+    makeTask(repo);
+    writeSweepState(
+      repo,
+      JSON.stringify({
+        skipped: [
+          { path: ".sddx-worktrees/b", reason: "phase RED" },
+          { path: ".sddx-worktrees/a", reason: "dirty" },
+        ],
+      }),
+    );
+    const board = renderBoard(repo);
+    expect(board).toContain("Flagged worktrees");
+    expect(board.indexOf(".sddx-worktrees/a")).toBeLessThan(board.indexOf(".sddx-worktrees/b"));
+    expect(board).toContain("dirty");
+    expect(board).toContain("phase RED");
+    expect(renderBoard(repo)).toBe(board); // still byte-deterministic
+  });
+
+  test("section renders even when no tasks are registered", () => {
+    const repo = fixtureRepo();
+    writeSweepState(
+      repo,
+      JSON.stringify({ skipped: [{ path: ".sddx-worktrees/x", reason: "dirty" }] }),
+    );
+    const board = renderBoard(repo);
+    expect(board).toContain("No tasks registered");
+    expect(board).toContain("Flagged worktrees");
+  });
+
+  test("no section when sweep state is absent or empty", () => {
+    const repo = fixtureRepo();
+    makeTask(repo);
+    expect(renderBoard(repo)).not.toContain("Flagged worktrees");
+    writeSweepState(repo, JSON.stringify({ skipped: [] }));
+    expect(renderBoard(repo)).not.toContain("Flagged worktrees");
+  });
+
+  test("corrupt sweep state is flagged without breaking the board", () => {
+    const repo = fixtureRepo();
+    const ok = makeTask(repo);
+    writeSweepState(repo, "{broken");
+    const board = renderBoard(repo);
+    expect(board).toContain(ok.id);
+    expect(board).toContain("Flagged worktrees");
+    expect(board).toContain("unreadable");
+  });
+});
+
 describe("writeBoard", () => {
   test("writes once, then skips unchanged renders", () => {
     const repo = fixtureRepo();

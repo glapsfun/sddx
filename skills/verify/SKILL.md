@@ -17,5 +17,12 @@ Run: `... verify <task-id> --model <your model id, if you know it>`
   verify again. Respect the spec's stop_rules: if iterations exceed
   max_iterations (default 5), stop and escalate to the user.
 
+After a pass, cross-check the spec's `success_criteria` in prose: list each
+criterion and whether the oracle's observed run covers it. This review is
+non-binding — the receipt verdict derives solely from the oracle exit code,
+and a prose doubt can neither pass nor fail a task. If a criterion turns out
+not to be exercised by the oracle, report it to the user as a spec gap: the
+fix is a better oracle in a future spec, never a hand-judged verdict.
+
 Never write or edit anything under `.sddx/receipts/` yourself. Never re-run
 verify on a DONE task — receipts are write-once.

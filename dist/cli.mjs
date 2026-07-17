@@ -6944,8 +6944,8 @@ var require_public_api = __commonJS((exports) => {
 });
 
 // src/cli.ts
-import { copyFileSync, mkdirSync as mkdirSync3, readFileSync as readFileSync3 } from "node:fs";
-import { join as join3 } from "node:path";
+import { copyFileSync, existsSync as existsSync4, mkdirSync as mkdirSync4, readFileSync as readFileSync4 } from "node:fs";
+import { join as join4 } from "node:path";
 
 // src/lib/git.ts
 import { spawnSync } from "node:child_process";
@@ -7278,13 +7278,210 @@ function verifyTask(cwd, id, opts) {
   return { verdict: "pass", exitCode, durationMs, receiptPath: receiptPath2, commitSha };
 }
 
+// src/lib/worktree.ts
+import { spawnSync as spawnSync3 } from "node:child_process";
+import {
+  appendFileSync,
+  existsSync as existsSync3,
+  mkdirSync as mkdirSync3,
+  readdirSync as readdirSync2,
+  readFileSync as readFileSync3,
+  realpathSync,
+  rmdirSync,
+  statSync
+} from "node:fs";
+import { join as join3 } from "node:path";
+var worktreesDir = (cwd) => join3(cwd, ".sddx-worktrees");
+function tryRev(cwd, ref) {
+  const r = spawnSync3("git", ["rev-parse", "--verify", "--quiet", ref], {
+    cwd,
+    encoding: "utf8"
+  });
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+function resolveBaseRef(cwd) {
+  const symref = spawnSync3("git", ["symbolic-ref", "-q", "refs/remotes/origin/HEAD"], {
+    cwd,
+    encoding: "utf8"
+  });
+  if (symref.status === 0) {
+    const sha = tryRev(cwd, symref.stdout.trim());
+    if (sha)
+      return { sha, source: "origin/HEAD" };
+  }
+  for (const [ref, source] of [
+    ["refs/remotes/origin/main", "origin/main"],
+    ["refs/remotes/origin/master", "origin/master"]
+  ]) {
+    const sha = tryRev(cwd, ref);
+    if (sha)
+      return { sha, source };
+  }
+  return { sha: git(cwd, "rev-parse", "HEAD"), source: "HEAD" };
+}
+var gitCommonDir = (cwd) => {
+  const dir = git(cwd, "rev-parse", "--git-common-dir");
+  return join3(cwd, dir);
+};
+var EXCLUDE_LINE = ".sddx-worktrees/";
+function ensureExcluded(cwd) {
+  const infoDir = join3(gitCommonDir(cwd), "info");
+  mkdirSync3(infoDir, { recursive: true });
+  const exclude = join3(infoDir, "exclude");
+  const current = existsSync3(exclude) ? readFileSync3(exclude, "utf8") : "";
+  if (current.split(`
+`).includes(EXCLUDE_LINE))
+    return;
+  const sep = current === "" || current.endsWith(`
+`) ? "" : `
+`;
+  appendFileSync(exclude, `${sep}${EXCLUDE_LINE}
+`);
+}
+function worktreeAvailable(cwd) {
+  const r = spawnSync3("git", ["worktree", "list"], { cwd });
+  if (r.status !== 0)
+    return false;
+  const gitDir = git(cwd, "rev-parse", "--git-dir");
+  const common = git(cwd, "rev-parse", "--git-common-dir");
+  return gitDir === common;
+}
+function createWorktree(cwd, id, baseSha) {
+  ensureExcluded(cwd);
+  mkdirSync3(worktreesDir(cwd), { recursive: true });
+  const path = join3(worktreesDir(cwd), id);
+  git(cwd, "worktree", "add", "-q", path, "-b", `sddx/${id}`, baseSha);
+  return path;
+}
+var isDirty = (worktreePath) => git(worktreePath, "status", "--porcelain") !== "";
+function removeWorktree(cwd, path) {
+  git(cwd, "worktree", "remove", path);
+  git(cwd, "worktree", "prune");
+}
+function listSddxWorktrees(cwd) {
+  const dir = worktreesDir(cwd);
+  if (!existsSync3(dir))
+    return [];
+  const realPrefix = `${realpathSync(dir)}/`;
+  const prefix = `${dir}/`;
+  const out = git(cwd, "worktree", "list", "--porcelain");
+  const entries = [];
+  let current = {};
+  for (const line of `${out}
+`.split(`
+`)) {
+    if (line.startsWith("worktree ")) {
+      current = { path: line.slice("worktree ".length), branch: null, head: null };
+    } else if (line.startsWith("HEAD ")) {
+      current.head = line.slice("HEAD ".length);
+    } else if (line.startsWith("branch ")) {
+      current.branch = line.slice("branch ".length).replace(/^refs\/heads\//, "");
+    } else if (line === "" && current.path) {
+      if (current.path.startsWith(realPrefix)) {
+        current.path = prefix + current.path.slice(realPrefix.length);
+        entries.push(current);
+      }
+      current = {};
+    }
+  }
+  return entries;
+}
+function hasSubmodules(cwd, baseSha) {
+  const r = spawnSync3("git", ["cat-file", "-e", `${baseSha}:.gitmodules`], { cwd });
+  return r.status === 0;
+}
+var LOCK_STALE_MS = 10 * 60000;
+function acquireLock(lockPath, now) {
+  try {
+    mkdirSync3(lockPath);
+    return true;
+  } catch {
+    let age = 0;
+    try {
+      age = now - statSync(lockPath).mtimeMs;
+    } catch {
+      try {
+        mkdirSync3(lockPath);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    if (age <= LOCK_STALE_MS)
+      return false;
+    try {
+      rmdirSync(lockPath);
+      mkdirSync3(lockPath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+function readWorktreeTask(worktreePath, id) {
+  const path = join3(worktreePath, ".sddx", "tasks", `${id}.json`);
+  try {
+    return JSON.parse(readFileSync3(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+var DISPOSABLE = new Set(["DONE", "ABANDONED"]);
+function sweep(cwd, opts = {}) {
+  const now = opts.now ?? Date.now();
+  const lockPath = join3(gitCommonDir(cwd), "sddx-sweep.lock");
+  if (!acquireLock(lockPath, now)) {
+    return { removed: [], skipped: [], locked: true };
+  }
+  const removed = [];
+  const skipped = [];
+  try {
+    for (const wt of listSddxWorktrees(cwd)) {
+      const id = wt.branch?.replace(/^sddx\//, "");
+      if (!id) {
+        skipped.push({ path: wt.path, reason: "no sddx branch" });
+        continue;
+      }
+      const task = readWorktreeTask(wt.path, id);
+      if (!task) {
+        skipped.push({ path: wt.path, reason: "no readable task state" });
+        continue;
+      }
+      if (!DISPOSABLE.has(task.phase)) {
+        skipped.push({ path: wt.path, reason: `phase ${task.phase}` });
+        continue;
+      }
+      if (isDirty(wt.path)) {
+        skipped.push({ path: wt.path, reason: "dirty" });
+        continue;
+      }
+      if (task.phase === "DONE" && !existsSync3(join3(wt.path, ".sddx", "receipts", `${id}.json`))) {
+        skipped.push({ path: wt.path, reason: "DONE without receipt" });
+        continue;
+      }
+      try {
+        removeWorktree(cwd, wt.path);
+        removed.push(wt.path);
+      } catch (e) {
+        skipped.push({ path: wt.path, reason: `remove failed: ${e.message}` });
+      }
+    }
+  } finally {
+    try {
+      rmdirSync(lockPath);
+    } catch {}
+  }
+  return { removed, skipped, locked: false };
+}
+
 // src/cli.ts
 var USAGE = `usage:
-  sddx task create --spec <path> [--no-branch]
+  sddx task create --spec <path> [--workspace auto|worktree|branch|none] [--no-branch]
   sddx task phase <id> <PHASE> [--test-exit <n>]
   sddx task show <id>
   sddx verify <id> [--model <m>] [--harness <h>]
-  sddx cleanup <id>`;
+  sddx cleanup <id>
+  sddx sweep`;
 function fail(message, code = 1) {
   console.error(message);
   process.exit(code);
@@ -7301,18 +7498,36 @@ function flag(args, name) {
 function pluginVersion() {
   try {
     const manifest = new URL("../.claude-plugin/plugin.json", import.meta.url);
-    return JSON.parse(readFileSync3(manifest, "utf8")).version;
+    return JSON.parse(readFileSync4(manifest, "utf8")).version;
   } catch {
     return "unknown";
   }
+}
+var WORKSPACE_MODES = ["auto", "worktree", "branch", "none"];
+function pickWorkspace(cwd, requested) {
+  if (requested !== "auto")
+    return requested;
+  if (!worktreeAvailable(cwd)) {
+    console.log("git worktree unavailable → branch mode");
+    return "branch";
+  }
+  const base = resolveBaseRef(cwd);
+  if (hasSubmodules(cwd, base.sha)) {
+    console.log("submodules detected → branch mode");
+    return "branch";
+  }
+  return "worktree";
 }
 function cmdTaskCreate(cwd, args) {
   const specArg = flag(args, "--spec");
   if (!specArg)
     fail(USAGE, 2);
+  const requested = flag(args, "--workspace") ?? (args.includes("--no-branch") ? "none" : "auto");
+  if (!WORKSPACE_MODES.includes(requested))
+    fail(USAGE, 2);
   let yamlText;
   try {
-    yamlText = readFileSync3(join3(cwd, specArg), "utf8");
+    yamlText = readFileSync4(join4(cwd, specArg), "utf8");
   } catch {
     fail(`cannot read spec file: ${specArg}`);
   }
@@ -7323,15 +7538,34 @@ function cmdTaskCreate(cwd, args) {
     process.exit(1);
   }
   const id = taskId(spec.task);
-  const useBranch = !args.includes("--no-branch");
+  const mode = pickWorkspace(cwd, requested);
+  if (mode === "worktree") {
+    const base2 = resolveBaseRef(cwd);
+    if (base2.source === "HEAD")
+      console.log("no origin remote — forking from local HEAD");
+    const wtPath = createWorktree(cwd, id, base2.sha);
+    const relPath = join4(".sddx-worktrees", id);
+    mkdirSync4(join4(sddxDir(wtPath), "specs"), { recursive: true });
+    const specPath2 = join4(".sddx", "specs", `${id}.yaml`);
+    copyFileSync(join4(cwd, specArg), join4(wtPath, specPath2));
+    createTask(wtPath, spec, specPath2, {
+      mode: "worktree",
+      branch: `sddx/${id}`,
+      base_sha: base2.sha,
+      path: relPath
+    });
+    console.log(`created ${id} phase=PLAN worktree=${relPath} branch=sddx/${id} base=${base2.sha}`);
+    return;
+  }
+  const useBranch = mode === "branch";
   const base = headSha(cwd);
   if (useBranch)
     createBranch(cwd, `sddx/${id}`);
-  mkdirSync3(join3(sddxDir(cwd), "specs"), { recursive: true });
-  const specPath = join3(".sddx", "specs", `${id}.yaml`);
-  copyFileSync(join3(cwd, specArg), join3(cwd, specPath));
+  mkdirSync4(join4(sddxDir(cwd), "specs"), { recursive: true });
+  const specPath = join4(".sddx", "specs", `${id}.yaml`);
+  copyFileSync(join4(cwd, specArg), join4(cwd, specPath));
   createTask(cwd, spec, specPath, {
-    mode: useBranch ? "branch" : "none",
+    mode,
     branch: useBranch ? `sddx/${id}` : null,
     base_sha: base
   });
@@ -7369,6 +7603,14 @@ function cmdCleanup(cwd, args) {
   if (!id)
     fail(USAGE, 2);
   const branch = `sddx/${id}`;
+  const wtPath = join4(worktreesDir(cwd), id);
+  if (existsSync4(wtPath)) {
+    if (isDirty(wtPath)) {
+      fail(`refusing: worktree ${join4(".sddx-worktrees", id)} has uncommitted changes`);
+    }
+    removeWorktree(cwd, wtPath);
+    console.log(`removed worktree ${join4(".sddx-worktrees", id)}`);
+  }
   if (!branchExists(cwd, branch)) {
     console.log(`no branch ${branch} — nothing to clean up`);
     return;
@@ -7381,6 +7623,18 @@ function cmdCleanup(cwd, args) {
   }
   deleteBranch(cwd, branch);
   console.log(`deleted merged branch ${branch}`);
+}
+function cmdSweep(cwd) {
+  const res = sweep(cwd);
+  if (res.locked) {
+    console.log("sweep: another sweep holds the lock — skipped");
+    return;
+  }
+  for (const path of res.removed)
+    console.log(`swept ${path}`);
+  for (const s of res.skipped)
+    console.log(`skipped ${s.path} (${s.reason})`);
+  console.log(`sweep: ${res.removed.length} removed, ${res.skipped.length} skipped`);
 }
 function main(argv) {
   const cwd = process.cwd();
@@ -7406,6 +7660,10 @@ function main(argv) {
     }
     if (cmd === "cleanup") {
       cmdCleanup(cwd, rest);
+      return;
+    }
+    if (cmd === "sweep") {
+      cmdSweep(cwd);
       return;
     }
     fail(USAGE, 2);

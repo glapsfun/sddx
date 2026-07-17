@@ -1,5 +1,14 @@
 # sddx
 
+## CLI at a glance
+
+`sddx task create --spec <file> [--workspace auto|worktree|branch|none]` registers
+a task; `auto` (default) runs it in an isolated worktree under `.sddx-worktrees/`
+forked from `origin/HEAD`, downgrading to a `sddx/<id>` branch when submodules
+make worktrees unsafe. `sddx sweep` removes leftover worktrees whose tasks are
+verified DONE (lock-guarded; never touches dirty trees). `sddx cleanup <id>`
+tears down a single task's worktree and merged branch.
+
 ## Development
 
 Prerequisites: [Bun](https://bun.sh) (version pinned in `.bun-version`) and

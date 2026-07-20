@@ -4,13 +4,16 @@
 // receipt, which no child hash references yet). Signature verification is
 // opt-in and consumes only git exit codes.
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { receiptsDir, verifyChain } from "./lib/receipt";
+import { receiptsDir, sha256, verifyChain } from "./lib/receipt";
+import { verifySignature } from "./lib/sign";
 
 export interface AuditResult {
   receipts: number;
   findings: string[];
+  /** Informational (never findings): unsigned or unverifiable receipts. */
+  notes: string[];
 }
 
 function gitLines(cwd: string, ...args: string[]): { ok: boolean; lines: string[]; err: string } {
@@ -19,8 +22,12 @@ function gitLines(cwd: string, ...args: string[]): { ok: boolean; lines: string[
   return { ok: true, lines: (r.stdout ?? "").split("\n").filter(Boolean), err: "" };
 }
 
-export function auditReceipts(cwd: string, opts: { signatures?: boolean } = {}): AuditResult {
+export function auditReceipts(
+  cwd: string,
+  opts: { signatures?: boolean; ci?: boolean } = {},
+): AuditResult {
   const findings = verifyChain(cwd).map((f) => `chain: ${f}`);
+  const notes: string[] = [];
   const dir = receiptsDir(cwd);
   const files = existsSync(dir)
     ? readdirSync(dir)
@@ -41,6 +48,39 @@ export function auditReceipts(cwd: string, opts: { signatures?: boolean } = {}):
 
   for (const file of files) {
     const rel = join(".sddx", "receipts", file);
+    // signature verification runs before the commit-binding checks below — their
+    // `continue`s must not hide an invalid signature on an unbound receipt
+    let raw: string | null = null;
+    try {
+      raw = readFileSync(join(cwd, rel), "utf8");
+    } catch {
+      // chain verification already reports unreadable receipts
+    }
+    if (raw !== null && raw.includes('"signature"')) {
+      let parsed: Record<string, unknown> | null = null;
+      try {
+        parsed = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        // chain verification already reports unparseable receipts
+      }
+      if (parsed && typeof parsed.signature === "string" && typeof parsed.signer === "string") {
+        const { signature, signer, ...unsigned } = parsed; // rest spread keeps key order
+        const payload = sha256(`${JSON.stringify(unsigned, null, 2)}\n`);
+        // destructured bindings are `unknown` under Record<string, unknown> — the
+        // typeof guard above makes these casts safe
+        const verdict = verifySignature(cwd, payload, {
+          signature: signature as string,
+          signer: signer as string,
+        });
+        if (verdict === "invalid") findings.push(`${rel}: embedded receipt signature is invalid`);
+        if (verdict === "unverifiable")
+          notes.push(`${rel}: signed by ${signer} — set gpg.ssh.allowedSignersFile to verify`);
+      } else {
+        notes.push(`${rel}: unsigned`);
+      }
+    } else if (raw !== null) {
+      notes.push(`${rel}: unsigned`);
+    }
     const log = gitLines(cwd, "log", "--format=%H", "--", rel);
     if (!log.ok) {
       findings.push(`${rel}: commit binding failed: ${log.err}`);
@@ -62,5 +102,24 @@ export function auditReceipts(cwd: string, opts: { signatures?: boolean } = {}):
       }
     }
   }
-  return { receipts: files.length, findings };
+  if (opts.ci) {
+    const tasksDir = join(cwd, ".sddx", "tasks");
+    if (existsSync(tasksDir)) {
+      for (const f of readdirSync(tasksDir).filter((x) => x.endsWith(".json"))) {
+        const rel = join(".sddx", "tasks", f);
+        try {
+          const t = JSON.parse(readFileSync(join(tasksDir, f), "utf8")) as {
+            id?: string;
+            phase?: string;
+          };
+          if (t.phase === "DONE" && !existsSync(join(dir, `${t.id}.json`))) {
+            findings.push(`${rel}: task is DONE without a receipt — completion unproven`);
+          }
+        } catch {
+          findings.push(`${rel}: unreadable task file`);
+        }
+      }
+    }
+  }
+  return { receipts: files.length, findings, notes };
 }

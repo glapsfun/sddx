@@ -31,9 +31,17 @@ observed test exit codes — never claimed by the model.** See
 tasks. The orchestrator splits the goal into independent tasks with disjoint
 file scopes; a planner writes each spec (no oracle, no goal); each task gets
 its own worktree forked from `origin/HEAD`; tdd-executor agents run all tasks
-in parallel; a verifier concludes each one with a receipt. You get a one-line
-report per task, and merging the resulting `sddx/<id>` branches back is always
-your decision — the agents never merge unasked.
+in parallel; a verifier concludes each one with a receipt. The run also
+registers a **goal** (`.sddx/goals/<goal-id>.json`) tying the tasks together.
+You get a one-line report per task plus the goal id, and merging the
+resulting `sddx/<id>` branches back — or opening a PR for the whole goal — is
+always your decision; the agents never do either unasked.
+
+**`/sddx:pr`** — once every task in a goal is DONE, ships it as **one PR for
+the whole goal**: cherry-picks each task's atomic commit onto a fresh branch
+(never a merge commit), pushes it, and opens the PR via `gh` or `glab` with a
+body generated from the tasks' receipts. See [cli.md](cli.md#sddx-pr-create)
+for the full gate and refusal behavior.
 
 **`/sddx:quick`** — one task through the same loop, on a `sddx/<id>` branch,
 with evidence-gated phase transitions (`task phase <id> RED --test-exit <n>`
@@ -107,7 +115,10 @@ Cleanup:
   Lock-guarded and conservative: it never touches a worktree with uncommitted
   changes (those get flagged on the board instead).
 - `sddx cleanup <id>` — tears down one task's worktree and its branch, and
-  only if the branch is merged.
+  only if the branch is merged into HEAD or carries a `shipped` marker from
+  `sddx pr create` (a cherry-picked commit never looks merged by ancestry
+  even after its goal PR lands, so the marker is the second, equally valid
+  proof).
 
 ## The board
 

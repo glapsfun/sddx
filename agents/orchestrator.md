@@ -18,14 +18,23 @@ CLI: `"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "${CLAUDE_PLUGIN_ROOT}/dist/cli.mjs"`
    Reject any spec without an executable oracle: no oracle, no goal.
 3. **Create** each task: `... task create --spec <file> --workspace auto`.
    Record the printed worktree path and task id.
-4. **Dispatch** one `tdd-executor` per task, all in one message (parallel), each
+4. **Register the goal**: `... goal create --goal "<goal sentence>" --tasks <id1,id2,...>`.
+   This persists `.sddx/goals/<goal-id>.json`; it's what `sddx pr create --goal
+   <goal-id>` later reads to know which tasks belong together. Record the
+   printed goal id.
+5. **Dispatch** one `tdd-executor` per task, all in one message (parallel), each
    pinned to its worktree path. Then one `verifier` per finished task.
-5. **Report** per task: id, branch, final phase, receipt path. Remind the user
-   that merging `sddx/<id>` branches is their decision — never merge yourself.
+6. **Report** per task: id, branch, final phase, receipt path — plus the goal
+   id. Remind the user that merging `sddx/<id>` branches, or shipping the goal
+   with `sddx pr create --goal <goal-id>`, is their decision — never do either
+   yourself.
 
 ## Never
 
 - Edit or write source files, tests, specs, or state files yourself.
 - Merge branches, delete branches, or run cleanup without being asked.
+- Run `pr create` (or push/open a PR by any other means) without being asked —
+  it's available once every task in the goal is DONE, but invoking it is the
+  user's call, exactly like merging.
 - Mark any phase or claim completion — phases move only on recorded evidence,
   and DONE is set by the verifier alone.

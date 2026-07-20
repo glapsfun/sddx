@@ -1,10 +1,10 @@
 // The TDD gate: pure decision logic for the PreToolUse hook on Edit/Write-family
 // tools. Hard-block, no soft mode — in RED, implementation paths are denied until
 // a failing test has been observed. The entrypoint I/O lives in src/hooks.ts.
-import { existsSync, readFileSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 import { BUILTIN_TEST_GLOBS, type ClassifyConfig, classify } from "./lib/classify";
-import { resolveTask } from "./lib/resolve";
+import { readConfig } from "./lib/config";
+import { resolutionFailureReason, resolveTask } from "./lib/resolve";
 import type { TaskState } from "./lib/task";
 
 export type GateDecision = { allow: true; diagnostic?: string } | { allow: false; reason: string };
@@ -18,15 +18,7 @@ export interface GateInput {
 
 /** userConfig globs: env wins, then the workspace's .sddx/config.json. */
 export function loadGateConfig(root: string, env = process.env): ClassifyConfig {
-  let fileConfig: { test_globs?: string; exempt_globs?: string } = {};
-  const path = join(root, ".sddx", "config.json");
-  if (existsSync(path)) {
-    try {
-      fileConfig = JSON.parse(readFileSync(path, "utf8"));
-    } catch {
-      // unreadable config never disables the gate — built-ins still apply
-    }
-  }
+  const fileConfig = readConfig(root);
   return {
     testGlobs: env.SDDX_TEST_GLOBS ?? fileConfig.test_globs,
     exemptGlobs: env.SDDX_EXEMPT_GLOBS ?? fileConfig.exempt_globs,
@@ -56,20 +48,9 @@ export function tddGate(input: GateInput, env = process.env): GateDecision {
 
   const res = resolveTask(anchor);
   if (res.kind === "none") return { allow: true };
-  if (res.kind === "ambiguous") {
-    return {
-      allow: false,
-      reason:
-        `sddx TDD gate: ambiguous governing task — ${res.ids.join(" and ")} are both active in this workspace. ` +
-        "The gate refuses to guess. Abandon or finish one, or work in each task's own worktree.",
-    };
-  }
-  if (res.kind === "corrupt") {
-    return {
-      allow: false,
-      reason: `sddx TDD gate: task state at ${res.path} is unreadable (${res.error}). Fix or remove it before writing — a broken state file must not silently disable the gate.`,
-    };
-  }
+  const failure = resolutionFailureReason(res, "writing");
+  if (failure) return { allow: false, reason: failure };
+  if (res.kind !== "task") return { allow: true };
 
   // Pre-GREEN phases: PLAN (no failing test yet) and RED both block implementation
   // writes — "implementation-first" is exactly a write attempted before GREEN evidence.

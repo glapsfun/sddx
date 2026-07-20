@@ -11,9 +11,13 @@ usage:
   sddx task phase <id> <PHASE> [--test-exit <n>]
   sddx task allow <id> <path>
   sddx task show <id>
+  sddx red-check <id>
   sddx verify <id> [--model <m>] [--harness <h>]
+  sddx goal create --goal <sentence> --tasks <id1,id2,...>
+  sddx goal show <id>
+  sddx pr create --goal <goal-id> [--title <title>]
   sddx board
-  sddx audit [--signatures]
+  sddx audit [--signatures] [--ci]
   sddx cleanup <id>
   sddx sweep
 ```
@@ -79,6 +83,17 @@ sddx task show <id>
 Prints the task state file as JSON — phase, workspace, base SHA, allow list,
 iteration count, timestamps.
 
+## sddx red-check
+
+```sh
+sddx red-check <id>
+```
+
+Runs the task's oracle during RED and records its failure
+(`evidence.oracle_red`). Exits 1 if the oracle passes — a pre-passing oracle
+proves nothing and the spec must be fixed. `sddx verify` refuses tasks whose
+`oracle_red` is missing or dated after the first GREEN.
+
 ## sddx verify
 
 ```sh
@@ -106,13 +121,68 @@ board — regenerate it.
 ## sddx audit
 
 ```sh
-sddx audit [--signatures]
+sddx audit [--signatures] [--ci]
 ```
 
 Re-walks and re-hashes the receipt chain and checks commit bindings;
-`--signatures` additionally verifies task-commit signatures. Prints one line
-per finding to stderr and exits 1 on any finding — CI-friendly. Clean run:
+`--signatures` additionally verifies task-commit signatures. `--ci` also
+fails when a task marked `DONE` has no receipt (tamper-only CI gate — see
+[receipts-and-audit.md](receipts-and-audit.md)). Prints one line per finding
+to stderr and exits 1 on any finding — CI-friendly. Clean run:
 `audit: <n> receipt(s) verified, chain intact`.
+
+## sddx goal create
+
+```sh
+sddx goal create --goal <sentence> --tasks <id1,id2,...>
+```
+
+Persists `.sddx/goals/<goal-id>.json` listing the given task ids — the record
+`sddx pr create --goal <goal-id>` later reads to know which tasks ship
+together. Refuses if any listed task id doesn't exist, or if the derived goal
+id already exists. `/sddx:run` calls this automatically after creating a
+run's tasks; invoke it directly only when assembling a goal from tasks
+created outside `/sddx:run`. Prints `created goal <id> tasks=[...]`.
+
+## sddx goal show
+
+```sh
+sddx goal show <id>
+```
+
+Prints the goal state file as JSON — task ids, timestamps, and the `shipped`
+marker once a PR has been opened for it.
+
+## sddx pr create
+
+```sh
+sddx pr create --goal <goal-id> [--title <title>]
+```
+
+Opens **one PR per goal**: refuses unless every task in the goal is `DONE`
+with a passing receipt (all-or-nothing, re-checked fresh at invocation time —
+see [receipts-and-audit.md](receipts-and-audit.md)), then cherry-picks each
+task's atomic commit onto a fresh `sddx/goal-<goal-id>` branch (task-creation
+order), pushes it, and opens the PR via `gh` or `glab` — resolved from
+`userConfig.pr_host` or detected from the `origin` remote. The PR body is
+generated from the tasks' receipts, never hand-written. On success, writes a
+`shipped` marker onto every task's branch and the goal file, which is what
+lets `sddx cleanup` later remove a cherry-picked task branch despite it never
+looking git-merged by ancestry.
+
+Refuses loudly, before any git mutation, on: an incomplete goal (names the
+blocking tasks and why), an unauthenticated or undetectable host CLI, or a
+cherry-pick conflict (names the task whose commit failed; no partial branch
+is left pushed). Prints `pr=<url> branch=<branch> tasks=[...]` on success.
+
+This is a deliberately separate, explicitly-invoked command — `/sddx:run`
+never calls it automatically, the same way it never merges branches
+automatically. See [/sddx:pr](../skills/pr/SKILL.md).
+
+On GitLab this opens a **merge request** (`glab mr create`) — sddx calls the
+command and output `pr` uniformly across both hosts since the mechanics
+(one branch, cherry-picked commits, receipt-derived body) are identical;
+only the underlying host object's name differs.
 
 ## sddx cleanup
 
@@ -122,8 +192,8 @@ sddx cleanup <id>
 
 Tears down one task's workspace: removes `.sddx-worktrees/<id>` (refuses if it
 has uncommitted changes) and deletes branch `sddx/<id>` (refuses if it is
-checked out or not merged into HEAD). Each refusal prints
-`refusing: …` and exits 1.
+checked out, or is neither merged into HEAD nor marked `shipped` by a prior
+`sddx pr create`). Each refusal prints `refusing: …` and exits 1.
 
 ## sddx sweep
 

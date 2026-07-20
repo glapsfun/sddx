@@ -34,8 +34,30 @@ export const deleteBranch = (cwd: string, name: string): void => {
   git(cwd, "branch", "-d", name);
 };
 
+/** For branches proven safe by a non-ancestry marker (e.g. a cherry-picked
+ * `shipped` task) rather than by git's own merge check. */
+export const forceDeleteBranch = (cwd: string, name: string): void => {
+  git(cwd, "branch", "-D", name);
+};
+
+/** null when the remote doesn't exist — never throws, so host detection can fall through. */
+export function remoteUrl(cwd: string, remote: string): string | null {
+  const r = spawnSync("git", ["remote", "get-url", remote], { cwd, encoding: "utf8" });
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+
+export const push = (cwd: string, branch: string): void => {
+  git(cwd, "push", "-u", "origin", branch);
+};
+
 export const stageAll = (cwd: string): void => {
   git(cwd, "add", "-A");
+};
+
+/** Stages exactly one path — unlike `stageAll`, safe to call in a shared
+ * checkout that may have unrelated in-progress edits sitting alongside it. */
+export const stagePath = (cwd: string, path: string): void => {
+  git(cwd, "add", "--", path);
 };
 
 export const writeTree = (cwd: string): string => git(cwd, "write-tree");

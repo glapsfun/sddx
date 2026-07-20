@@ -58,9 +58,13 @@ above) make that cross-check meaningful; vague ones make it noise.
 The mandatory proof. **A spec without an oracle is rejected at registration —
 no oracle, no goal** (`oracle: required — no oracle, no goal`).
 
-Fields: `type`, `run`, `expect`. `expect` defaults to `exit 0` when omitted.
-`run` is required for every type except `manual`
+Fields: `type`, `run`, `expect`, `runs`. `expect` defaults to `exit 0` when
+omitted. `run` is required for every type except `manual`
 (`oracle.run: command required for non-manual oracles`).
+
+- `runs` (optional, integer ≥ 1, default 1): verify executes the oracle this
+  many times sequentially; **every** run must exit as expected. Repo default:
+  userConfig `oracle_runs_default`. Receipt v3 records each run.
 
 Four types (`oracle.type: must be one of command | test-suite | browser |
 manual` otherwise):

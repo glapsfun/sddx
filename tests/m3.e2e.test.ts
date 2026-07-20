@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Receipt } from "../src/lib/receipt";
 import { fixtureClone, fixtureRepo } from "./fixtures";
-import { repoRoot } from "./helpers";
+import { fakeRedCheck, repoRoot } from "./helpers";
 
 const HOOKS = join(repoRoot, "dist", "hooks.mjs");
 const CLI = join(repoRoot, "src", "cli.ts");
@@ -168,6 +168,7 @@ describe("test-first path passes (5.3)", () => {
     writeFileSync(join(repo, "src", "api.ts"), "export const ok = true;\n");
 
     // verifier executes the oracle and writes the receipt
+    fakeRedCheck(repo, id);
     expect(sddx(repo, "task", "phase", id, "VERIFY").status).toBe(0);
     const v = sddx(repo, "verify", id);
     expect(v.status).toBe(0);
@@ -175,7 +176,7 @@ describe("test-first path passes (5.3)", () => {
     const receipt = JSON.parse(
       readFileSync(join(repo, ".sddx", "receipts", `${id}.json`), "utf8"),
     ) as Receipt;
-    expect(receipt.version).toBe(2);
+    expect(receipt.version).toBe(3);
     expect(receipt.allow).toEqual([]);
 
     // task file shows hook-sourced evidence for both transitions
@@ -200,6 +201,7 @@ describe("allow exemption is audited (5.4)", () => {
 
     runHook("record-test", bashEvent(repo, "bun test", 1));
     runHook("record-test", bashEvent(repo, "bun test", 0));
+    fakeRedCheck(repo, id);
     expect(sddx(repo, "task", "phase", id, "VERIFY").status).toBe(0);
     expect(sddx(repo, "verify", id).status).toBe(0);
 
@@ -223,6 +225,7 @@ describe("stop gate (5.5)", () => {
     res = runHook("stop-gate", { hook_event_name: "Stop", cwd: repo, stop_hook_active: true });
     expect(res.output.decision).toBeUndefined();
 
+    fakeRedCheck(repo, id);
     expect(sddx(repo, "task", "phase", id, "VERIFY").status).toBe(0);
     expect(sddx(repo, "verify", id).status).toBe(0);
     res = runHook("stop-gate", { hook_event_name: "Stop", cwd: repo });

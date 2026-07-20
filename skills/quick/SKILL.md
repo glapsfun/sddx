@@ -17,10 +17,13 @@ Then loop, recording every phase in the task file:
    Run the test runner and capture its exit code, then:
    `... task phase <id> RED --test-exit <code>`
    (rejected unless the code is nonzero — a passing test is not RED).
-2. **GREEN** — write the minimal implementation. Re-run the tests; when they
+2. **Red-check** — `... red-check <id>` runs the spec's oracle and must see it
+   fail. Exit 0 means the oracle cannot discriminate — fix the spec before any
+   implementation; verify refuses a task without this record.
+3. **GREEN** — write the minimal implementation. Re-run the tests; when they
    pass: `... task phase <id> GREEN --test-exit 0`.
-3. **REFACTOR** (optional) — clean up; tests must stay green.
-4. `... task phase <id> VERIFY`, then follow /sddx:verify.
+4. **REFACTOR** (optional) — clean up; tests must stay green.
+5. `... task phase <id> VERIFY`, then follow /sddx:verify.
 
 Rules:
 - Phase transitions demand evidence (test exit codes); never claim a phase.

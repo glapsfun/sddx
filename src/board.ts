@@ -4,6 +4,7 @@
 // dirties the working tree.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { stuckThreshold } from "./lib/config";
 import type { Receipt } from "./lib/receipt";
 import type { TaskState } from "./lib/task";
 import { worktreesDir } from "./lib/worktree";
@@ -32,7 +33,12 @@ function receiptRef(dir: string, id: string): string {
   }
 }
 
-function taskRow(taskPath: string, id: string, receiptsDirs: string[]): BoardRow {
+function taskRow(
+  taskPath: string,
+  id: string,
+  receiptsDirs: string[],
+  threshold: number,
+): BoardRow {
   let t: TaskState;
   try {
     t = JSON.parse(readFileSync(taskPath, "utf8")) as TaskState;
@@ -54,7 +60,7 @@ function taskRow(taskPath: string, id: string, receiptsDirs: string[]): BoardRow
   }
   return {
     id: t.id,
-    phase: t.phase,
+    phase: t.stuck && t.stuck.count >= threshold ? `${t.phase} ⚠stuck` : t.phase,
     sentence: t.task,
     workspace: t.workspace.mode,
     iterations: String(t.iterations),
@@ -102,9 +108,10 @@ const jsonIds = (dir: string): string[] =>
 export function renderBoard(cwd: string): string {
   const rows = new Map<string, BoardRow>();
   const mainReceipts = join(cwd, ".sddx", "receipts");
+  const threshold = stuckThreshold(cwd);
 
   for (const id of jsonIds(join(cwd, ".sddx", "tasks"))) {
-    rows.set(id, taskRow(join(cwd, ".sddx", "tasks", `${id}.json`), id, [mainReceipts]));
+    rows.set(id, taskRow(join(cwd, ".sddx", "tasks", `${id}.json`), id, [mainReceipts], threshold));
   }
   // worktree copies are the live ones — they win over a same-id workspace row
   const wtDir = worktreesDir(cwd);
@@ -112,7 +119,17 @@ export function renderBoard(cwd: string): string {
     for (const id of readdirSync(wtDir).sort()) {
       const taskPath = join(wtDir, id, ".sddx", "tasks", `${id}.json`);
       if (!existsSync(taskPath)) continue;
-      rows.set(id, taskRow(taskPath, id, [join(wtDir, id, ".sddx", "receipts"), mainReceipts]));
+      // worktrees carry their own .sddx/config.json — judge stuck by the same
+      // threshold the gates inside that worktree use
+      rows.set(
+        id,
+        taskRow(
+          taskPath,
+          id,
+          [join(wtDir, id, ".sddx", "receipts"), mainReceipts],
+          stuckThreshold(join(wtDir, id)),
+        ),
+      );
     }
   }
 

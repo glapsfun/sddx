@@ -55,6 +55,20 @@ function readTaskFile(root: string, id: string): Resolution | null {
   }
 }
 
+/** Shared gate wording for resolutions the gates refuse to act on; null when resolvable. */
+export function resolutionFailureReason(res: Resolution, action: string): string | null {
+  if (res.kind === "ambiguous") {
+    return (
+      `sddx TDD gate: ambiguous governing task — ${res.ids.join(" and ")} are both active in this workspace. ` +
+      "The gate refuses to guess. Abandon or finish one, or work in each task's own worktree."
+    );
+  }
+  if (res.kind === "corrupt") {
+    return `sddx TDD gate: task state at ${res.path} is unreadable (${res.error}). Fix or remove it before ${action} — a broken state file must not silently disable the gate.`;
+  }
+  return null;
+}
+
 export function resolveTask(startPath: string): Resolution {
   const root = workspaceRoot(startPath);
   if (!root || !existsSync(join(root, ".sddx"))) return { kind: "none" };

@@ -7,12 +7,13 @@ each hook does, how the gate decides, and the one escape hatch.
 All hooks run one dependency-free bundle (`dist/hooks.mjs`) through the
 bun-or-node launcher, with a 10-second timeout.
 
-## The five hooks
+## The hooks
 
 | Event          | Matcher                              | Mode           | Job                                                                                       |
 | -------------- | ------------------------------------ | -------------- | ----------------------------------------------------------------------------------------- |
 | `SessionStart` | —                                    | `session-start` | Bootstrap: orphan-worktree sweep, board refresh, active tasks surfaced as session context |
 | `PreToolUse`   | `Edit\|Write\|MultiEdit\|NotebookEdit` | `tdd-gate`     | **TDD gate** — before GREEN (phases PLAN/RED), writes to implementation paths are denied  |
+| `PreToolUse`   | `Bash`                               | `bash-gate`    | **Bash gate** — pre-GREEN, only allow-listed test/read commands run (see below)           |
 | `PostToolUse`  | `Bash`                               | `record-test`  | Test-result recorder: observed test-runner exit codes drive PLAN→RED→GREEN                |
 | `Stop`         | —                                    | `stop-gate`    | Refuses to conclude a session whose task lacks a verified receipt                         |
 | `SubagentStop` | —                                    | `stop-gate`    | Same refusal for subagents                                                                |
@@ -64,6 +65,30 @@ Both lists extend via the plugin settings `exempt_globs` and `test_globs`
 (space-separated; see [installation.md](installation.md)). Paths are
 normalized to forward slashes before matching, so the gate classifies
 identically on Windows.
+
+## RED-phase Bash gate
+
+`PreToolUse` on Bash: while the governing task is pre-GREEN (PLAN or RED),
+a command runs only if the first word of **every** segment (split on pipes,
+`&&`, `;`, and newlines) is on the allow-list — test runners and runtimes
+(`bun`, `npm`, `npx`, `pnpm`, `yarn`, `pytest`, `go`, `cargo`, `make`,
+`node`, `python`, `python3`), read tools (`ls`, `cat`, `grep`, `rg`, `find`,
+`head`, `tail`, `wc`), `git status|diff|log|show`, and the sddx CLI itself
+(`sddx-run`/`sddx` — recording phases must never be gated out). Blocked
+outright, with no target parsing: `>` redirection (fd duplication like `2>&1`
+is fine), command/process substitution (`$(…)`, backticks, `<(…)`), and
+eval/print flags (`-e`, `-c`, `-p`, …) on the runtimes. Extend (never
+replace) the list with userConfig `red_bash_allow`. This closes the classic
+`sed -i`/`tee` bypass around the Edit/Write gate.
+
+## Stuck-loop escalation
+
+The PostToolUse recorder fingerprints every failing test run (exit code +
+normalized output tail). Reaching `stuck_threshold` (default 3) consecutive
+identical failures marks the task `stuck`: the recorder tells the model to
+stop and escalate, the Stop gate permits concluding the session (escalation
+beats spinning), and `BOARD.md` shows `⚠stuck`. Any pass or a *different*
+failure resets the counter — progress is allowed, spinning is not.
 
 ## The allow escape hatch
 

@@ -8,6 +8,37 @@ All notable changes to sddx are documented here. The format follows
 
 ### Added
 
+- `sddx pr create --goal <goal-id>`: ships a completed `/sddx:run` goal as
+  **one PR per goal**, gated on every task being DONE with a passing receipt.
+  Builds the PR branch by cherry-picking each task's atomic commit (never a
+  merge commit), pushes it, and opens the PR via `gh` or `glab`
+  (auto-detected from the `origin` remote, or pinned with `userConfig.pr_host`)
+  with a body generated from the tasks' receipts.
+- `sddx goal create` / `sddx goal show`: persists `.sddx/goals/<goal-id>.json`
+  tying a set of task ids together; `/sddx:run` registers one automatically.
+- `/sddx:pr` skill for directly invoking `pr create`.
+- Task state gains an optional `shipped` field, written once by `pr create`;
+  `sddx cleanup` now accepts a `shipped` marker as proof-of-integration when
+  a cherry-picked branch fails git's ancestry-based merge check.
+
+## [0.2.0] - 2026-07-18
+
+Trust hardening: prove the oracle, close the gate holes, extend receipt
+trust beyond the local machine.
+
+### Added
+
+- Receipt v3: per-run `runs[]` records, `env` capture (runtime, OS, dirty
+  tree), optional SSH `signature`/`signer`. Audit accepts v1–v3.
+- `sddx red-check <id>`: the oracle must fail during RED; verify refuses
+  tasks without pre-GREEN failing-oracle evidence.
+- `oracle.runs: N` + userConfig `oracle_runs_default`: N-for-N oracle passes
+  (flakiness detection).
+- RED-phase Bash allow-list hook closes the `sed -i`/`tee`/redirection
+  bypass (userConfig `red_bash_allow` extends the list).
+- Stuck-loop detection: `stuck_threshold` identical failures → escalate
+  instead of iterating; shown on the board as `⚠stuck`.
+- `sddx audit --ci`: tamper-only CI gate with a zero-install workflow recipe.
 - Comprehensive documentation: `docs/` guides (installation, usage, spec
   reference, hooks, CLI, receipts and audit, architecture, troubleshooting),
   community files, README landing page with status badges, and an offline

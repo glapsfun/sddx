@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join, relative } from "node:path";
 import { createWorktree, resolveBaseRef, sweep } from "../src/lib/worktree";
 import { fixtureClone } from "./fixtures";
-import { repoRoot } from "./helpers";
+import { fakeRedCheck, repoRoot } from "./helpers";
 
 const CLI_SRC = join(repoRoot, "src/cli.ts");
 const SPEC = (n: number) =>
@@ -24,6 +24,7 @@ function doneTask(clone: string, n: number): { id: string; wt: string } {
   cli(wt, "task", "phase", id, "RED", "--test-exit", "1");
   cli(wt, "task", "phase", id, "GREEN", "--test-exit", "0");
   cli(wt, "task", "phase", id, "VERIFY");
+  fakeRedCheck(wt, id);
   cli(wt, "verify", id);
   return { id, wt };
 }

@@ -6,7 +6,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fixtureClone } from "./fixtures";
-import { repoRoot } from "./helpers";
+import { fakeRedCheck, repoRoot } from "./helpers";
 
 const HOOKS = join(repoRoot, "dist", "hooks.mjs");
 const CLI = join(repoRoot, "dist", "cli.mjs");
@@ -58,6 +58,7 @@ function completedTask(): { repo: string; id: string } {
     tool_response: { exit_code: 0 },
     cwd: repo,
   });
+  fakeRedCheck(repo, id);
   expect(sddx(repo, "task", "phase", id, "VERIFY").status).toBe(0);
   expect(sddx(repo, "verify", id).status).toBe(0);
   return { repo, id };
@@ -118,6 +119,7 @@ describe("M4 oracle", () => {
       tool_response: { exit_code: 0 },
       cwd: repo,
     });
+    fakeRedCheck(repo, id2);
     expect(sddx(repo, "task", "phase", id2, "VERIFY").status).toBe(0);
     expect(sddx(repo, "verify", id2).status).toBe(0);
 

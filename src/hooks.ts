@@ -7,6 +7,8 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeBoard } from "./board";
+import { bashGate } from "./lib/bashgate";
+import { readConfig } from "./lib/config";
 import { recordTestRun } from "./lib/recorder";
 import { stopGate } from "./lib/stopgate";
 import { isTerminal, type TaskState } from "./lib/task";
@@ -60,6 +62,21 @@ function cmdTddGate(event: HookEvent): void {
   });
 }
 
+function cmdBashGate(event: HookEvent): void {
+  const decision = bashGate({ command: event.tool_input?.command, cwd: event.cwd });
+  if (decision.allow) {
+    emit({});
+    return;
+  }
+  emit({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: decision.reason,
+    },
+  });
+}
+
 function exitCodeOf(response: HookEvent["tool_response"]): number | undefined {
   for (const key of ["exit_code", "exitCode", "code"]) {
     const v = response?.[key];
@@ -68,39 +85,54 @@ function exitCodeOf(response: HookEvent["tool_response"]): number | undefined {
   return undefined;
 }
 
+function outputOf(response: HookEvent["tool_response"]): string {
+  let out = "";
+  for (const key of ["stdout", "stderr", "output"]) {
+    const v = response?.[key];
+    if (typeof v === "string") out += v;
+  }
+  return out;
+}
+
 function cmdRecordTest(event: HookEvent): void {
   const command = event.tool_input?.command;
   if (typeof command !== "string") {
     emit({});
     return;
   }
-  const res = recordTestRun(event.cwd ?? process.cwd(), command, exitCodeOf(event.tool_response));
-  emit(
-    res.transitioned
-      ? { systemMessage: `sddx: task ${res.taskId} → ${res.transitioned} (observed test run)` }
-      : {},
+  const res = recordTestRun(
+    event.cwd ?? process.cwd(),
+    command,
+    exitCodeOf(event.tool_response),
+    outputOf(event.tool_response),
   );
+  const parts: string[] = [];
+  if (res.transitioned)
+    parts.push(`sddx: task ${res.taskId} → ${res.transitioned} (observed test run)`);
+  if (res.stuck)
+    parts.push(
+      `sddx: task ${res.taskId} has failed identically ${res.stuck.count}× (threshold ${res.stuck.threshold}) — stuck; stop and escalate to the human instead of iterating.`,
+    );
+  emit(parts.length > 0 ? { systemMessage: parts.join("\n") } : {});
 }
 
 function cmdStopGate(event: HookEvent): void {
   const decision = stopGate({ cwd: event.cwd, stop_hook_active: event.stop_hook_active });
-  emit(decision.block ? { decision: "block", reason: decision.reason } : {});
+  emit(
+    decision.block
+      ? { decision: "block", reason: decision.reason }
+      : decision.note
+        ? { systemMessage: decision.note }
+        : {},
+  );
 }
 
 function boardEnabled(cwd: string, env = process.env): boolean {
   if (env.SDDX_BOARD_ENABLED !== undefined) {
     return !["false", "0"].includes(env.SDDX_BOARD_ENABLED);
   }
-  const path = join(cwd, ".sddx", "config.json");
-  if (existsSync(path)) {
-    try {
-      const cfg = JSON.parse(readFileSync(path, "utf8")) as { board_enabled?: boolean };
-      if (typeof cfg.board_enabled === "boolean") return cfg.board_enabled;
-    } catch {
-      // unreadable config → default
-    }
-  }
-  return true;
+  const cfg = readConfig(cwd).board_enabled;
+  return typeof cfg === "boolean" ? cfg : true;
 }
 
 function cmdSessionStart(event: HookEvent): void {
@@ -147,6 +179,7 @@ function main(): void {
   const event = readEvent();
   try {
     if (sub === "tdd-gate") cmdTddGate(event);
+    else if (sub === "bash-gate") cmdBashGate(event);
     else if (sub === "record-test") cmdRecordTest(event);
     else if (sub === "stop-gate") cmdStopGate(event);
     else if (sub === "session-start") cmdSessionStart(event);

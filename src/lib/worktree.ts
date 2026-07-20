@@ -92,6 +92,15 @@ export function removeWorktree(cwd: string, path: string): void {
   git(cwd, "worktree", "prune");
 }
 
+/** Forced removal for scratch worktrees sddx creates and owns for the
+ * duration of one command (goal-branch construction, shipped-marker commits)
+ * — never for task worktrees, which hold user work and use the guarded
+ * `removeWorktree` above instead. */
+export function removeWorktreeForced(cwd: string, path: string): void {
+  git(cwd, "worktree", "remove", "--force", path);
+  git(cwd, "worktree", "prune");
+}
+
 export interface WorktreeInfo {
   path: string;
   branch: string | null;

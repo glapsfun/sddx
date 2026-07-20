@@ -1,9 +1,10 @@
-import { spawnSync } from "node:child_process";
+import { oracleRuns } from "./config";
+import { captureEnv } from "./envinfo";
 import { commit, stageAll, writeTree } from "./git";
-import { chainHead, type Receipt, sha256, writeReceipt } from "./receipt";
+import { runOracle } from "./oracle";
+import { chainHead, type OracleRun, type Receipt, sha256, writeReceipt } from "./receipt";
+import { signPayload } from "./sign";
 import { readTask, transition, writeTask } from "./task";
-
-const ORACLE_TIMEOUT_MS = 10 * 60_000;
 
 function expectedExit(expect: string): number {
   const m = /^exit\s+(\d+)$/.exec(expect.trim());
@@ -33,16 +34,38 @@ export function verifyTask(
   if (task.oracle.type === "manual") {
     throw new Error("manual oracles need a human decision; M1 verify supports command oracles");
   }
+  const redEvidence = task.evidence.oracle_red;
+  if (!redEvidence || redEvidence.exit_code === undefined || redEvidence.exit_code === 0) {
+    throw new Error(
+      `task ${id} has no failing-oracle evidence — an oracle that never failed proves nothing. ` +
+        `In RED, run \`sddx red-check ${id}\`. A task already past RED (e.g. created before sddx 0.2) ` +
+        `cannot be red-checked retroactively: abandon it (sddx task phase ${id} ABANDONED) and recreate`,
+    );
+  }
+  const firstGreen = task.history.find((h) => h.phase === "GREEN");
+  if (firstGreen && Date.parse(redEvidence.at) > Date.parse(firstGreen.at)) {
+    throw new Error(
+      `oracle_red (${redEvidence.at}) was recorded after the first GREEN (${firstGreen.at}) — the red-check must precede implementation; abandon and restart the task`,
+    );
+  }
   const want = expectedExit(task.oracle.expect);
 
+  const wanted = oracleRuns(cwd, task.oracle.runs);
+  const runs: OracleRun[] = [];
   const started = Date.now();
-  const run = spawnSync("sh", ["-c", task.oracle.run], {
-    cwd,
-    timeout: ORACLE_TIMEOUT_MS,
-  });
-  if (run.error) throw new Error(`oracle could not run: ${run.error.message}`);
+  let exitCode = 0;
+  for (let i = 0; i < wanted; i += 1) {
+    const run = runOracle(cwd, task.oracle.run);
+    exitCode = run.exitCode;
+    runs.push({
+      exit_code: run.exitCode,
+      duration_ms: run.durationMs,
+      stdout_sha256: sha256(run.stdout),
+      stderr_sha256: sha256(run.stderr),
+    });
+    if (exitCode !== want) break; // fail fast — one bad run fails the whole verification
+  }
   const durationMs = Date.now() - started;
-  const exitCode = run.status ?? -1;
 
   task.iterations += 1;
   if (exitCode !== want) {
@@ -50,6 +73,8 @@ export function verifyTask(
     writeTask(cwd, task);
     return { verdict: "fail", exitCode, durationMs };
   }
+
+  const env = captureEnv(cwd); // before staging — reflects the tree the oracle saw
 
   transition(task, "DONE", { internal: true });
   task.evidence.verify = { exit_code: exitCode, at: new Date().toISOString() };
@@ -60,7 +85,7 @@ export function verifyTask(
 
   const head = chainHead(cwd);
   const receipt: Receipt = {
-    version: 2,
+    version: 3,
     task_id: id,
     seq: head.seq + 1,
     prev: head.prevHash,
@@ -68,16 +93,21 @@ export function verifyTask(
     model: opts.model ?? null,
     plugin_version: opts.pluginVersion,
     oracle: { run: task.oracle.run, expect: task.oracle.expect },
-    exit_code: exitCode,
-    duration_ms: durationMs,
-    stdout_sha256: sha256(run.stdout ?? Buffer.alloc(0)),
-    stderr_sha256: sha256(run.stderr ?? Buffer.alloc(0)),
+    runs,
+    env,
     base_sha: task.workspace.base_sha,
     tree_sha: treeSha,
     verdict: "pass",
     verified_at: new Date().toISOString(),
     allow: [...task.allow],
   };
+  // sign the unsigned bytes, then append the two fields LAST — audit
+  // reconstructs the payload by deleting exactly these keys
+  const sig = signPayload(cwd, sha256(`${JSON.stringify(receipt, null, 2)}\n`));
+  if (sig) {
+    receipt.signature = sig.signature;
+    receipt.signer = sig.signer;
+  }
   const receiptPath = writeReceipt(cwd, receipt);
 
   stageAll(cwd);

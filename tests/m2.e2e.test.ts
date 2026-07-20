@@ -49,6 +49,7 @@ test("M2 oracle: two parallel worktree tasks — chained receipts, clean sweep a
     const red = spawnSync("node", [`check${n}.js`], { cwd: t.wt });
     expect(red.status).not.toBe(0);
     cli(t.wt, "task", "phase", t.id, "RED", "--test-exit", String(red.status));
+    cli(t.wt, "red-check", t.id); // the oracle genuinely fails pre-implementation
   }
   for (const [n, t] of [
     [1, t1],

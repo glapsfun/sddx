@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Marketplace for the sddx Spec-Driven Development plugin",
-    "version": "0.2.0"
+    "version": "0.3.0"
   },
   "plugins": [
     {
@@ -16,7 +16,14 @@
         "name": "glapsfun"
       },
       "license": "MIT",
-      "keywords": ["sdd", "tdd", "spec-driven", "worktree", "receipts", "oracle"]
+      "keywords": [
+        "sdd",
+        "tdd",
+        "spec-driven",
+        "worktree",
+        "receipts",
+        "oracle"
+      ]
     }
   ]
 }

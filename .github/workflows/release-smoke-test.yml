@@ -22,9 +22,7 @@ jobs:
           bun-version-file: .bun-version
 
       - name: validate plugin package (install-equivalent)
-        run: |
-          npm install -g @anthropic-ai/claude-code@2.1.211
-          claude plugin validate --strict .
+        uses: ./.github/actions/validate-plugin
 
       - name: clean-checkout quickstart (PLAN -> RED -> GREEN -> VERIFY -> board/audit)
         run: |

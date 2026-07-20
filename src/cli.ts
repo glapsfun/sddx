@@ -4,12 +4,17 @@ import { auditReceipts } from "./audit";
 import { writeBoard } from "./board";
 import {
   branchExists,
+  commit,
   createBranch,
   currentBranch,
   deleteBranch,
+  forceDeleteBranch,
   headSha,
   isMerged,
+  stagePath,
 } from "./lib/git";
+import { createGoal, goalPath, readGoal } from "./lib/goal";
+import { createGoalPr } from "./lib/pr";
 import { redCheck } from "./lib/redcheck";
 import { parseSpec } from "./lib/spec";
 import {
@@ -17,6 +22,7 @@ import {
   createTask,
   type Phase,
   readTask,
+  resolveTaskState,
   sddxDir,
   taskId,
   transition,
@@ -41,6 +47,9 @@ const USAGE = `usage:
   sddx task show <id>
   sddx red-check <id>
   sddx verify <id> [--model <m>] [--harness <h>]
+  sddx goal create --goal <sentence> --tasks <id1,id2,...>
+  sddx goal show <id>
+  sddx pr create --goal <goal-id> [--title <title>]
   sddx board
   sddx audit [--signatures] [--ci]
   sddx cleanup <id>
@@ -182,6 +191,26 @@ function cmdVerify(cwd: string, args: string[]): void {
   );
 }
 
+/**
+ * A task's `shipped` marker is self-reported, mutable JSON — not proof on its
+ * own. Cross-check it against the goal file (which `pr create` stamps with
+ * the same `pr_url` only after a real PR opened) so cleanup can't be tricked
+ * into force-deleting a branch by a hand-edited or stale task file.
+ */
+function corroboratedShip(
+  cwd: string,
+  taskId: string,
+  shipped: { goal_id: string; pr_url: string } | undefined,
+): boolean {
+  if (!shipped) return false;
+  try {
+    const goal = readGoal(cwd, shipped.goal_id);
+    return goal.task_ids.includes(taskId) && goal.shipped?.pr_url === shipped.pr_url;
+  } catch {
+    return false;
+  }
+}
+
 function cmdCleanup(cwd: string, args: string[]): void {
   const [id] = args;
   if (!id) fail(USAGE, 2);
@@ -202,10 +231,46 @@ function cmdCleanup(cwd: string, args: string[]): void {
     fail(`refusing: ${branch} is checked out — switch branches first`);
   }
   if (!isMerged(cwd, branch)) {
-    fail(`refusing: ${branch} is not merged into HEAD`);
+    // ancestry check fails for cherry-picked commits (new SHA, same diff) even
+    // when the task genuinely shipped via `sddx pr create` — the shipped
+    // marker on the task's own branch is the second, non-ancestry proof.
+    const shipped = resolveTaskState(cwd, id)?.shipped;
+    if (!shipped || !corroboratedShip(cwd, id, shipped)) {
+      fail(`refusing: ${branch} is not merged into HEAD`);
+    }
+    console.log(
+      `${branch} not merged by ancestry but shipped in goal ${shipped.goal_id} (${shipped.pr_url})`,
+    );
+    forceDeleteBranch(cwd, branch);
+    console.log(`deleted shipped branch ${branch}`);
+    return;
   }
   deleteBranch(cwd, branch);
   console.log(`deleted merged branch ${branch}`);
+}
+
+function cmdGoalCreate(cwd: string, args: string[]): void {
+  const goalSentence = flag(args, "--goal");
+  const tasksArg = flag(args, "--tasks");
+  if (!goalSentence || !tasksArg) fail(USAGE, 2);
+  const taskIds = tasksArg
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s !== "");
+  const g = createGoal(cwd, goalSentence, taskIds);
+  // committed narrowly (not `git add -A`) so registering a goal in the main
+  // checkout never sweeps up unrelated work sitting there — G5: state is
+  // files in git, and a goal is meaningless if it's only ever on disk
+  stagePath(cwd, goalPath(cwd, g.id));
+  commit(cwd, `sddx: register goal ${g.id}`);
+  console.log(`created goal ${g.id} tasks=[${g.task_ids.join(", ")}]`);
+}
+
+function cmdPrCreate(cwd: string, args: string[]): void {
+  const goalIdArg = flag(args, "--goal");
+  if (!goalIdArg) fail(USAGE, 2);
+  const res = createGoalPr(cwd, goalIdArg, { title: flag(args, "--title") });
+  console.log(`pr=${res.prUrl} branch=${res.branch} tasks=[${res.taskIds.join(", ")}]`);
 }
 
 function cmdSweep(cwd: string): void {
@@ -269,6 +334,19 @@ function main(argv: string[]): void {
       for (const f of res.findings) console.error(f);
       if (res.findings.length > 0) fail(`audit: ${res.findings.length} finding(s)`);
       console.log(`audit: ${res.receipts} receipt(s) verified, chain intact`);
+      return;
+    }
+    if (cmd === "goal" && rest[0] === "create") {
+      cmdGoalCreate(cwd, rest.slice(1));
+      return;
+    }
+    if (cmd === "goal" && rest[0] === "show") {
+      if (!rest[1]) fail(USAGE, 2);
+      console.log(JSON.stringify(readGoal(cwd, rest[1]), null, 2));
+      return;
+    }
+    if (cmd === "pr" && rest[0] === "create") {
+      cmdPrCreate(cwd, rest.slice(1));
       return;
     }
     if (cmd === "cleanup") {

@@ -32,6 +32,7 @@ hand-edited config files and no environment variables:
 | `exempt_globs`           | *(empty)* | Space-separated extra globs exempt from the RED-phase write block    |
 | `max_iterations_default` | `5`     | Default stop rule: max loop iterations per task                      |
 | `board_enabled`          | `true`  | Regenerate `.sddx/BOARD.md` automatically                            |
+| `pr_host`                | *(auto-detected)* | PR-host CLI for `sddx pr create`: `gh` \| `glab`. Unset detects from the `origin` remote (`github.com` → `gh`, `gitlab.com` → `glab`); refuses if neither matches |
 
 ## Local development
 

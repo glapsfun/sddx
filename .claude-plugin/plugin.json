@@ -56,6 +56,12 @@
       "title": "Stuck threshold",
       "default": 3,
       "description": "Consecutive identical test failures before a task is flagged stuck and escalation is requested"
+    },
+    "pr_host": {
+      "type": "string",
+      "title": "PR host",
+      "default": "",
+      "description": "PR-host CLI for `sddx pr create`: gh | glab. Empty auto-detects from the origin remote"
     }
   }
 }

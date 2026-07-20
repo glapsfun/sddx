@@ -10,6 +10,7 @@ export interface SddxConfig {
   oracle_runs_default?: number;
   red_bash_allow?: string;
   stuck_threshold?: number;
+  pr_host?: "gh" | "glab";
 }
 
 export function readConfig(root: string): SddxConfig {

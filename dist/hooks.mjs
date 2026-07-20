@@ -76,8 +76,21 @@ function isMerged(cwd, branch) {
 var deleteBranch = (cwd, name) => {
   git(cwd, "branch", "-d", name);
 };
+var forceDeleteBranch = (cwd, name) => {
+  git(cwd, "branch", "-D", name);
+};
+function remoteUrl(cwd, remote) {
+  const r = spawnSync("git", ["remote", "get-url", remote], { cwd, encoding: "utf8" });
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+var push = (cwd, branch) => {
+  git(cwd, "push", "-u", "origin", branch);
+};
 var stageAll = (cwd) => {
   git(cwd, "add", "-A");
+};
+var stagePath = (cwd, path) => {
+  git(cwd, "add", "--", path);
 };
 var writeTree = (cwd) => git(cwd, "write-tree");
 function commit(cwd, message) {
@@ -151,6 +164,10 @@ function createWorktree(cwd, id, baseSha) {
 var isDirty = (worktreePath) => git(worktreePath, "status", "--porcelain") !== "";
 function removeWorktree(cwd, path) {
   git(cwd, "worktree", "remove", path);
+  git(cwd, "worktree", "prune");
+}
+function removeWorktreeForced(cwd, path) {
+  git(cwd, "worktree", "remove", "--force", path);
   git(cwd, "worktree", "prune");
 }
 function listSddxWorktrees(cwd) {
@@ -395,6 +412,7 @@ import { existsSync as existsSync5, readdirSync as readdirSync3, readFileSync as
 import { basename, dirname, join as join5, resolve as resolvePath } from "node:path";
 
 // src/lib/task.ts
+import { spawnSync as spawnSync3 } from "node:child_process";
 import { existsSync as existsSync4, mkdirSync as mkdirSync3, readFileSync as readFileSync4, writeFileSync as writeFileSync3 } from "node:fs";
 import { join as join4 } from "node:path";
 
@@ -556,6 +574,33 @@ function allowPath(t, path) {
   if (!t.allow.includes(normalized))
     t.allow.push(normalized);
   return t;
+}
+function markShipped(t, goalId, prUrl) {
+  t.shipped = { goal_id: goalId, pr_url: prUrl, at: new Date().toISOString() };
+  return t;
+}
+function readTaskFrom(dir, id) {
+  try {
+    return JSON.parse(readFileSync4(taskPath(dir, id), "utf8"));
+  } catch {
+    return null;
+  }
+}
+function readTaskFromBranch(cwd, id) {
+  const r = spawnSync3("git", ["show", `sddx/${id}:.sddx/tasks/${id}.json`], {
+    cwd,
+    encoding: "utf8"
+  });
+  if (r.status !== 0)
+    return null;
+  try {
+    return JSON.parse(r.stdout);
+  } catch {
+    return null;
+  }
+}
+function resolveTaskState(cwd, id) {
+  return readTaskFrom(join4(cwd, ".sddx-worktrees", id), id) ?? readTaskFrom(cwd, id) ?? readTaskFromBranch(cwd, id);
 }
 
 // src/lib/resolve.ts
@@ -762,6 +807,7 @@ function bashGate(input, env = process.env) {
 }
 
 // src/lib/receipt.ts
+import { spawnSync as spawnSync4 } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -856,6 +902,29 @@ function validateReceipt(raw) {
   need("verdict", r.verdict === "pass");
   need("verified_at", typeof r.verified_at === "string" && !Number.isNaN(Date.parse(r.verified_at)));
   return errors;
+}
+function readReceiptFrom(dir, id) {
+  try {
+    return JSON.parse(readFileSync6(receiptPath(dir, id), "utf8"));
+  } catch {
+    return null;
+  }
+}
+function readReceiptFromBranch(cwd, id) {
+  const r = spawnSync4("git", ["show", `sddx/${id}:.sddx/receipts/${id}.json`], {
+    cwd,
+    encoding: "utf8"
+  });
+  if (r.status !== 0)
+    return null;
+  try {
+    return JSON.parse(r.stdout);
+  } catch {
+    return null;
+  }
+}
+function resolveReceipt(cwd, id) {
+  return readReceiptFrom(join6(cwd, ".sddx-worktrees", id), id) ?? readReceiptFrom(cwd, id) ?? readReceiptFromBranch(cwd, id);
 }
 function verifyChain(cwd) {
   const errors = [];

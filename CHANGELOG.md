@@ -6,6 +6,21 @@ All notable changes to sddx are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `sddx pr create --goal <goal-id>`: ships a completed `/sddx:run` goal as
+  **one PR per goal**, gated on every task being DONE with a passing receipt.
+  Builds the PR branch by cherry-picking each task's atomic commit (never a
+  merge commit), pushes it, and opens the PR via `gh` or `glab`
+  (auto-detected from the `origin` remote, or pinned with `userConfig.pr_host`)
+  with a body generated from the tasks' receipts.
+- `sddx goal create` / `sddx goal show`: persists `.sddx/goals/<goal-id>.json`
+  tying a set of task ids together; `/sddx:run` registers one automatically.
+- `/sddx:pr` skill for directly invoking `pr create`.
+- Task state gains an optional `shipped` field, written once by `pr create`;
+  `sddx cleanup` now accepts a `shipped` marker as proof-of-integration when
+  a cherry-picked branch fails git's ancestry-based merge check.
+
 ## [0.2.0] - 2026-07-18
 
 Trust hardening: prove the oracle, close the gate holes, extend receipt

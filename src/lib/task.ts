@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { normalizeRelPath } from "./classify";
@@ -36,6 +37,8 @@ export interface TaskState {
   iterations: number;
   /** Consecutive identical test failures; cleared by any pass or a different failure. */
   stuck?: { fingerprint: string; count: number; since: string };
+  /** Set once by `sddx pr create` after this task's commit ships in a goal PR. */
+  shipped?: { goal_id: string; pr_url: string; at: string };
   evidence: Record<
     string,
     {
@@ -153,4 +156,45 @@ export function allowPath(t: TaskState, path: string): TaskState {
   }
   if (!t.allow.includes(normalized)) t.allow.push(normalized);
   return t;
+}
+
+export function markShipped(t: TaskState, goalId: string, prUrl: string): TaskState {
+  t.shipped = { goal_id: goalId, pr_url: prUrl, at: new Date().toISOString() };
+  return t;
+}
+
+function readTaskFrom(dir: string, id: string): TaskState | null {
+  try {
+    return JSON.parse(readFileSync(taskPath(dir, id), "utf8")) as TaskState;
+  } catch {
+    return null;
+  }
+}
+
+function readTaskFromBranch(cwd: string, id: string): TaskState | null {
+  const r = spawnSync("git", ["show", `sddx/${id}:.sddx/tasks/${id}.json`], {
+    cwd,
+    encoding: "utf8",
+  });
+  if (r.status !== 0) return null;
+  try {
+    return JSON.parse(r.stdout) as TaskState;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolves a task's state wherever it currently lives: a live worktree (the
+ * source of truth while work is in progress), the main checkout (branch/none
+ * mode), or the tip of the task's own branch once its worktree has been swept.
+ * Unlike `readTask`, never throws — callers that need "does this task exist
+ * at all" get `null` instead of an exception.
+ */
+export function resolveTaskState(cwd: string, id: string): TaskState | null {
+  return (
+    readTaskFrom(join(cwd, ".sddx-worktrees", id), id) ??
+    readTaskFrom(cwd, id) ??
+    readTaskFromBranch(cwd, id)
+  );
 }

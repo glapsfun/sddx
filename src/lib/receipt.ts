@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -196,6 +197,36 @@ export function validateReceipt(raw: unknown): string[] {
     typeof r.verified_at === "string" && !Number.isNaN(Date.parse(r.verified_at as string)),
   );
   return errors;
+}
+
+function readReceiptFrom(dir: string, id: string): Receipt | null {
+  try {
+    return JSON.parse(readFileSync(receiptPath(dir, id), "utf8")) as Receipt;
+  } catch {
+    return null;
+  }
+}
+
+function readReceiptFromBranch(cwd: string, id: string): Receipt | null {
+  const r = spawnSync("git", ["show", `sddx/${id}:.sddx/receipts/${id}.json`], {
+    cwd,
+    encoding: "utf8",
+  });
+  if (r.status !== 0) return null;
+  try {
+    return JSON.parse(r.stdout) as Receipt;
+  } catch {
+    return null;
+  }
+}
+
+/** Same cross-location lookup as `resolveTaskState`: live worktree, then main checkout, then branch tip. */
+export function resolveReceipt(cwd: string, id: string): Receipt | null {
+  return (
+    readReceiptFrom(join(cwd, ".sddx-worktrees", id), id) ??
+    readReceiptFrom(cwd, id) ??
+    readReceiptFromBranch(cwd, id)
+  );
 }
 
 /**

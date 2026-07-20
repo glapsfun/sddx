@@ -56,6 +56,7 @@ oracle and write the receipt but never edit sources.
   specs/<task-id>.yaml       # the registered spec (copied at task create)
   tasks/<task-id>.json       # phase, oracle, workspace, base SHA, allow list, iterations
   receipts/<task-id>.json    # immutable, written once by the verifier
+  goals/<goal-id>.json       # task ids a /sddx:run goal ties together; read by `pr create`
   BOARD.md                   # generated rollup — never hand-edited
 ```
 

@@ -8386,13 +8386,19 @@ function flag(args, name) {
     fail(`${name} requires a value`, 2);
   return v;
 }
-function pluginVersion() {
+function readVersionField(relativePath) {
   try {
-    const manifest = new URL("../.claude-plugin/plugin.json", import.meta.url);
+    const manifest = new URL(relativePath, import.meta.url);
     return JSON.parse(readFileSync9(manifest, "utf8")).version;
   } catch {
     return "unknown";
   }
+}
+function pluginVersion() {
+  return readVersionField("../.claude-plugin/plugin.json");
+}
+function packageVersion() {
+  return readVersionField("../package.json");
 }
 var WORKSPACE_MODES = ["auto", "worktree", "branch", "none"];
 function pickWorkspace(cwd, requested) {
@@ -8575,6 +8581,14 @@ function cmdSweep(cwd) {
 function main(argv) {
   const cwd = process.cwd();
   const [cmd, ...rest] = argv;
+  if (cmd === "--version" || cmd === "-v") {
+    console.log(packageVersion());
+    return;
+  }
+  if (cmd === "--help" || cmd === "-h") {
+    console.log(USAGE);
+    return;
+  }
   try {
     if (cmd === "task" && rest[0] === "create") {
       cmdTaskCreate(cwd, rest.slice(1));

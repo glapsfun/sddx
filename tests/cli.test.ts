@@ -1,9 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fixtureClone, fixtureRepo } from "./fixtures";
 import { fakeRedCheck, repoRoot } from "./helpers";
+
+const PACKAGE_VERSION = (
+  JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as { version: string }
+).version;
 
 const CLI_SRC = join(repoRoot, "src/cli.ts");
 
@@ -251,5 +256,24 @@ describe("sddx cli", () => {
     expect(cli(cwd, "frobnicate").status).toBe(2);
     expect(cli(cwd, "task").status).toBe(2);
     expect(cli(cwd, "task", "create", "--spec", "x.yaml", "--workspace", "bogus").status).toBe(2);
+  });
+
+  test("--version and -v print the package version outside a git repository", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "sddx-nongit-"));
+    for (const flag of ["--version", "-v"]) {
+      const r = cli(cwd, flag);
+      expect(r.status).toBe(0);
+      expect(r.stdout.trim()).toBe(PACKAGE_VERSION);
+    }
+  });
+
+  test("--help and -h print usage and exit 0", () => {
+    const cwd = mkdtempSync(join(tmpdir(), "sddx-nongit-"));
+    for (const flag of ["--help", "-h"]) {
+      const r = cli(cwd, flag);
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain("usage:");
+      expect(r.stdout).toContain("sddx task create");
+    }
   });
 });

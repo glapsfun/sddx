@@ -48,8 +48,19 @@ clean local `bun run check` and pre-commit pass means CI will agree.
 - **Hooks stay fast.** The SessionStart path budgets < 200 ms; keep heavy
   imports off the hook hot path.
 - Update the relevant `docs/` page in the same PR as the behavior it
-  describes, and add a line to `CHANGELOG.md` under `## [Unreleased]`.
+  describes.
+- **Commit messages use conventional-commit type prefixes** (`feat:`, `fix:`,
+  `docs:`, `ci:`, `chore:`, `refactor:`, `test:`, ...) — they drive the
+  automated release's version bump and changelog, so a clear, correctly typed
+  commit message *is* the changelog entry. Don't hand-edit `CHANGELOG.md`'s
+  `[Unreleased]` section; release-please generates it at release time.
 
 ## Releases
 
-Maintainers follow the checklist in [docs/RELEASING.md](docs/RELEASING.md).
+Releases are automated: [release-please](https://github.com/googleapis/release-please)
+proposes each release as a pull request, computed from conventional-commit
+messages (`feat:`, `fix:`, `docs:`, `ci:`, ...) — the style already used
+throughout this repo's history. A maintainer's job is to review/edit that PR's
+changelog section and merge it once the required checks (including an
+automated clean-checkout install smoke test) are green; merging *is* the
+release. See [docs/RELEASING.md](docs/RELEASING.md) for the full flow.

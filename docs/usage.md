@@ -58,6 +58,7 @@ plugin root; every command is documented in [cli.md](cli.md).
 
 ```sh
 mkdir demo && cd demo && git init
+git commit --allow-empty -m init   # sddx needs a resolvable HEAD to base tasks on
 cat > spec.yaml <<'EOF'
 task: health endpoint returns ok
 context: []

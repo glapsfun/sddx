@@ -1,0 +1,87 @@
+name: release smoke test
+
+# Required check on release-please's release PR. This is the automated
+# replacement for docs/RELEASING.md's former "blocking (manual)" clean-machine
+# install smoke test: a GitHub Actions runner is a clean machine on every run,
+# so the check that used to depend on a maintainer remembering to run it by
+# hand becomes a merge-blocking required status check instead.
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke-test:
+    name: release smoke test
+    if: startsWith(github.head_ref, 'release-please--')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: validate plugin package (install-equivalent)
+        run: |
+          npm install -g @anthropic-ai/claude-code@2.1.211
+          claude plugin validate --strict .
+
+      - name: clean-checkout quickstart (PLAN -> RED -> GREEN -> VERIFY -> board/audit)
+        run: |
+          set -eu
+          root="$GITHUB_WORKSPACE"
+          sddx() { "$root/bin/sddx-run" "$root/dist/cli.mjs" "$@"; }
+
+          demo="$(mktemp -d)"
+          cd "$demo"
+          git init -q
+          git config user.email smoke-test@example.com
+          git config user.name smoke-test
+          # sddx task create needs a resolvable HEAD; a fresh `git init` has none
+          git commit --allow-empty -q -m init
+
+          cat > spec.yaml <<'SPEC'
+          task: health endpoint returns ok
+          context: []
+          success_criteria:
+            - "bun test tests/health.test.ts exits 0"
+          oracle:
+            type: command
+            run: "bun test tests/health.test.ts"
+            expect: exit 0
+          stop_rules:
+            - max_iterations: 5
+          out_of_scope: []
+          SPEC
+
+          out="$(sddx task create --spec spec.yaml --workspace none)"
+          echo "$out"
+          id="$(echo "$out" | grep '^created ' | awk '{print $2}')"
+          [ -n "$id" ] || { echo "could not parse task id from: $out" >&2; exit 1; }
+
+          mkdir -p tests
+          cat > tests/health.test.ts <<'RED'
+          import { test, expect } from "bun:test";
+          test("health", () => { expect(false).toBe(true); });
+          RED
+
+          set +e
+          bun test tests/health.test.ts
+          red_exit=$?
+          set -e
+          [ "$red_exit" -ne 0 ] || { echo "expected the RED-phase test to fail" >&2; exit 1; }
+          sddx task phase "$id" RED --test-exit "$red_exit"
+          sddx red-check "$id"
+
+          cat > tests/health.test.ts <<'GREEN'
+          import { test, expect } from "bun:test";
+          test("health", () => { expect(true).toBe(true); });
+          GREEN
+
+          bun test tests/health.test.ts
+          sddx task phase "$id" GREEN --test-exit 0
+          sddx task phase "$id" VERIFY
+          sddx verify "$id"
+
+          sddx board
+          sddx audit

@@ -4,6 +4,22 @@ All notable changes to sddx are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sddx adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0](https://github.com/glapsfun/sddx/compare/v0.2.0...v0.3.0) (2026-07-20)
+
+
+### Added
+
+* automate releases with release-please and a required install smoke test ([076729b](https://github.com/glapsfun/sddx/commit/076729bc2f2f2be8b91c821805ebc6015fcbcc32))
+* automate releases with release-please and a required install smoke test ([e32b406](https://github.com/glapsfun/sddx/commit/e32b40647507038988b46609484ff7791633182f))
+
+
+### Fixed
+
+* exempt bot-touched manifests from Biome's format check ([184530a](https://github.com/glapsfun/sddx/commit/184530a56975afeb6d68e97612397dcd3fba4061))
+* exempt bot-touched manifests from Biome's format check ([2b9f878](https://github.com/glapsfun/sddx/commit/2b9f878b0562cd0f41a18161f07266971617d839))
+* release-please tags must be bare v&lt;version&gt;, not sddx-v&lt;version&gt; ([6f295e6](https://github.com/glapsfun/sddx/commit/6f295e630384233e73c68ed5aac30105dccde482))
+* release-please tags must be bare v&lt;version&gt;, not sddx-v&lt;version&gt; ([7c7089a](https://github.com/glapsfun/sddx/commit/7c7089ae17d6b7e062b881130a8e3fca0e59974a))
+
 ## [Unreleased]
 
 ### Added

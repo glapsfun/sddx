@@ -4,6 +4,14 @@ All notable changes to sddx are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sddx adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0](https://github.com/glapsfun/sddx/compare/v0.3.0...v0.4.0) (2026-07-20)
+
+
+### Added
+
+* publish sddx as a standalone CLI on npm ([f0c489b](https://github.com/glapsfun/sddx/commit/f0c489ba3c1c1a176e19ccbc8699f14b2c810986))
+* publish sddx as a standalone CLI on npm ([628358d](https://github.com/glapsfun/sddx/commit/628358df925b23e94007278c7e0b3c3c2df85f66))
+
 ## [0.3.0](https://github.com/glapsfun/sddx/compare/v0.2.0...v0.3.0) (2026-07-20)
 
 

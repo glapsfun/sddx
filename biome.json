@@ -36,6 +36,12 @@
           }
         }
       }
+    },
+    {
+      "includes": [".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"],
+      "formatter": {
+        "enabled": false
+      }
     }
   ],
   "assist": {

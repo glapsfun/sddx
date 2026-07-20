@@ -5,28 +5,66 @@ name: release smoke test
 # install smoke test: a GitHub Actions runner is a clean machine on every run,
 # so the check that used to depend on a maintainer remembering to run it by
 # hand becomes a merge-blocking required status check instead.
+#
+# Triggered by workflow_run (not pull_request): PRs opened by
+# release-please-action use the default GITHUB_TOKEN, and GitHub Actions
+# does not cascade pull_request events from GITHUB_TOKEN-authored pushes/PRs
+# (anti-recursion guard). workflow_run has no such restriction and needs no
+# extra credentials — it fires whenever the named workflow finishes,
+# regardless of which token drove it.
 on:
-  pull_request:
-    branches: [main]
+  workflow_run:
+    workflows: ["release-please"]
+    types: [completed]
+
+permissions:
+  contents: read
+  statuses: write
 
 jobs:
   smoke-test:
     name: release smoke test
-    if: startsWith(github.head_ref, 'release-please--')
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
+      - name: locate the release-please branch
+        id: branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          branch="release-please--branches--main--components--sddx"
+          if git ls-remote --exit-code --heads "https://github.com/${GITHUB_REPOSITORY}" "$branch" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "no open release-please branch — nothing to smoke test"
+          fi
+
       - uses: actions/checkout@v4
+        if: steps.branch.outputs.exists == 'true'
+        with:
+          ref: ${{ steps.branch.outputs.branch }}
+
+      - name: resolve head sha
+        if: steps.branch.outputs.exists == 'true'
+        id: sha
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - uses: oven-sh/setup-bun@v2
+        if: steps.branch.outputs.exists == 'true'
         with:
           bun-version-file: .bun-version
 
       - name: validate plugin package (install-equivalent)
+        if: steps.branch.outputs.exists == 'true'
         run: |
           npm install -g @anthropic-ai/claude-code@2.1.211
           claude plugin validate --strict .
 
       - name: clean-checkout quickstart (PLAN -> RED -> GREEN -> VERIFY -> board/audit)
+        if: steps.branch.outputs.exists == 'true'
         run: |
           set -eu
           root="$GITHUB_WORKSPACE"
@@ -85,3 +123,23 @@ jobs:
 
           sddx board
           sddx audit
+
+      - name: report success
+        if: steps.branch.outputs.exists == 'true' && success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${{ steps.sha.outputs.sha }}" \
+            -f state=success \
+            -f context="release smoke test" \
+            -f description="clean-checkout install + quickstart passed"
+
+      - name: report failure
+        if: steps.branch.outputs.exists == 'true' && failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${{ steps.sha.outputs.sha }}" \
+            -f state=failure \
+            -f context="release smoke test" \
+            -f description="clean-checkout install + quickstart failed"

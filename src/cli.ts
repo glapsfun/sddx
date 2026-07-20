@@ -68,13 +68,21 @@ function flag(args: string[], name: string): string | undefined {
   return v;
 }
 
-function pluginVersion(): string {
+function readVersionField(relativePath: string): string {
   try {
-    const manifest = new URL("../.claude-plugin/plugin.json", import.meta.url);
+    const manifest = new URL(relativePath, import.meta.url);
     return (JSON.parse(readFileSync(manifest, "utf8")) as { version: string }).version;
   } catch {
     return "unknown";
   }
+}
+
+function pluginVersion(): string {
+  return readVersionField("../.claude-plugin/plugin.json");
+}
+
+function packageVersion(): string {
+  return readVersionField("../package.json");
 }
 
 const WORKSPACE_MODES = ["auto", "worktree", "branch", "none"] as const;
@@ -287,6 +295,14 @@ function cmdSweep(cwd: string): void {
 function main(argv: string[]): void {
   const cwd = process.cwd();
   const [cmd, ...rest] = argv;
+  if (cmd === "--version" || cmd === "-v") {
+    console.log(packageVersion());
+    return;
+  }
+  if (cmd === "--help" || cmd === "-h") {
+    console.log(USAGE);
+    return;
+  }
   try {
     if (cmd === "task" && rest[0] === "create") {
       cmdTaskCreate(cwd, rest.slice(1));

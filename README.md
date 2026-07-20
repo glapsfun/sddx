@@ -20,10 +20,24 @@ Process over intelligence, proof over promises.
 
 ## Install
 
+For Claude Code, as a plugin:
+
 ```sh
 claude plugin marketplace add glapsfun/sddx
 claude plugin install sddx@sddx
 ```
+
+For direct/standalone use — CI pipelines, other agent harnesses, or just the
+CLI by hand — independent of Claude Code, via npm/npx/bun:
+
+```sh
+npx @glapsfun/sddx board          # no install
+npm install -g @glapsfun/sddx     # or: bun add -g @glapsfun/sddx
+```
+
+Both paths install the same `sddx` command (the package is scoped as
+`@glapsfun/sddx` on npm, but its `bin` entry is plain `sddx`) — the plugin
+wraps it with Claude Code skills and hooks; the npm package is the bare CLI.
 
 Local development, skills-only mode, prerequisites, and verifying the install:
 see [docs/installation.md](docs/installation.md).
@@ -58,8 +72,9 @@ sddx audit                   # verifies the receipt hash chain
 ```
 
 Inside Claude Code the same loop is driven by `/sddx:quick` (single task) or
-`/sddx:run` (parallel tasks in worktrees); `sddx` here means
-`bin/sddx-run dist/cli.mjs` from the plugin root.
+`/sddx:run` (parallel tasks in worktrees). Outside Claude Code, `sddx` above is
+the published npm package (`npx @glapsfun/sddx ...` works with no install);
+the same commands also run from a checkout as `bin/sddx-run dist/cli.mjs`.
 
 ## Documentation
 

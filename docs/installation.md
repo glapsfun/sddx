@@ -1,7 +1,8 @@
 # Installation
 
-sddx is a Claude Code plugin. This page covers every way to install it, how to
-verify the install, and how to remove it.
+sddx is a Claude Code plugin *and* a standalone npm package — the same CLI,
+reachable two independent ways. This page covers every way to install it, how
+to verify the install, and how to remove it.
 
 ## Prerequisites
 
@@ -33,6 +34,29 @@ hand-edited config files and no environment variables:
 | `max_iterations_default` | `5`     | Default stop rule: max loop iterations per task                      |
 | `board_enabled`          | `true`  | Regenerate `.sddx/BOARD.md` automatically                            |
 | `pr_host`                | *(auto-detected)* | PR-host CLI for `sddx pr create`: `gh` \| `glab`. Unset detects from the `origin` remote (`github.com` → `gh`, `gitlab.com` → `glab`); refuses if neither matches |
+
+## Standalone CLI (npm / npx / bun)
+
+Independent of Claude Code — for CI pipelines, other agent harnesses, or
+running the loop by hand:
+
+```sh
+npx @glapsfun/sddx board            # no install, always latest published version
+npm install -g @glapsfun/sddx       # or: bun add -g @glapsfun/sddx / bunx @glapsfun/sddx
+```
+
+The npm package is scoped (`@glapsfun/sddx`) since the bare name `sddx` is
+blocked by npm's package-name-similarity policy (too close to existing
+packages like `sax`/`shx`/`sade`); the installed command is still plain
+`sddx` — the package's `bin` entry, not its registry name.
+
+This installs the same `dist/cli.mjs` the plugin uses internally — `sddx task
+create`, `sddx verify`, `sddx board`, `sddx audit`, etc. all work identically.
+It does **not** install the Claude Code plugin (skills, agents, hooks) — there
+is no TDD-gate hook enforcement without the plugin; see
+[skills-only mode](#skills-only-mode) below for the same caveat in the
+opposite direction. Use the marketplace install above if you want the
+conversational `/sddx:run` / `/sddx:quick` skills and the hard-blocking hooks.
 
 ## Local development
 

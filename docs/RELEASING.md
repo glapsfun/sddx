@@ -26,6 +26,11 @@ maintainer reviews/edits the changelog section, merges when green
         │
         ▼
 release-please tags v<version> and publishes the GitHub Release
+        │
+        ▼
+release workflow checks out that tag (no rebuild — dist/cli.mjs is
+already committed and CI-verified) and runs `npm publish --provenance`
+— authenticated via npm OIDC trusted publishing, no stored NPM_TOKEN
 ```
 
 ## The maintainer's job
@@ -41,18 +46,43 @@ release-please tags v<version> and publishes the GitHub Release
    merge it.
 3. **Wait for the required checks**, including the install smoke test. It
    can't be skipped or bypassed by memory — merge is blocked until it's green.
-4. **Merge when ready.** That's it: merging tags `v<version>` and publishes
-   the GitHub Release automatically. There is no separate manual step after
-   the merge — treat merging the release PR as publishing, not proposing to
+4. **Merge when ready.** That's it: merging tags `v<version>`, publishes
+   the GitHub Release, and publishes the same version to npm as
+   `@glapsfun/sddx` — all automatic, no separate manual step after the
+   merge. Treat merging the release PR as publishing, not proposing to
    publish.
 5. **Submit for indexing** (still manual): skills.sh and directory
    aggregators, per-site submission, linking the tagged release.
 
+## npm publish (one-time setup)
+
+The package is published as `@glapsfun/sddx` (the `glapsfun` npm org),
+authenticated via npm's OIDC **trusted publishing** — no long-lived
+`NPM_TOKEN` secret stored anywhere. The bare name `sddx` is rejected by npm's
+package-name-similarity policy (too close to existing packages), and scoping
+under `@glapsfun` also lets `publishConfig.access: "public"` in `package.json`
+handle the "public, not private-scoped-package" requirement automatically —
+no `--access public` flag needed on any publish, bootstrap or CI. Because a
+package's trusted publisher can only be configured from its registry
+settings page, and that page only exists once the package has been published
+at least once, the very first publish is a manual, one-time bootstrap:
+
+1. From a clean local checkout, `bun run build && CI=true npm publish` using
+   a maintainer's own npm login/token with publish rights on the `glapsfun`
+   org, to claim `@glapsfun/sddx`. Discard/revoke a token afterward if one
+   was used — it is not needed again. (`CI=true` is required:
+   `prepublishOnly` refuses to publish outside CI to guard against an
+   accidental local `npm publish` once `package.json` is no longer
+   `private`; GitHub Actions sets this automatically, so ongoing releases
+   don't need it.)
+2. On npmjs.com, open the `@glapsfun/sddx` package's settings and add a
+   trusted publisher: `glapsfun/sddx`, bound to the exact release workflow
+   file that runs `npm publish`.
+3. From then on, every release publishes automatically via OIDC — no token,
+   no manual step. `sddx --version` after a release should match the tag.
+
 ## What's still not automated
 
-- **npm / package registry publish** — not applicable; `package.json` is
-  `private: true` and nothing in this project is published there. Scope is
-  GitHub Release only.
 - **skills.sh / directory aggregator submission** — manual, out of band.
 - **Commit message enforcement** — conventional-commit types drive the
   automation, but nothing currently blocks a malformed commit message at

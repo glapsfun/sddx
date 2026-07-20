@@ -46,6 +46,10 @@ already committed and CI-verified) and runs `npm publish --provenance`
    merge it.
 3. **Wait for the required checks**, including the install smoke test. It
    can't be skipped or bypassed by memory — merge is blocked until it's green.
+   These checks run automatically on the release PR: `release-please-action`
+   authenticates as the `sddx-release-please` GitHub App (see below), not the
+   default `GITHUB_TOKEN`, specifically so its pushes to the release PR
+   branch trigger CI normally.
 4. **Merge when ready.** That's it: merging tags `v<version>`, publishes
    the GitHub Release, and publishes the same version to npm as
    `@glapsfun/sddx` — all automatic, no separate manual step after the
@@ -53,6 +57,35 @@ already committed and CI-verified) and runs `npm publish --provenance`
    publish.
 5. **Submit for indexing** (still manual): skills.sh and directory
    aggregators, per-site submission, linking the tagged release.
+
+## Release PR checks (one-time setup)
+
+`release-please-action` needs write access to open/update its own PR and,
+on merge, to create the tag and GitHub Release. Using the default
+`GITHUB_TOKEN` for this works for creating those things, but GitHub
+deliberately blocks `GITHUB_TOKEN`-authored pushes from triggering other
+workflows (anti-recursion protection) — so the release PR's required checks
+(lint/test/verify/the install smoke test) never ran on their own, leaving
+every release PR permanently `BLOCKED` until someone manually closed and
+reopened it to force a re-trigger.
+
+Fixed by authenticating `release-please-action` as a dedicated, org-owned
+GitHub App (`sddx-release-please`) instead: an installation token doesn't
+have the anti-recursion restriction, so pushes to the release PR trigger CI
+like any normal push. One-time setup (already done for this repo):
+
+1. Create a GitHub App under the `glapsfun` org with `Contents: Read and
+   write` and `Pull requests: Read and write` repository permissions, no
+   webhook, installable only on this account.
+2. Generate a private key for the App; install the App on the `sddx` repo.
+3. Store the App ID and private key as repo secrets:
+   `RELEASE_PLEASE_APP_ID`, `RELEASE_PLEASE_APP_PRIVATE_KEY`.
+4. `.github/workflows/release-please.yml` mints a short-lived installation
+   token via `actions/create-github-app-token` and passes it to
+   `release-please-action`'s `token` input.
+
+No further maintenance: the installation token is minted fresh on every
+workflow run, nothing to rotate manually.
 
 ## npm publish (one-time setup)
 

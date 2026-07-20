@@ -1,0 +1,33 @@
+name: validate plugin
+description: Install the pinned claude-code CLI (cached) and run 'claude plugin validate --strict'
+
+runs:
+  using: composite
+  steps:
+    - name: read pinned version
+      id: version
+      shell: bash
+      run: echo "version=$(tr -d '[:space:]' < "$GITHUB_WORKSPACE/.claude-code-version")" >> "$GITHUB_OUTPUT"
+
+    - name: cache claude-code global install
+      id: cache
+      uses: actions/cache@v4
+      with:
+        path: ~/.npm-global
+        key: ${{ runner.os }}-claude-code-${{ steps.version.outputs.version }}
+
+    - name: point npm at the cached global prefix
+      shell: bash
+      run: |
+        mkdir -p ~/.npm-global
+        npm config set prefix ~/.npm-global
+        echo "$HOME/.npm-global/bin" >> "$GITHUB_PATH"
+
+    - name: install claude-code
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: bash
+      run: npm install -g "@anthropic-ai/claude-code@${{ steps.version.outputs.version }}"
+
+    - name: validate plugin (strict)
+      shell: bash
+      run: claude plugin validate --strict .

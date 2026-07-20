@@ -18,11 +18,17 @@ jobs:
         with:
           path: ~/.cache/pre-commit
           key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.local/pipx/venvs/pre-commit
+            ~/.local/bin/pre-commit
+          key: ${{ runner.os }}-pipx-pre-commit
       - run: pipx install pre-commit
-      # Commit-stage hooks only; typecheck/test/build stay in the ci job.
+      # Commit-stage hooks only; typecheck/test/build stay in the verify/test jobs.
       - run: pre-commit run --all-files --show-diff-on-failure
 
-  ci:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +37,6 @@ jobs:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
-      - run: bun test
       - run: bun run build
       - name: dist drift check
         run: |
@@ -40,10 +45,22 @@ jobs:
             echo "dist/ is out of sync with src/ — run 'bun run build' and commit the result" >&2
             exit 1
           fi
-      - name: plugin validate (strict)
-        run: |
-          npm install -g @anthropic-ai/claude-code@2.1.211
-          claude plugin validate --strict .
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - run: bun test
+
+  plugin-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/validate-plugin
 
   links:
     runs-on: ubuntu-latest

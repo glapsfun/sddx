@@ -4,6 +4,18 @@ All notable changes to sddx are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sddx adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0](https://github.com/glapsfun/sddx/compare/v0.4.0...v1.0.0) (2026-07-21)
+
+
+### ⚠ BREAKING CHANGES
+
+* the post-task completion message users see is now the Next Actions menu instead of free-form prose offering a merge.
+
+### Added
+
+* model single-parent task dependencies with scope-based scheduling ([4f91a48](https://github.com/glapsfun/sddx/commit/4f91a48aec545ee4f0fbf6d0460ed35b40ae7459))
+* replace static task-completion message with a Next Actions menu ([6b98212](https://github.com/glapsfun/sddx/commit/6b982121d0238e11273a43b53a6b675e9d0bc981))
+
 ## [0.4.0](https://github.com/glapsfun/sddx/compare/v0.3.0...v0.4.0) (2026-07-20)
 
 

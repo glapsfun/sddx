@@ -13,6 +13,7 @@ const SPEC = {
   oracle: { type: "command" as const, run: "true", expect: "exit 0" },
   stop_rules: [],
   out_of_scope: [],
+  scope: [],
 };
 
 function makeTask(repo: string, sentence = "demo task"): string {

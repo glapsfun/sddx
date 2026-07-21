@@ -49,4 +49,21 @@ describe("parseSpec", () => {
     );
     expect(errors.join(" ")).toContain("oracle.type");
   });
+
+  test("accepts an optional scope and trims its globs", () => {
+    const { spec, errors } = parseSpec(`${VALID}scope:\n  - " src/db/** "\n  - migrations/*.sql\n`);
+    expect(errors).toEqual([]);
+    expect(spec!.scope).toEqual(["src/db/**", "migrations/*.sql"]);
+  });
+
+  test("defaults scope to an empty list when omitted", () => {
+    const { spec } = parseSpec(VALID);
+    expect(spec!.scope).toEqual([]);
+  });
+
+  test("rejects an empty or non-string scope", () => {
+    expect(parseSpec(`${VALID}scope: []\n`).errors.join(" ")).toContain("scope");
+    expect(parseSpec(`${VALID}scope:\n  - ""\n`).errors.join(" ")).toContain("scope");
+    expect(parseSpec(`${VALID}scope: "src/**"\n`).errors.join(" ")).toContain("scope");
+  });
 });

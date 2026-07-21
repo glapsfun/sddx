@@ -17,6 +17,8 @@ export interface Spec {
   oracle: Oracle;
   stop_rules: Array<string | Record<string, unknown>>;
   out_of_scope: string[];
+  /** Write globs the task is permitted to touch. Empty when the spec omits `scope`. */
+  scope: string[];
 }
 
 const ORACLE_TYPES: ReadonlySet<string> = new Set(["command", "test-suite", "browser", "manual"]);
@@ -69,6 +71,18 @@ export function parseSpec(yamlText: string): { spec?: Spec; errors: string[] } {
       errors.push("oracle.runs: must be an integer >= 1");
     }
   }
+  // `scope` is optional; only validated when present. A present scope must be a
+  // non-empty list of non-empty globs (a bare string or empty list is a mistake,
+  // not a lane declaration) — reject rather than silently coerce.
+  if (r.scope !== undefined) {
+    if (
+      !Array.isArray(r.scope) ||
+      r.scope.length === 0 ||
+      !r.scope.every((s) => typeof s === "string" && s.trim() !== "")
+    ) {
+      errors.push("scope: when present, must be a non-empty list of non-empty globs");
+    }
+  }
   if (errors.length > 0) return { errors };
 
   const or = o as Record<string, unknown>;
@@ -78,6 +92,7 @@ export function parseSpec(yamlText: string): { spec?: Spec; errors: string[] } {
       task: (r.task as string).trim(),
       context: toList(r.context),
       success_criteria: (sc as string[]).map((s) => s.trim()),
+      scope: Array.isArray(r.scope) ? (r.scope as string[]).map((s) => s.trim()) : [],
       oracle: {
         type: or.type as OracleType,
         run: typeof or.run === "string" ? or.run.trim() : "",

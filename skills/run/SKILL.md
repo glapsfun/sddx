@@ -12,31 +12,36 @@ Trivial single task and the user wants it in-session? `--solo` → follow
 
 ## Flow
 
-1. **Decompose** — dispatch the `orchestrator` agent with the goal. It returns
-   independent tasks with disjoint file scopes (or one task — that's fine;
-   a single-task run is just the degenerate case).
-2. **Plan** — one `planner` agent per task writes the spec YAML. Specs without
-   an executable oracle do not proceed: no oracle, no goal.
-3. **Create** — per task, from the repo root:
-   `... task create --spec <file> --workspace auto`
-   Auto picks a worktree forked from origin/HEAD; it downgrades to branch mode
-   (one notice line) when submodules or nested worktrees make that unsafe.
-   Record each printed task id and worktree path.
-4. **Register the goal** — from the repo root:
-   `... goal create --goal "<goal sentence>" --tasks <id1,id2,...>`
-   Persists `.sddx/goals/<goal-id>.json`. Record the printed goal id; it's
-   what ties this run's tasks together for step 7.
-5. **Execute in parallel** — dispatch ALL `tdd-executor` agents in a single
-   message (one Task call per task), each given its task id and worktree path.
-   Executors never leave their worktree. Each executor runs
+1. **Decompose into a graph** — dispatch the `orchestrator` agent with the goal.
+   It authors a `graph.yaml`: one node per task with an `alias`, a `spec` path,
+   and at most one `depends_on` (an alias). Concurrent tasks (not ordered by an
+   edge) must have **disjoint `scope`**; overlapping scope must be ordered with
+   `depends_on`. One task is fine — a single-task run is the degenerate case.
+2. **Plan** — one `planner` agent per node writes its spec YAML, including a
+   `scope` (globs it may write) and an executable oracle: no oracle, no goal.
+3. **Create atomically** — from the repo root:
+   `... graph create --graph graph.yaml`
+   This is the gate: it validates every oracle, the single-parent forest, and
+   **overlap ⟹ ordered**, then writes all task files (worktrees forked from
+   origin/HEAD for roots; dependents deferred) and `.sddx/goals/<goal-id>.json`
+   with its edges — or writes **nothing** and names the offending node. Auto
+   downgrades to branch mode (one notice) when worktrees are unsafe. Record the
+   printed alias→id map and goal id.
+4. **Execute as a chain-walk** — dispatch a `tdd-executor` for every **ready**
+   task (a root, or one whose parent is DONE) in a single message, each given
+   its task id and worktree path. Executors never leave their worktree and run
    `... red-check <id>` once RED is recorded, before implementing.
-6. **Verify** — per finished task, dispatch a `verifier` agent with the task id
-   and worktree path. Only `sddx verify` sets DONE and writes the receipt.
-7. **Report** — one line per task: id · branch · phase · receipt path, plus the
-   goal id. Then run `... sweep` to clear disposable leftovers (it skips
-   anything dirty or unverified, loudly). Mention that once every task is
-   DONE, `sddx pr create --goal <goal-id>` will open one PR for the whole
-   goal — but offer it, never run it unasked (see `/sddx:pr`).
+5. **Verify and advance** — per finished task, dispatch a `verifier` (only
+   `sddx verify` sets DONE and writes the receipt). When a parent reaches DONE,
+   materialize each newly-ready child with `... task materialize <child-id>`
+   (forks its worktree from the parent's DONE commit) and dispatch it. Repeat
+   until the forest drains. A stuck task leaves its descendants **blocked** —
+   report them, never dispatch them.
+6. **Report** — one line per task: id · branch · phase (or `blocked-on-<id>`) ·
+   receipt path, plus the goal id. Then run `... sweep` to clear disposable
+   leftovers (it skips anything dirty or unverified, loudly). Mention that once
+   every task is DONE, `sddx pr create --goal <goal-id>` will open one PR for the
+   whole goal — but offer it, never run it unasked (see `/sddx:pr`).
 
 ## Rules
 

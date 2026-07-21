@@ -12,6 +12,7 @@ const SPEC = {
   oracle: { type: "command" as const, run: "true", expect: "exit 0" },
   stop_rules: [],
   out_of_scope: [],
+  scope: [],
 };
 
 const makeTask = (repo: string, sentence = "board demo") =>
@@ -43,8 +44,34 @@ describe("renderBoard", () => {
     );
     const a = renderBoard(repo);
     expect(a).toBe(renderBoard(repo));
-    expect(a).toContain(`| ${t.id} | PLAN | board demo | none | 0 | #3 | src/migration.sql |`);
+    expect(a).toContain(`| ${t.id} | PLAN | — | board demo | none | 0 | #3 | src/migration.sql |`);
     expect(a).not.toMatch(/\d{4}-\d{2}-\d{2}T/); // no timestamps anywhere
+  });
+
+  test("dependent row shows its parent and a blocked marker until the parent is DONE", () => {
+    const repo = fixtureRepo();
+    const parent = makeTask(repo, "parent task");
+    const child = createTask(
+      repo,
+      { ...SPEC, task: "child task" },
+      ".sddx/specs/c.yaml",
+      { mode: "none", branch: null, base_sha: `pending:${parent.id}` },
+      { dependsOn: parent.id },
+    );
+
+    const blocked = renderBoard(repo);
+    expect(blocked).toContain("| Task | Phase | Depends |");
+    expect(blocked).toContain(`⏸blocked-on-${parent.id}`);
+    // the child names its parent in the Depends column
+    expect(blocked).toMatch(new RegExp(`\\| ${child.id} \\|.*\\| ${parent.id} \\|`));
+
+    // once the parent reaches DONE, the child is no longer blocked
+    transition(parent, "RED", { testExit: 1 });
+    transition(parent, "GREEN", { testExit: 0 });
+    transition(parent, "VERIFY");
+    transition(parent, "DONE", { internal: true });
+    writeTask(repo, parent);
+    expect(renderBoard(repo)).not.toContain("blocked-on-");
   });
 
   test("worktree task row wins over workspace copy and uses worktree receipts", () => {

@@ -6,12 +6,14 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { stuckThreshold } from "./lib/config";
 import type { Receipt } from "./lib/receipt";
-import type { TaskState } from "./lib/task";
+import { blockedOn, type TaskState } from "./lib/task";
 import { worktreesDir } from "./lib/worktree";
 
 interface BoardRow {
   id: string;
   phase: string;
+  rawPhase: string;
+  dependsOn?: string;
   sentence: string;
   workspace: string;
   iterations: string;
@@ -46,6 +48,7 @@ function taskRow(
     return {
       id,
       phase: "UNREADABLE",
+      rawPhase: "UNREADABLE",
       sentence: "task file failed to parse",
       workspace: DASH,
       iterations: DASH,
@@ -61,6 +64,8 @@ function taskRow(
   return {
     id: t.id,
     phase: t.stuck && t.stuck.count >= threshold ? `${t.phase} ⚠stuck` : t.phase,
+    rawPhase: t.phase,
+    ...(t.depends_on ? { dependsOn: t.depends_on } : {}),
     sentence: t.task,
     workspace: t.workspace.mode,
     iterations: String(t.iterations),
@@ -138,13 +143,18 @@ export function renderBoard(cwd: string): string {
     lines.push("_No tasks registered._", "");
   } else {
     lines.push(
-      "| Task | Phase | Sentence | Workspace | Iter | Receipt | Allow |",
-      "| --- | --- | --- | --- | --- | --- | --- |",
+      "| Task | Phase | Depends | Sentence | Workspace | Iter | Receipt | Allow |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- |",
     );
     for (const id of [...rows.keys()].sort()) {
       const r = rows.get(id) as BoardRow;
+      // Share the CLI's blocked derivation so the board and `blockedOn` agree even
+      // when an ancestor's worktree was swept (resolveTaskState reads its branch tip).
+      const blocker =
+        r.rawPhase === "DONE" ? null : blockedOn(cwd, { id, depends_on: r.dependsOn });
+      const phase = blocker ? `${r.phase} ⏸blocked-on-${blocker}` : r.phase;
       lines.push(
-        `| ${cell(r.id)} | ${r.phase} | ${cell(r.sentence)} | ${r.workspace} | ${r.iterations} | ${r.receipt} | ${cell(r.allow)} |`,
+        `| ${cell(r.id)} | ${phase} | ${r.dependsOn ? cell(r.dependsOn) : DASH} | ${cell(r.sentence)} | ${r.workspace} | ${r.iterations} | ${r.receipt} | ${cell(r.allow)} |`,
       );
     }
     lines.push("");

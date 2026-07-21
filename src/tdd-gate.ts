@@ -2,8 +2,14 @@
 // tools. Hard-block, no soft mode — in RED, implementation paths are denied until
 // a failing test has been observed. The entrypoint I/O lives in src/hooks.ts.
 import { isAbsolute, relative, resolve } from "node:path";
-import { BUILTIN_TEST_GLOBS, type ClassifyConfig, classify } from "./lib/classify";
+import {
+  BUILTIN_TEST_GLOBS,
+  type ClassifyConfig,
+  classify,
+  normalizeRelPath,
+} from "./lib/classify";
 import { readConfig } from "./lib/config";
+import { globMatch } from "./lib/glob";
 import { resolutionFailureReason, resolveTask } from "./lib/resolve";
 import type { TaskState } from "./lib/task";
 
@@ -39,6 +45,29 @@ export function blockMessage(task: TaskState, relPath: string, config: ClassifyC
   ].join("\n");
 }
 
+/** A declared scope confines only implementation writes to their lane. Empty
+ * scope = unconfined. Exempt/test/allow paths are handled by `classify` before
+ * this is consulted, so an out-of-lane path here is genuinely off-scope. */
+function inScope(relPath: string, scope: readonly string[]): boolean {
+  const path = normalizeRelPath(relPath);
+  return scope.some((glob) => globMatch(normalizeRelPath(glob), path));
+}
+
+export function scopeBlockMessage(
+  task: TaskState,
+  relPath: string,
+  scope: readonly string[],
+): string {
+  return [
+    `sddx TDD gate: blocked write to ${relPath} — outside task ${task.id}'s declared scope.`,
+    `This task may only write: ${scope.join(", ")}.`,
+    "Do one of:",
+    "  1. Write inside the declared scope.",
+    `  2. If this file genuinely belongs to the task, widen its spec's scope and re-create the task.`,
+    `  3. For a one-off exception: sddx task allow ${task.id} ${relPath} — audited in the receipt.`,
+  ].join("\n");
+}
+
 export function tddGate(input: GateInput, env = process.env): GateDecision {
   const anchor = input.filePath
     ? isAbsolute(input.filePath)
@@ -51,15 +80,25 @@ export function tddGate(input: GateInput, env = process.env): GateDecision {
   const failure = resolutionFailureReason(res, "writing");
   if (failure) return { allow: false, reason: failure };
   if (res.kind !== "task") return { allow: true };
-
-  // Pre-GREEN phases: PLAN (no failing test yet) and RED both block implementation
-  // writes — "implementation-first" is exactly a write attempted before GREEN evidence.
-  if (res.task.phase !== "PLAN" && res.task.phase !== "RED") return { allow: true };
   if (!input.filePath) return { allow: true }; // no target to classify (non-file event)
 
   const relPath = relative(res.root, anchor);
   const config = input.config ?? loadGateConfig(res.root, env);
   const cls = classify(relPath, res.task.allow, config);
-  if (cls.rule !== "implementation") return { allow: true };
-  return { allow: false, reason: blockMessage(res.task, relPath, config) };
+
+  // Test-first: pre-GREEN, an implementation write is blocked outright — "implementation
+  // -first" is exactly a write attempted before GREEN evidence.
+  if ((res.task.phase === "PLAN" || res.task.phase === "RED") && cls.rule === "implementation") {
+    return { allow: false, reason: blockMessage(res.task, relPath, config) };
+  }
+
+  // Scope confinement: an implementation write outside the declared lane is blocked
+  // in ANY phase. `classify` already gave exempt globs and the allow-list precedence,
+  // so they permit the write before we reach here.
+  const scope = res.task.scope ?? [];
+  if (cls.rule === "implementation" && scope.length > 0 && !inScope(relPath, scope)) {
+    return { allow: false, reason: scopeBlockMessage(res.task, relPath, scope) };
+  }
+
+  return { allow: true };
 }

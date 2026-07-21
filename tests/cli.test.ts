@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fixtureClone, fixtureRepo } from "./fixtures";
@@ -23,6 +23,24 @@ oracle:
   type: command
   run: "exit 0"
 `;
+
+/** A two-node graph.yaml + specs where the dependent's scope overlaps its parent's
+ * (legal, because the edge orders them). specs live in a subdir of the graph file. */
+function mkdtempScopedSpecs(cwd: string): void {
+  mkdirSync(join(cwd, "specs"), { recursive: true });
+  writeFileSync(
+    join(cwd, "specs", "schema.yaml"),
+    `task: migrate the schema\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/db/**\n`,
+  );
+  writeFileSync(
+    join(cwd, "specs", "api.yaml"),
+    `task: build the api\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/db/schema.ts\n`,
+  );
+  writeFileSync(
+    join(cwd, "graph.yaml"),
+    "goal: ship the feature\ntasks:\n  - alias: schema\n    spec: specs/schema.yaml\n  - alias: api\n    spec: specs/api.yaml\n    depends_on: schema\n",
+  );
+}
 
 describe("sddx cli", () => {
   test("task create validates spec, creates branch, writes state", () => {
@@ -244,6 +262,178 @@ describe("sddx cli", () => {
     const shown = cli(cwd, "goal", "show", goalIdMatch);
     expect(shown.status).toBe(0);
     expect(JSON.parse(shown.stdout).task_ids).toEqual([id]);
+  });
+
+  test("task create --depends-on records a deferred workspace; unknown parent refused", () => {
+    const cwd = fixtureRepo();
+    writeFileSync(join(cwd, "spec.yaml"), SPEC);
+    const parentId = /created (\S+)/.exec(
+      cli(cwd, "task", "create", "--spec", "spec.yaml", "--no-branch").stdout,
+    )![1]!;
+
+    writeFileSync(
+      join(cwd, "child.yaml"),
+      `task: use the greet output\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/child/**\n`,
+    );
+    const child = cli(cwd, "task", "create", "--spec", "child.yaml", "--depends-on", parentId);
+    expect(child.status).toBe(0);
+    expect(child.stdout).toContain(`depends_on=${parentId}`);
+    expect(child.stdout).toContain("workspace=deferred");
+    const childId = /created (\S+)/.exec(child.stdout)![1]!;
+    const state = JSON.parse(readFileSync(join(cwd, ".sddx", "tasks", `${childId}.json`), "utf8"));
+    expect(state.depends_on).toBe(parentId);
+    expect(state.workspace.base_sha).toBe(`pending:${parentId}`);
+    expect(state.workspace.path).toBeUndefined();
+    expect(existsSync(join(cwd, ".sddx-worktrees", childId))).toBe(false);
+
+    // unknown parent is refused
+    const bad = cli(cwd, "task", "create", "--spec", "child.yaml", "--depends-on", "no-such-task");
+    expect(bad.status).toBe(1);
+    expect(bad.stderr).toContain("no such task");
+  });
+
+  test("graph create: ordered overlap accepted, tasks + goal written with edges", () => {
+    const cwd = fixtureRepo();
+    mkdtempScopedSpecs(cwd);
+    // branch mode: `none` is incompatible with dependent tasks (no base to fork from)
+    const r = cli(cwd, "graph", "create", "--graph", "graph.yaml", "--workspace", "branch");
+    expect(r.status).toBe(0);
+    const goalId = /created goal (\S+)/.exec(r.stdout)![1]!;
+    const goal = JSON.parse(readFileSync(join(cwd, ".sddx", "goals", `${goalId}.json`), "utf8"));
+    expect(goal.task_ids.length).toBe(2);
+    // the dependent records its parent as an edge and is deferred
+    const [rootId, childId] = goal.task_ids as [string, string];
+    expect(goal.deps[childId]).toBe(rootId);
+    const child = JSON.parse(readFileSync(join(cwd, ".sddx", "tasks", `${childId}.json`), "utf8"));
+    expect(child.depends_on).toBe(rootId);
+    expect(child.workspace.base_sha).toBe(`pending:${rootId}`);
+  });
+
+  test("graph create: concurrent scope overlap refused atomically — nothing written", () => {
+    const cwd = fixtureRepo();
+    writeFileSync(
+      join(cwd, "a.yaml"),
+      `task: task a\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/db/**\n`,
+    );
+    writeFileSync(
+      join(cwd, "b.yaml"),
+      `task: task b\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/db/schema.ts\n`,
+    );
+    // a and b are both roots (no depends_on) with overlapping scope → illegal
+    writeFileSync(
+      join(cwd, "graph.yaml"),
+      "goal: do a and b\ntasks:\n  - alias: a\n    spec: a.yaml\n  - alias: b\n    spec: b.yaml\n",
+    );
+    const r = cli(cwd, "graph", "create", "--graph", "graph.yaml", "--workspace", "none");
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("scope overlap");
+    // atomic: no task files, no goal directory
+    expect(existsSync(join(cwd, ".sddx", "tasks"))).toBe(false);
+    expect(existsSync(join(cwd, ".sddx", "goals"))).toBe(false);
+  });
+
+  test("graph create: a node whose spec lacks an oracle is refused, nothing written", () => {
+    const cwd = fixtureRepo();
+    writeFileSync(join(cwd, "ok.yaml"), SPEC);
+    writeFileSync(join(cwd, "bad.yaml"), "task: t\nsuccess_criteria:\n  - a\n");
+    writeFileSync(
+      join(cwd, "graph.yaml"),
+      "goal: g\ntasks:\n  - alias: ok\n    spec: ok.yaml\n  - alias: bad\n    spec: bad.yaml\n",
+    );
+    const r = cli(cwd, "graph", "create", "--graph", "graph.yaml", "--workspace", "none");
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("oracle");
+    expect(existsSync(join(cwd, ".sddx", "tasks"))).toBe(false);
+  });
+
+  test("graph create refuses --workspace none when the graph has a dependency", () => {
+    const cwd = fixtureRepo();
+    mkdtempScopedSpecs(cwd);
+    const r = cli(cwd, "graph", "create", "--graph", "graph.yaml", "--workspace", "none");
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("none is incompatible with dependent tasks");
+    expect(existsSync(join(cwd, ".sddx", "tasks"))).toBe(false);
+  });
+
+  test("task create --depends-on refuses none mode and overlapping siblings", () => {
+    const cwd = fixtureRepo();
+    writeFileSync(join(cwd, "p.yaml"), SPEC);
+    const parentId = /created (\S+)/.exec(
+      cli(cwd, "task", "create", "--spec", "p.yaml", "--no-branch").stdout,
+    )![1]!;
+
+    // none mode + a dependency is refused (no isolatable base to fork from)
+    writeFileSync(
+      join(cwd, "c1.yaml"),
+      `task: child one\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/shared/**\n`,
+    );
+    const none = cli(
+      cwd,
+      "task",
+      "create",
+      "--spec",
+      "c1.yaml",
+      "--depends-on",
+      parentId,
+      "--workspace",
+      "none",
+    );
+    expect(none.status).toBe(1);
+    expect(none.stderr).toContain("worktree or branch mode");
+
+    // first sibling (branch mode) is accepted
+    const c1 = cli(
+      cwd,
+      "task",
+      "create",
+      "--spec",
+      "c1.yaml",
+      "--depends-on",
+      parentId,
+      "--workspace",
+      "branch",
+    );
+    expect(c1.status).toBe(0);
+
+    // a second sibling of the same parent with overlapping scope is refused
+    writeFileSync(
+      join(cwd, "c2.yaml"),
+      `task: child two\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/shared/x.ts\n`,
+    );
+    const c2 = cli(
+      cwd,
+      "task",
+      "create",
+      "--spec",
+      "c2.yaml",
+      "--depends-on",
+      parentId,
+      "--workspace",
+      "branch",
+    );
+    expect(c2.status).toBe(1);
+    expect(c2.stderr).toContain("scope overlap");
+  });
+
+  test("goal create refuses concurrent overlapping tasks", () => {
+    const cwd = fixtureRepo();
+    writeFileSync(
+      join(cwd, "a.yaml"),
+      `task: alpha\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/db/**\n`,
+    );
+    writeFileSync(
+      join(cwd, "b.yaml"),
+      `task: bravo\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/db/x.ts\n`,
+    );
+    const aId = /created (\S+)/.exec(
+      cli(cwd, "task", "create", "--spec", "a.yaml", "--no-branch").stdout,
+    )![1]!;
+    const bId = /created (\S+)/.exec(
+      cli(cwd, "task", "create", "--spec", "b.yaml", "--no-branch").stdout,
+    )![1]!;
+    const r = cli(cwd, "goal", "create", "--goal", "both", "--tasks", `${aId},${bId}`);
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("scope overlap");
   });
 
   test("pr create usage error exits 2 without --goal", () => {

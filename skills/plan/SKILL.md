@@ -20,6 +20,8 @@ CLI: `"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "${CLAUDE_PLUGIN_ROOT}/dist/cli.mjs"`
    context: <links/paths, not prose>
    success_criteria:
      - "<binary check>"
+   scope:             # optional — write globs this task's lane covers
+     - "<glob>"
    oracle:            # mandatory — no oracle, no goal
      type: command    # command | test-suite | browser | manual
      run: "<command that proves success>"
@@ -29,6 +31,11 @@ CLI: `"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "${CLAUDE_PLUGIN_ROOT}/dist/cli.mjs"`
    out_of_scope:
      - "<explicitly not doing>"
    ```
+
+   Declare `scope` when the task will run alongside others: it's the write-lane
+   the graph gate checks for conflicts and the gate enforces at run time. A
+   dependent task (one that needs another's committed result) is expressed in
+   the graph with `depends_on`, not in this spec — see `/sddx:run`.
 
 4. **Register it.** Save the YAML to a file and run:
    `... task create --spec <file> --workspace branch`

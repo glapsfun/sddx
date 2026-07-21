@@ -15,6 +15,8 @@ task: <one sentence>
 context: <links to CONTEXT.md sections, not prose>
 success_criteria: # every item binary — pass or fail, no judgment calls
   - "GET /health returns 200 with {status: ok}"
+scope: # OPTIONAL — the write globs this task's lane covers
+  - "src/health/**"
 oracle: # the observable proof — MANDATORY
   type: command # command | test-suite | browser | manual
   run: "bun test tests/health.test.ts"
@@ -32,6 +34,10 @@ Rules:
   A spec without an oracle is invalid and will be rejected at create time.
 - Every success criterion must be binary. Rewrite vague asks ("make it fast")
   into measurable ones ("p95 < 100ms on the included benchmark") or push back.
+- When the task runs alongside siblings, declare a `scope` — the globs it may
+  write. It is both the conflict-check the orchestrator's graph gate uses and the
+  executor's write-boundary at run time (writes outside it are blocked). Keep it
+  tight: the smallest lane that covers the work.
 - Keep it to one page. Dense context links beat prose.
 
 ## Never

@@ -98,6 +98,35 @@ describe("task state", () => {
   });
 });
 
+describe("scope and depends_on", () => {
+  const scopedSpec = parseSpec(
+    "task: build the api\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: t\nscope:\n  - src/api/**\n",
+  ).spec!;
+
+  test("scope copied from the spec; root omits depends_on", () => {
+    const cwd = tmpCwd();
+    const t = createTask(cwd, scopedSpec, "s", { mode: "none", branch: null, base_sha: "a" });
+    const back = readTask(cwd, t.id);
+    expect(back.scope).toEqual(["src/api/**"]);
+    expect(back.depends_on).toBeUndefined();
+  });
+
+  test("depends_on recorded and round-trips when provided", () => {
+    const cwd = tmpCwd();
+    const t = createTask(
+      cwd,
+      scopedSpec,
+      "s",
+      { mode: "worktree", branch: null, base_sha: "pending:20260721-parent" },
+      { dependsOn: "20260721-parent" },
+    );
+    const back = readTask(cwd, t.id);
+    expect(back.depends_on).toBe("20260721-parent");
+    expect(back.workspace.base_sha).toBe("pending:20260721-parent");
+    expect(back.workspace.path).toBeUndefined();
+  });
+});
+
 describe("markShipped", () => {
   test("records goal id, PR url, and a timestamp", () => {
     const t = createTask(tmpCwd(), spec, "s", { mode: "none", branch: null, base_sha: "a" });

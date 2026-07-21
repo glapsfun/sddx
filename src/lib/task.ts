@@ -21,8 +21,12 @@ export const TRANSITIONS: Record<Phase, Phase[]> = {
 export interface Workspace {
   mode: "worktree" | "branch" | "none";
   branch: string | null;
+  /** Fork point once resolved. For a dependent task not yet materialized this is
+   * `pending:<parent-id>` — the real SHA is filled in when its worktree is created
+   * from the parent's DONE commit (see materializeDependent in worktree.ts). */
   base_sha: string;
-  /** Worktree path relative to the main repo root; absent for branch/none (M1 files). */
+  /** Worktree path relative to the main repo root; absent for branch/none, or for a
+   * dependent task whose worktree has not been materialized yet. */
   path?: string;
 }
 
@@ -33,6 +37,11 @@ export interface TaskState {
   spec_path: string;
   oracle: Oracle;
   workspace: Workspace;
+  /** Write globs the task may touch, copied from the spec. Empty = unconfined. */
+  scope: string[];
+  /** Single predecessor task id (LINE). Absent for a root task. A dependent runs
+   * only once this parent is DONE and forks its worktree from the parent's commit. */
+  depends_on?: string;
   allow: string[];
   iterations: number;
   /** Consecutive identical test failures; cleared by any pass or a different failure. */
@@ -75,6 +84,7 @@ export function createTask(
   spec: Spec,
   specPath: string,
   workspace: Workspace,
+  opts: { dependsOn?: string } = {},
 ): TaskState {
   const now = new Date().toISOString();
   const t: TaskState = {
@@ -84,6 +94,8 @@ export function createTask(
     spec_path: specPath,
     oracle: spec.oracle,
     workspace,
+    scope: spec.scope,
+    ...(opts.dependsOn ? { depends_on: opts.dependsOn } : {}),
     allow: [],
     iterations: 0,
     evidence: {},
@@ -156,6 +168,26 @@ export function allowPath(t: TaskState, path: string): TaskState {
   }
   if (!t.allow.includes(normalized)) t.allow.push(normalized);
   return t;
+}
+
+/**
+ * The nearest ancestor that is not yet DONE, or null when the task is ready to
+ * dispatch (a root, or every ancestor DONE). Derived at read time from
+ * `depends_on` plus the ancestors' phases (resolved wherever they live — main
+ * checkout, live worktree, or a swept task's branch tip) — "blocked" is never a
+ * persisted phase. A missing ancestor blocks too (its id is returned). Takes a
+ * structural subset of TaskState so the board can share this one derivation.
+ */
+export function blockedOn(cwd: string, task: { id: string; depends_on?: string }): string | null {
+  const seen = new Set<string>([task.id]);
+  let parentId = task.depends_on ?? null;
+  while (parentId && !seen.has(parentId)) {
+    seen.add(parentId);
+    const parent = resolveTaskState(cwd, parentId);
+    if (!parent || parent.phase !== "DONE") return parentId;
+    parentId = parent.depends_on ?? null;
+  }
+  return null;
 }
 
 export function markShipped(t: TaskState, goalId: string, prUrl: string): TaskState {

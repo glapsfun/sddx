@@ -7,6 +7,9 @@ export interface Goal {
   id: string;
   goal: string;
   task_ids: string[];
+  /** Single-parent edges: task id → its predecessor task id. Absent/empty for a
+   * goal of all-root tasks (the legacy shape). Set by `graph create`. */
+  deps?: Record<string, string>;
   created_at: string;
   updated_at: string;
   /** Set once by `sddx pr create` after a successful PR open. */
@@ -21,7 +24,12 @@ export const goalPath = (cwd: string, id: string): string => join(goalsDir(cwd),
  * branch carries a `goal-` prefix that keeps branch names distinct. */
 export const goalId = (sentence: string, date = new Date()): string => taskId(sentence, date);
 
-export function createGoal(cwd: string, goalSentence: string, taskIds: string[]): Goal {
+export function createGoal(
+  cwd: string,
+  goalSentence: string,
+  taskIds: string[],
+  deps?: Record<string, string>,
+): Goal {
   if (taskIds.length === 0) {
     throw new Error("a goal requires at least one task id");
   }
@@ -34,7 +42,14 @@ export function createGoal(cwd: string, goalSentence: string, taskIds: string[])
       throw new Error(`task ${tid} does not exist — cannot register it in a goal`);
     }
   }
-  const g: Goal = { id, goal: goalSentence, task_ids: taskIds, created_at: now, updated_at: now };
+  const g: Goal = {
+    id,
+    goal: goalSentence,
+    task_ids: taskIds,
+    ...(deps && Object.keys(deps).length > 0 ? { deps } : {}),
+    created_at: now,
+    updated_at: now,
+  };
   mkdirSync(goalsDir(cwd), { recursive: true });
   writeFileSync(path, `${JSON.stringify(g, null, 2)}\n`);
   return g;

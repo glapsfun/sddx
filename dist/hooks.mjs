@@ -291,6 +291,29 @@ function remoteUrl(cwd, remote) {
   const r = spawnSync2("git", ["remote", "get-url", remote], { cwd, encoding: "utf8" });
   return r.status === 0 ? r.stdout.trim() : null;
 }
+function upstreamBranch(cwd) {
+  const r = spawnSync2("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], {
+    cwd,
+    encoding: "utf8"
+  });
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+function commitsAheadOfUpstream(cwd) {
+  const r = spawnSync2("git", ["rev-list", "--count", "@{u}..HEAD"], { cwd, encoding: "utf8" });
+  return r.status === 0 ? Number(r.stdout.trim()) : 0;
+}
+function defaultBranch(cwd) {
+  const r = spawnSync2("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], {
+    cwd,
+    encoding: "utf8"
+  });
+  if (r.status === 0) {
+    const m = /^refs\/remotes\/origin\/(.+)$/.exec(r.stdout.trim());
+    if (m?.[1])
+      return m[1];
+  }
+  return branchExists(cwd, "main") ? "main" : "master";
+}
 var push = (cwd, branch) => {
   git(cwd, "push", "-u", "origin", branch);
 };

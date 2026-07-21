@@ -15,6 +15,7 @@ import {
 } from "./lib/git";
 import { createGoal, goalPath, readGoal } from "./lib/goal";
 import { type GraphNode, parseGraph, validateSchedule } from "./lib/graph";
+import { detectState, renderMenu, resolveSelection, visibleActions } from "./lib/next-actions";
 import { createGoalPr } from "./lib/pr";
 import { redCheck } from "./lib/redcheck";
 import { parseSpec, type Spec } from "./lib/spec";
@@ -57,7 +58,8 @@ const USAGE = `usage:
   sddx board
   sddx audit [--signatures] [--ci]
   sddx cleanup <id>
-  sddx sweep`;
+  sddx sweep
+  sddx next-actions [--select <reply>]`;
 
 function fail(message: string, code: 1 | 2 = 1): never {
   console.error(message);
@@ -504,6 +506,42 @@ function cmdSweep(cwd: string): void {
   console.log(`sweep: ${res.removed.length} removed, ${res.skipped.length} skipped`);
 }
 
+function cmdNextActions(cwd: string, args: string[]): void {
+  const selectArg = flag(args, "--select");
+  // detected fresh here, and again just before executing a selection — state
+  // between "show the menu" and "act on a reply" spans a model turn, so it
+  // can drift (the user may commit or push by hand outside sddx meanwhile)
+  const detected = detectState(cwd);
+  if (detected.warning) console.log(`warning: ${detected.warning}`);
+
+  if (selectArg === undefined) {
+    console.log(renderMenu(visibleActions(detected.state)));
+    return;
+  }
+
+  const fresh = detectState(cwd);
+  const freshVisible = visibleActions(fresh.state);
+  const resolved = resolveSelection(selectArg, freshVisible);
+  if ("error" in resolved) {
+    console.log(
+      resolved.error === "ambiguous"
+        ? `"${selectArg}" matches more than one action — be more specific.`
+        : `"${selectArg}" isn't a valid action right now.`,
+    );
+    console.log(renderMenu(freshVisible));
+    process.exitCode = 1;
+    return;
+  }
+  if (!resolved.run) {
+    console.log(`${resolved.label}: not implemented yet.`);
+    process.exitCode = 1;
+    return;
+  }
+  const result = resolved.run(cwd, { branch: fresh.branch });
+  console.log(result.message);
+  if (!result.ok) process.exitCode = 1;
+}
+
 function main(argv: string[]): void {
   const cwd = process.cwd();
   const [cmd, ...rest] = argv;
@@ -594,6 +632,10 @@ function main(argv: string[]): void {
     }
     if (cmd === "sweep") {
       cmdSweep(cwd);
+      return;
+    }
+    if (cmd === "next-actions") {
+      cmdNextActions(cwd, rest);
       return;
     }
     fail(USAGE, 2);

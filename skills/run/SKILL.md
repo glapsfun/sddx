@@ -36,16 +36,20 @@ Trivial single task and the user wants it in-session? `--solo` → follow
    its task id and worktree path. Executors never leave their worktree and run
    `... red-check <id>` once RED is recorded, before implementing.
 5. **Verify and advance** — per finished task, dispatch a `verifier` (only
-   `sddx verify` sets DONE and writes the receipt). When a parent reaches DONE,
-   materialize each newly-ready child with `... task materialize <child-id>`
-   (forks its worktree from the parent's DONE commit) and dispatch it. Repeat
-   until the forest drains. A stuck task leaves its descendants **blocked** —
-   report them, never dispatch them.
+   `sddx verify` sets DONE and writes the receipt). Each dispatched verifier
+   follows /sddx:verify, which on a pass runs `... next-actions` inside that
+   task's own worktree/branch and relays it — so each task gets the same
+   deterministic hand-off /sddx:quick uses, scoped to its own branch. When a
+   parent reaches DONE, materialize each newly-ready child with
+   `... task materialize <child-id>` (forks its worktree from the parent's
+   DONE commit) and dispatch it. Repeat until the forest drains. A stuck task
+   leaves its descendants **blocked** — report them, never dispatch them.
 6. **Report** — one line per task: id · branch · phase (or `blocked-on-<id>`) ·
    receipt path, plus the goal id. Then run `... sweep` to clear disposable
-   leftovers (it skips anything dirty or unverified, loudly). Mention that once
-   every task is DONE, `sddx pr create --goal <goal-id>` will open one PR for the
-   whole goal — but offer it, never run it unasked (see `/sddx:pr`).
+   leftovers (it skips anything dirty or unverified, loudly). `next-actions`
+   is single-branch and doesn't know about goals, so it isn't run here: if
+   every task is DONE, mention that `sddx pr create --goal <goal-id>` will
+   open one PR for the whole goal — but offer it, never run it unasked.
 
 ## Rules
 

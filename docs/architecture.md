@@ -75,6 +75,8 @@ few things intentionally live outside it because they aren't sddx state:
 - **The sweep lock and `.git/info/exclude`'s `.sddx-worktrees/` entry** live
   under `.git/` — they're git-internal bookkeeping, not sddx state.
 
+Two invariants hold across all of `.sddx/`:
+
 - **One file per task** — parallel worktrees merge `.sddx/` without conflicts.
 - **Every completed task is one atomic commit**: code + spec + receipt.
 

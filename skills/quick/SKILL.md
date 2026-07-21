@@ -30,6 +30,8 @@ Rules:
 - Check `iterations` in `.sddx/tasks/<id>.json` against the spec's
   max_iterations (default 5) each verify attempt; exceeded → stop, escalate.
 - Never touch `.sddx/receipts/**`. DONE is the verifier's call, not yours.
-- After DONE the work sits on `sddx/<id>`; offer the user the merge — never
-  merge or clean up without being asked. Cleanup: `... cleanup <id>` (deletes
-  only merged branches).
+- After DONE (or whenever the loop pauses for input), run `... next-actions`
+  and relay its output verbatim as the completion message — don't compose
+  your own summary of what's next. On the user's reply, run
+  `... next-actions --select "<reply>"` and relay that output too. Cleanup:
+  `... cleanup <id>` (deletes only merged branches).

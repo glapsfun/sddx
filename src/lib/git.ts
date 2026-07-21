@@ -46,6 +46,37 @@ export function remoteUrl(cwd: string, remote: string): string | null {
   return r.status === 0 ? r.stdout.trim() : null;
 }
 
+/** null when HEAD has no configured upstream — never throws. */
+export function upstreamBranch(cwd: string): string | null {
+  const r = spawnSync("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], {
+    cwd,
+    encoding: "utf8",
+  });
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+
+/** Commits on HEAD not yet on its upstream. 0 when there is no upstream (callers
+ * should check `upstreamBranch` separately — that distinguishes "clean" from
+ * "never pushed", which this alone cannot). */
+export function commitsAheadOfUpstream(cwd: string): number {
+  const r = spawnSync("git", ["rev-list", "--count", "@{u}..HEAD"], { cwd, encoding: "utf8" });
+  return r.status === 0 ? Number(r.stdout.trim()) : 0;
+}
+
+/** The remote's default branch (e.g. "main"), read from `origin/HEAD`; falls
+ * back to a local "main" or "master" branch when that symref isn't set. */
+export function defaultBranch(cwd: string): string {
+  const r = spawnSync("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], {
+    cwd,
+    encoding: "utf8",
+  });
+  if (r.status === 0) {
+    const m = /^refs\/remotes\/origin\/(.+)$/.exec(r.stdout.trim());
+    if (m?.[1]) return m[1];
+  }
+  return branchExists(cwd, "main") ? "main" : "master";
+}
+
 export const push = (cwd: string, branch: string): void => {
   git(cwd, "push", "-u", "origin", branch);
 };

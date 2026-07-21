@@ -45,7 +45,11 @@ for the full gate and refusal behavior.
 
 **`/sddx:quick`** — one task through the same loop, on a `sddx/<id>` branch,
 with evidence-gated phase transitions (`task phase <id> RED --test-exit <n>`
-is rejected unless the observed exit code is actually non-zero).
+is rejected unless the observed exit code is actually non-zero). Once a task
+passes verify (or the loop otherwise pauses), the completion message is the
+**Next Actions** menu (`sddx next-actions`, see
+[cli.md](cli.md#sddx-next-actions)) — a deterministic list of exactly the
+git/PR actions valid for the branch's current state, not free-form prose.
 
 **`--solo`** — for a trivial task: same hook gates, but run in the main
 session with no subagents and no worktree. Mention it to `/sddx:run` and it
@@ -96,6 +100,7 @@ one atomic commit containing the code, the spec, and the receipt. Then:
 ```sh
 sddx board   # regenerates .sddx/BOARD.md
 sddx audit   # walks the receipt chain; exit 1 on any finding
+sddx next-actions   # what to do next, filtered to the current git/PR state
 ```
 
 ## Workspaces and worktrees

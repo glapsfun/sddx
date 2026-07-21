@@ -206,3 +206,39 @@ DONE, skips everything else with a reason (`skipped <path> (<reason>)` — dirty
 trees are never touched, they get flagged on the board). Prints
 `sweep: <n> removed, <n> skipped`; a concurrent sweep prints
 `sweep: another sweep holds the lock — skipped`.
+
+## sddx next-actions
+
+```sh
+sddx next-actions [--select "<reply>"]
+```
+
+The deterministic "Next Actions" menu that replaces free-form completion
+prose after a task's loop pauses or finishes. With no `--select`, detects the
+current repository state (`uncommitted` / `committed-unpushed` /
+`pushed-no-pr` / `pr-open` — from `git status`, upstream tracking, and a
+PR/MR-existence check via `gh`/`glab`) and prints only the actions valid for
+that state, numbered and grouped (Git / Development / Quality / Other). With
+`--select "<reply>"`, re-detects state fresh, resolves `<reply>` against the
+menu (either the printed number or a case-insensitive match on the action's
+label — e.g. `"1"` and `"commit"` both select **Commit**), and executes it,
+printing the observable result (new commit SHA, PR/MR URL, diff, etc). A
+`<reply>` that no longer matches a currently-valid action (state drifted
+since the menu was shown) or matches more than one action is refused with
+the menu re-printed, exit 1 — nothing executes.
+
+If the PR/MR-existence check can't reach the host (no `gh`/`glab`
+authentication, or the remote isn't GitHub/GitLab), the state degrades to
+`pushed-no-pr` with a one-line `warning:` rather than failing — PR-dependent
+actions are simply omitted from that menu.
+
+The action set is a static, data-driven catalog (`src/lib/next-actions.ts`):
+each entry declares the states it's valid in. Adding a new action is a new
+catalog entry — it never requires changing state detection or the selection
+parser. A handful of future actions (release, tag, deploy, changelog,
+security/perf scans, dashboard, branch switch) are already listed in the
+catalog with `implemented: false`, so they never appear in a menu yet, but
+the shape is there.
+
+Used by `/sddx:quick` and `/sddx:verify` as the default post-task hand-off,
+in place of the model composing its own "what's next" prose.

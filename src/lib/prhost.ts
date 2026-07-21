@@ -22,6 +22,12 @@ export interface PrHostBackend {
   authStatus(cwd: string): AuthStatus;
   /** Returns the opened PR/MR's URL. */
   openPr(cwd: string, opts: OpenPrOptions): string;
+  /** The open PR/MR for `branch`, or null if none exists. Callers that need to
+   * distinguish "none exists" from "couldn't check" should call `authStatus`
+   * first — this never throws on a plain not-found. */
+  findPr(cwd: string, branch: string): { url: string } | null;
+  /** Merges the open PR/MR for `branch`; returns the host CLI's report line. */
+  mergePr(cwd: string, branch: string): string;
 }
 
 // explicit `env` matters: without it, some runtimes resolve the executable
@@ -53,6 +59,22 @@ export const ghBackend: PrHostBackend = {
     }
     return r.stdout.trim();
   },
+  findPr(cwd, branch) {
+    const r = run("gh", ["pr", "view", branch, "--json", "url"], cwd);
+    if (r.status !== 0) return null;
+    try {
+      return { url: (JSON.parse(r.stdout) as { url: string }).url };
+    } catch {
+      return null;
+    }
+  },
+  mergePr(cwd, branch) {
+    const r = run("gh", ["pr", "merge", branch, "--merge"], cwd);
+    if (r.status !== 0) {
+      throw new Error(`gh pr merge failed: ${(r.stderr ?? "").trim()}`);
+    }
+    return ((r.stdout ?? "") + (r.stderr ?? "")).trim();
+  },
 };
 
 export const glabBackend: PrHostBackend = {
@@ -81,6 +103,19 @@ export const glabBackend: PrHostBackend = {
       throw new Error(`glab mr create failed: ${(r.stderr ?? "").trim()}`);
     }
     return r.stdout.trim();
+  },
+  findPr(cwd, branch) {
+    const r = run("glab", ["mr", "view", branch], cwd);
+    if (r.status !== 0) return null;
+    const m = /(https?:\/\/\S+)/.exec(r.stdout);
+    return { url: m ? m[1] : r.stdout.trim() };
+  },
+  mergePr(cwd, branch) {
+    const r = run("glab", ["mr", "merge", branch, "--yes"], cwd);
+    if (r.status !== 0) {
+      throw new Error(`glab mr merge failed: ${(r.stderr ?? "").trim()}`);
+    }
+    return ((r.stdout ?? "") + (r.stderr ?? "")).trim();
   },
 };
 

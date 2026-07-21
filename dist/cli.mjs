@@ -6944,8 +6944,8 @@ var require_public_api = __commonJS((exports) => {
 });
 
 // src/cli.ts
-import { copyFileSync as copyFileSync2, existsSync as existsSync9, mkdirSync as mkdirSync6, readdirSync as readdirSync5, readFileSync as readFileSync9 } from "node:fs";
-import { dirname, join as join11, relative as relative2, resolve } from "node:path";
+import { copyFileSync as copyFileSync2, existsSync as existsSync10, mkdirSync as mkdirSync6, readdirSync as readdirSync5, readFileSync as readFileSync10 } from "node:fs";
+import { dirname, join as join12, relative as relative2, resolve } from "node:path";
 
 // src/audit.ts
 import { spawnSync as spawnSync3 } from "node:child_process";
@@ -7526,6 +7526,29 @@ var forceDeleteBranch = (cwd, name) => {
 function remoteUrl(cwd, remote) {
   const r = spawnSync5("git", ["remote", "get-url", remote], { cwd, encoding: "utf8" });
   return r.status === 0 ? r.stdout.trim() : null;
+}
+function upstreamBranch(cwd) {
+  const r = spawnSync5("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], {
+    cwd,
+    encoding: "utf8"
+  });
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+function commitsAheadOfUpstream(cwd) {
+  const r = spawnSync5("git", ["rev-list", "--count", "@{u}..HEAD"], { cwd, encoding: "utf8" });
+  return r.status === 0 ? Number(r.stdout.trim()) : 0;
+}
+function defaultBranch(cwd) {
+  const r = spawnSync5("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], {
+    cwd,
+    encoding: "utf8"
+  });
+  if (r.status === 0) {
+    const m = /^refs\/remotes\/origin\/(.+)$/.exec(r.stdout.trim());
+    if (m?.[1])
+      return m[1];
+  }
+  return branchExists(cwd, "main") ? "main" : "master";
 }
 var push = (cwd, branch) => {
   git(cwd, "push", "-u", "origin", branch);
@@ -8187,64 +8210,15 @@ function validateSchedule(nodes) {
 }
 var dedupe = (xs) => [...new Set(xs)];
 
-// src/lib/pr.ts
+// src/lib/next-actions.ts
+import { spawnSync as spawnSync8 } from "node:child_process";
 import { existsSync as existsSync8, readFileSync as readFileSync8 } from "node:fs";
-import { join as join10 } from "node:path";
-
-// src/lib/prbranch.ts
-import { spawnSync as spawnSync7 } from "node:child_process";
 import { join as join9 } from "node:path";
-var goalBranchName = (goalId2) => `sddx/goal-${goalId2}`;
-function taskCommitSha(cwd, taskId2) {
-  return git(cwd, "rev-parse", `refs/heads/sddx/${taskId2}`);
-}
-function resetGoalBranch(cwd, branch) {
-  if (branchExists(cwd, branch))
-    forceDeleteBranch(cwd, branch);
-}
-function buildGoalBranch(cwd, goalId2, taskIds) {
-  if (taskIds.length === 0)
-    throw new Error("cannot build a goal branch with zero tasks");
-  const resolved = taskIds.map((taskId2) => {
-    const task = resolveTaskState(cwd, taskId2);
-    if (!task) {
-      throw new Error(`task ${taskId2} could not be resolved while building the goal branch`);
-    }
-    if (!branchExists(cwd, `sddx/${taskId2}`)) {
-      throw new Error(`task ${taskId2} has no sddx/${taskId2} branch — workspace mode "none" tasks can't be ` + "cherry-picked into a goal PR; recreate the task with --workspace branch or worktree");
-    }
-    return { taskId: taskId2, createdAt: task.created_at, commitSha: taskCommitSha(cwd, taskId2) };
-  });
-  const commits = resolved.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
-  const branch = goalBranchName(goalId2);
-  resetGoalBranch(cwd, branch);
-  const base = resolveBaseRef(cwd);
-  const worktreePath = join9(worktreesDir(cwd), `goal-${goalId2}`);
-  git(cwd, "worktree", "add", "-q", worktreePath, "-b", branch, base.sha);
-  try {
-    for (const { taskId: taskId2, commitSha } of commits) {
-      const r = spawnSync7("git", ["cherry-pick", commitSha], {
-        cwd: worktreePath,
-        encoding: "utf8"
-      });
-      if (r.status !== 0) {
-        spawnSync7("git", ["cherry-pick", "--abort"], { cwd: worktreePath });
-        throw new Error(`cherry-pick failed for task ${taskId2} while building ${branch}: ${(r.stderr ?? "").trim()}`);
-      }
-    }
-  } catch (e) {
-    removeWorktreeForced(cwd, worktreePath);
-    forceDeleteBranch(cwd, branch);
-    throw e;
-  }
-  const headSha2 = git(worktreePath, "rev-parse", "HEAD");
-  return { branch, headSha: headSha2, worktreePath };
-}
 
 // src/lib/prhost.ts
-import { spawnSync as spawnSync8 } from "node:child_process";
+import { spawnSync as spawnSync7 } from "node:child_process";
 function run(cli, args, cwd) {
-  return spawnSync8(cli, args, { cwd, encoding: "utf8", env: process.env });
+  return spawnSync7(cli, args, { cwd, encoding: "utf8", env: process.env });
 }
 var ghBackend = {
   name: "gh",
@@ -8265,6 +8239,23 @@ var ghBackend = {
       throw new Error(`gh pr create failed: ${(r.stderr ?? "").trim()}`);
     }
     return r.stdout.trim();
+  },
+  findPr(cwd, branch) {
+    const r = run("gh", ["pr", "view", branch, "--json", "url"], cwd);
+    if (r.status !== 0)
+      return null;
+    try {
+      return { url: JSON.parse(r.stdout).url };
+    } catch {
+      return null;
+    }
+  },
+  mergePr(cwd, branch) {
+    const r = run("gh", ["pr", "merge", branch, "--merge"], cwd);
+    if (r.status !== 0) {
+      throw new Error(`gh pr merge failed: ${(r.stderr ?? "").trim()}`);
+    }
+    return ((r.stdout ?? "") + (r.stderr ?? "")).trim();
   }
 };
 var glabBackend = {
@@ -8289,6 +8280,20 @@ var glabBackend = {
       throw new Error(`glab mr create failed: ${(r.stderr ?? "").trim()}`);
     }
     return r.stdout.trim();
+  },
+  findPr(cwd, branch) {
+    const r = run("glab", ["mr", "view", branch], cwd);
+    if (r.status !== 0)
+      return null;
+    const m = /(https?:\/\/\S+)/.exec(r.stdout);
+    return { url: m ? m[1] : r.stdout.trim() };
+  },
+  mergePr(cwd, branch) {
+    const r = run("glab", ["mr", "merge", branch, "--yes"], cwd);
+    if (r.status !== 0) {
+      throw new Error(`glab mr merge failed: ${(r.stderr ?? "").trim()}`);
+    }
+    return ((r.stdout ?? "") + (r.stderr ?? "")).trim();
   }
 };
 var BACKENDS = { gh: ghBackend, glab: glabBackend };
@@ -8315,6 +8320,354 @@ function resolveBackend(cwd) {
   throw new Error('cannot determine PR host from the "origin" remote — set userConfig.pr_host to "gh" or "glab"');
 }
 
+// src/lib/next-actions.ts
+function prLookup(cwd, branch) {
+  let backend;
+  try {
+    backend = resolveBackend(cwd);
+  } catch {
+    return {
+      state: "pushed-no-pr",
+      warning: "cannot determine PR host — showing local-only actions"
+    };
+  }
+  const auth = backend.authStatus(cwd);
+  if (!auth.ok) {
+    return {
+      state: "pushed-no-pr",
+      warning: `${backend.name} is not authenticated — showing local-only actions`
+    };
+  }
+  const found = backend.findPr(cwd, branch);
+  return { state: found ? "pr-open" : "pushed-no-pr", warning: null };
+}
+function detectState(cwd) {
+  const branch = currentBranch(cwd);
+  if (isDirty(cwd))
+    return { state: "uncommitted", branch, warning: null };
+  const upstream = upstreamBranch(cwd);
+  if (!upstream || commitsAheadOfUpstream(cwd) > 0) {
+    return { state: "committed-unpushed", branch, warning: null };
+  }
+  const { state, warning } = prLookup(cwd, branch);
+  return { state, branch, warning };
+}
+function runTestsAction(cwd) {
+  const pkgPath = join9(cwd, "package.json");
+  if (!existsSync8(pkgPath))
+    return { ok: false, message: "no package.json found — nothing to run" };
+  let hasTestScript = false;
+  try {
+    const pkg = JSON.parse(readFileSync8(pkgPath, "utf8"));
+    hasTestScript = Boolean(pkg.scripts?.test);
+  } catch {
+    return { ok: false, message: "package.json is unreadable — cannot determine the test script" };
+  }
+  if (!hasTestScript)
+    return { ok: false, message: 'no "test" script in package.json' };
+  const r = spawnSync8("npm", ["test", "--silent"], { cwd, encoding: "utf8" });
+  const output = ((r.stdout ?? "") + (r.stderr ?? "")).trim();
+  return { ok: r.status === 0, message: output || `exit ${r.status}` };
+}
+var CATALOG = [
+  {
+    id: "commit",
+    label: "Commit",
+    category: "git",
+    validIn: ["uncommitted"],
+    implemented: true,
+    run(cwd) {
+      stageAll(cwd);
+      const sha = commit(cwd, "sddx: checkpoint");
+      return { ok: true, message: `committed ${sha}` };
+    }
+  },
+  {
+    id: "commit-push",
+    label: "Commit & Push",
+    category: "git",
+    validIn: ["uncommitted"],
+    aliases: ["commit and push"],
+    implemented: true,
+    run(cwd, ctx) {
+      stageAll(cwd);
+      const sha = commit(cwd, "sddx: checkpoint");
+      push(cwd, ctx.branch);
+      return { ok: true, message: `committed ${sha} and pushed ${ctx.branch}` };
+    }
+  },
+  {
+    id: "push",
+    label: "Push",
+    category: "git",
+    validIn: ["committed-unpushed"],
+    implemented: true,
+    run(cwd, ctx) {
+      push(cwd, ctx.branch);
+      return { ok: true, message: `pushed ${ctx.branch}` };
+    }
+  },
+  {
+    id: "create-pr",
+    label: "Create PR/MR",
+    category: "git",
+    validIn: ["committed-unpushed", "pushed-no-pr"],
+    aliases: ["create pull request", "create merge request", "open pr", "open mr"],
+    implemented: true,
+    run(cwd, ctx) {
+      const backend = resolveBackend(cwd);
+      const upstream = upstreamBranch(cwd);
+      if (!upstream)
+        push(cwd, ctx.branch);
+      const url = backend.openPr(cwd, { branch: ctx.branch, title: ctx.branch, body: "" });
+      return { ok: true, message: `opened ${url}` };
+    }
+  },
+  {
+    id: "merge-branch",
+    label: "Merge Branch",
+    category: "git",
+    validIn: ["committed-unpushed"],
+    implemented: true,
+    run(cwd, ctx) {
+      const target = defaultBranch(cwd);
+      git(cwd, "checkout", target);
+      try {
+        git(cwd, "merge", "--no-ff", "-m", `sddx: merge ${ctx.branch}`, ctx.branch);
+      } catch (e) {
+        git(cwd, "checkout", ctx.branch);
+        throw e;
+      }
+      return { ok: true, message: `merged ${ctx.branch} into ${target} (${headSha(cwd)})` };
+    }
+  },
+  {
+    id: "merge-to-main",
+    label: "Merge to Main",
+    category: "git",
+    validIn: ["pr-open"],
+    implemented: true,
+    run(cwd, ctx) {
+      const backend = resolveBackend(cwd);
+      const report = backend.mergePr(cwd, ctx.branch);
+      return { ok: true, message: report || `merged ${ctx.branch}` };
+    }
+  },
+  {
+    id: "continue-working",
+    label: "Continue Working",
+    category: "development",
+    validIn: ["uncommitted", "committed-unpushed", "pushed-no-pr", "pr-open"],
+    implemented: true,
+    run() {
+      return { ok: true, message: "continuing — no action taken" };
+    }
+  },
+  {
+    id: "start-next-task",
+    label: "Start Next Task",
+    category: "development",
+    validIn: ["pr-open"],
+    implemented: true,
+    run() {
+      return { ok: true, message: "run /sddx:plan or /sddx:run to start the next task" };
+    }
+  },
+  {
+    id: "show-diff",
+    label: "Show Git Diff",
+    category: "quality",
+    validIn: ["uncommitted"],
+    implemented: true,
+    run(cwd) {
+      const diff = git(cwd, "diff", "HEAD");
+      return { ok: true, message: diff || "(no changes)" };
+    }
+  },
+  {
+    id: "run-tests",
+    label: "Run Tests",
+    category: "quality",
+    validIn: ["uncommitted"],
+    implemented: true,
+    run(cwd) {
+      return runTestsAction(cwd);
+    }
+  },
+  {
+    id: "discard-changes",
+    label: "Discard Changes",
+    category: "other",
+    validIn: ["uncommitted"],
+    implemented: true,
+    run(cwd) {
+      git(cwd, "checkout", "--", ".");
+      git(cwd, "clean", "-fd");
+      return { ok: true, message: "discarded uncommitted changes" };
+    }
+  },
+  {
+    id: "exit",
+    label: "Exit",
+    category: "other",
+    validIn: ["uncommitted", "committed-unpushed", "pushed-no-pr", "pr-open"],
+    implemented: true,
+    run() {
+      return { ok: true, message: "session ended" };
+    }
+  },
+  {
+    id: "create-release",
+    label: "Create Release",
+    category: "other",
+    validIn: [],
+    implemented: false
+  },
+  { id: "create-tag", label: "Create Git Tag", category: "other", validIn: [], implemented: false },
+  { id: "deploy", label: "Deploy", category: "other", validIn: [], implemented: false },
+  {
+    id: "generate-changelog",
+    label: "Generate Changelog",
+    category: "other",
+    validIn: [],
+    implemented: false
+  },
+  {
+    id: "generate-release-notes",
+    label: "Generate Release Notes",
+    category: "other",
+    validIn: [],
+    implemented: false
+  },
+  {
+    id: "run-security-scan",
+    label: "Run Security Scan",
+    category: "other",
+    validIn: [],
+    implemented: false
+  },
+  {
+    id: "run-performance-tests",
+    label: "Run Performance Tests",
+    category: "other",
+    validIn: [],
+    implemented: false
+  },
+  {
+    id: "open-project-dashboard",
+    label: "Open Project Dashboard",
+    category: "other",
+    validIn: [],
+    implemented: false
+  },
+  {
+    id: "switch-branch",
+    label: "Switch Branch",
+    category: "other",
+    validIn: [],
+    implemented: false
+  }
+];
+var CATEGORY_ORDER = ["git", "development", "quality", "other"];
+var CATEGORY_LABEL = {
+  git: "Git",
+  development: "Development",
+  quality: "Quality",
+  other: "Other"
+};
+function visibleActions(state) {
+  return CATALOG.filter((a) => a.implemented && a.validIn.includes(state)).sort((a, b) => CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category));
+}
+function renderMenu(visible) {
+  const lines = ["Next Actions", ""];
+  let n = 0;
+  for (const cat of CATEGORY_ORDER) {
+    const inCat = visible.filter((a) => a.category === cat);
+    if (inCat.length === 0)
+      continue;
+    lines.push(CATEGORY_LABEL[cat]);
+    for (const a of inCat) {
+      n++;
+      lines.push(`${n}. ${a.label}`);
+    }
+    lines.push("");
+  }
+  lines.push("Reply with the action number or simply type the action name.");
+  return lines.join(`
+`).trimEnd();
+}
+function normalize(text) {
+  return text.toLowerCase().replace(/[^\w\s]/g, "").replace(/\s+/g, " ").trim();
+}
+function resolveSelection(input, visible) {
+  const trimmed = input.trim();
+  const asIndex = Number(trimmed);
+  if (Number.isInteger(asIndex) && asIndex >= 1 && asIndex <= visible.length) {
+    return visible[asIndex - 1];
+  }
+  const normalized = normalize(trimmed);
+  const matches = visible.filter((a) => normalize(a.label) === normalized || (a.aliases ?? []).some((alias) => normalize(alias) === normalized));
+  if (matches.length === 1)
+    return matches[0];
+  if (matches.length > 1)
+    return { error: "ambiguous" };
+  return { error: "not-found" };
+}
+
+// src/lib/pr.ts
+import { existsSync as existsSync9, readFileSync as readFileSync9 } from "node:fs";
+import { join as join11 } from "node:path";
+
+// src/lib/prbranch.ts
+import { spawnSync as spawnSync9 } from "node:child_process";
+import { join as join10 } from "node:path";
+var goalBranchName = (goalId2) => `sddx/goal-${goalId2}`;
+function taskCommitSha(cwd, taskId2) {
+  return git(cwd, "rev-parse", `refs/heads/sddx/${taskId2}`);
+}
+function resetGoalBranch(cwd, branch) {
+  if (branchExists(cwd, branch))
+    forceDeleteBranch(cwd, branch);
+}
+function buildGoalBranch(cwd, goalId2, taskIds) {
+  if (taskIds.length === 0)
+    throw new Error("cannot build a goal branch with zero tasks");
+  const resolved = taskIds.map((taskId2) => {
+    const task = resolveTaskState(cwd, taskId2);
+    if (!task) {
+      throw new Error(`task ${taskId2} could not be resolved while building the goal branch`);
+    }
+    if (!branchExists(cwd, `sddx/${taskId2}`)) {
+      throw new Error(`task ${taskId2} has no sddx/${taskId2} branch — workspace mode "none" tasks can't be ` + "cherry-picked into a goal PR; recreate the task with --workspace branch or worktree");
+    }
+    return { taskId: taskId2, createdAt: task.created_at, commitSha: taskCommitSha(cwd, taskId2) };
+  });
+  const commits = resolved.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+  const branch = goalBranchName(goalId2);
+  resetGoalBranch(cwd, branch);
+  const base = resolveBaseRef(cwd);
+  const worktreePath = join10(worktreesDir(cwd), `goal-${goalId2}`);
+  git(cwd, "worktree", "add", "-q", worktreePath, "-b", branch, base.sha);
+  try {
+    for (const { taskId: taskId2, commitSha } of commits) {
+      const r = spawnSync9("git", ["cherry-pick", commitSha], {
+        cwd: worktreePath,
+        encoding: "utf8"
+      });
+      if (r.status !== 0) {
+        spawnSync9("git", ["cherry-pick", "--abort"], { cwd: worktreePath });
+        throw new Error(`cherry-pick failed for task ${taskId2} while building ${branch}: ${(r.stderr ?? "").trim()}`);
+      }
+    }
+  } catch (e) {
+    removeWorktreeForced(cwd, worktreePath);
+    forceDeleteBranch(cwd, branch);
+    throw e;
+  }
+  const headSha2 = git(worktreePath, "rev-parse", "HEAD");
+  return { branch, headSha: headSha2, worktreePath };
+}
+
 // src/lib/pr.ts
 function renderPrBody(worktreePath, goal) {
   const lines = [
@@ -8325,10 +8678,10 @@ function renderPrBody(worktreePath, goal) {
   ];
   for (const taskId2 of goal.task_ids) {
     const rPath = receiptPath(worktreePath, taskId2);
-    if (!existsSync8(rPath)) {
+    if (!existsSync9(rPath)) {
       throw new Error(`receipt for task ${taskId2} is missing from the goal branch — the cherry-pick is incomplete`);
     }
-    const raw = readFileSync8(rPath);
+    const raw = readFileSync9(rPath);
     const receipt = JSON.parse(raw.toString("utf8"));
     const exitCode = receipt.runs?.at(-1)?.exit_code ?? receipt.exit_code ?? "?";
     lines.push(`| \`${taskId2}\` | \`${receipt.oracle.run}\` | ${exitCode} | \`${sha256(raw)}\` |`);
@@ -8350,12 +8703,12 @@ function shipTask(cwd, taskId2, goalId2, prUrl) {
     mark(cwd);
     return;
   }
-  const existingWtPath = join10(worktreesDir(cwd), taskId2);
-  if (existsSync8(existingWtPath)) {
+  const existingWtPath = join11(worktreesDir(cwd), taskId2);
+  if (existsSync9(existingWtPath)) {
     mark(existingWtPath);
     return;
   }
-  const tmpPath = join10(worktreesDir(cwd), `ship-${taskId2}`);
+  const tmpPath = join11(worktreesDir(cwd), `ship-${taskId2}`);
   git(cwd, "worktree", "add", "-q", tmpPath, branch);
   try {
     mark(tmpPath);
@@ -8399,11 +8752,11 @@ function createGoalPr(cwd, id, opts = {}) {
 }
 
 // src/lib/oracle.ts
-import { spawnSync as spawnSync9 } from "node:child_process";
+import { spawnSync as spawnSync10 } from "node:child_process";
 var ORACLE_TIMEOUT_MS = 10 * 60000;
 function runOracle(cwd, run2) {
   const started = Date.now();
-  const r = spawnSync9("sh", ["-c", run2], { cwd, timeout: ORACLE_TIMEOUT_MS });
+  const r = spawnSync10("sh", ["-c", run2], { cwd, timeout: ORACLE_TIMEOUT_MS });
   if (r.error)
     throw new Error(`oracle could not run: ${r.error.message}`);
   return {
@@ -8508,11 +8861,11 @@ function parseSpec(yamlText) {
 }
 
 // src/lib/envinfo.ts
-import { spawnSync as spawnSync10 } from "node:child_process";
+import { spawnSync as spawnSync11 } from "node:child_process";
 import { arch, platform } from "node:os";
 function captureEnv(cwd) {
   const bun = globalThis.Bun;
-  const status = spawnSync10("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
+  const status = spawnSync11("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
   return {
     os: platform(),
     arch: arch(),
@@ -8622,14 +8975,15 @@ var USAGE = `usage:
   sddx board
   sddx audit [--signatures] [--ci]
   sddx cleanup <id>
-  sddx sweep`;
+  sddx sweep
+  sddx next-actions [--select <reply>]`;
 function fail(message, code = 1) {
   console.error(message);
   process.exit(code);
 }
 function mainTaskIds(cwd) {
-  const dir = join11(sddxDir(cwd), "tasks");
-  if (!existsSync9(dir))
+  const dir = join12(sddxDir(cwd), "tasks");
+  if (!existsSync10(dir))
     return [];
   return readdirSync5(dir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length));
 }
@@ -8645,7 +8999,7 @@ function flag(args, name) {
 function readVersionField(relativePath) {
   try {
     const manifest = new URL(relativePath, import.meta.url);
-    return JSON.parse(readFileSync9(manifest, "utf8")).version;
+    return JSON.parse(readFileSync10(manifest, "utf8")).version;
   } catch {
     return "unknown";
   }
@@ -8678,10 +9032,10 @@ function createRootTask(cwd, spec, specSrc, mode) {
     if (base2.source === "HEAD")
       console.log("no origin remote — forking from local HEAD");
     const wtPath = createWorktree(cwd, id, base2.sha);
-    const relPath = join11(".sddx-worktrees", id);
-    mkdirSync6(join11(sddxDir(wtPath), "specs"), { recursive: true });
-    const specPath2 = join11(".sddx", "specs", `${id}.yaml`);
-    copyFileSync2(specSrc, join11(wtPath, specPath2));
+    const relPath = join12(".sddx-worktrees", id);
+    mkdirSync6(join12(sddxDir(wtPath), "specs"), { recursive: true });
+    const specPath2 = join12(".sddx", "specs", `${id}.yaml`);
+    copyFileSync2(specSrc, join12(wtPath, specPath2));
     createTask(wtPath, spec, specPath2, {
       mode: "worktree",
       branch: `sddx/${id}`,
@@ -8697,9 +9051,9 @@ function createRootTask(cwd, spec, specSrc, mode) {
   const base = headSha(cwd);
   if (useBranch)
     createBranch(cwd, `sddx/${id}`);
-  mkdirSync6(join11(sddxDir(cwd), "specs"), { recursive: true });
-  const specPath = join11(".sddx", "specs", `${id}.yaml`);
-  copyFileSync2(specSrc, join11(cwd, specPath));
+  mkdirSync6(join12(sddxDir(cwd), "specs"), { recursive: true });
+  const specPath = join12(".sddx", "specs", `${id}.yaml`);
+  copyFileSync2(specSrc, join12(cwd, specPath));
   createTask(cwd, spec, specPath, {
     mode,
     branch: useBranch ? `sddx/${id}` : null,
@@ -8712,9 +9066,9 @@ function createDeferredTask(cwd, spec, specSrc, mode, dependsOn) {
     throw new Error("dependent tasks require worktree or branch mode — `none` has no isolatable base to fork from");
   }
   const id = taskId(spec.task);
-  mkdirSync6(join11(sddxDir(cwd), "specs"), { recursive: true });
-  const specPath = join11(".sddx", "specs", `${id}.yaml`);
-  copyFileSync2(specSrc, join11(cwd, specPath));
+  mkdirSync6(join12(sddxDir(cwd), "specs"), { recursive: true });
+  const specPath = join12(".sddx", "specs", `${id}.yaml`);
+  copyFileSync2(specSrc, join12(cwd, specPath));
   createTask(cwd, spec, specPath, { mode, branch: null, base_sha: `pending:${dependsOn}` }, { dependsOn });
   return id;
 }
@@ -8727,7 +9081,7 @@ function cmdTaskCreate(cwd, args) {
     fail(USAGE, 2);
   let yamlText;
   try {
-    yamlText = readFileSync9(join11(cwd, specArg), "utf8");
+    yamlText = readFileSync10(join12(cwd, specArg), "utf8");
   } catch {
     fail(`cannot read spec file: ${specArg}`);
   }
@@ -8738,7 +9092,7 @@ function cmdTaskCreate(cwd, args) {
     process.exit(1);
   }
   const mode = pickWorkspace(cwd, requested);
-  const specSrc = join11(cwd, specArg);
+  const specSrc = join12(cwd, specArg);
   const dependsOn = flag(args, "--depends-on");
   if (dependsOn !== undefined) {
     if (!resolveTaskState(cwd, dependsOn))
@@ -8790,7 +9144,7 @@ function cmdGraphCreate(cwd, args) {
     fail(USAGE, 2);
   let graphText;
   try {
-    graphText = readFileSync9(join11(cwd, graphArg), "utf8");
+    graphText = readFileSync10(join12(cwd, graphArg), "utf8");
   } catch {
     fail(`cannot read graph file: ${graphArg}`);
   }
@@ -8800,7 +9154,7 @@ function cmdGraphCreate(cwd, args) {
       console.error(`graph error: ${e}`);
     process.exit(1);
   }
-  const graphDir = dirname(join11(cwd, graphArg));
+  const graphDir = dirname(join12(cwd, graphArg));
   const errs = [];
   if (requested === "none" && graph.tasks.some((n) => n.depends_on !== null)) {
     errs.push("workspace none is incompatible with dependent tasks — use worktree or branch mode");
@@ -8811,7 +9165,7 @@ function cmdGraphCreate(cwd, args) {
     const src = resolve(graphDir, node.spec);
     let text;
     try {
-      text = readFileSync9(src, "utf8");
+      text = readFileSync10(src, "utf8");
     } catch {
       errs.push(`${node.alias}: cannot read spec ${node.spec}`);
       continue;
@@ -8921,13 +9275,13 @@ function cmdCleanup(cwd, args) {
   if (!id)
     fail(USAGE, 2);
   const branch = `sddx/${id}`;
-  const wtPath = join11(worktreesDir(cwd), id);
-  if (existsSync9(wtPath)) {
+  const wtPath = join12(worktreesDir(cwd), id);
+  if (existsSync10(wtPath)) {
     if (isDirty(wtPath)) {
-      fail(`refusing: worktree ${join11(".sddx-worktrees", id)} has uncommitted changes`);
+      fail(`refusing: worktree ${join12(".sddx-worktrees", id)} has uncommitted changes`);
     }
     removeWorktree(cwd, wtPath);
-    console.log(`removed worktree ${join11(".sddx-worktrees", id)}`);
+    console.log(`removed worktree ${join12(".sddx-worktrees", id)}`);
   }
   if (!branchExists(cwd, branch)) {
     console.log(`no branch ${branch} — nothing to clean up`);
@@ -8987,6 +9341,34 @@ function cmdSweep(cwd) {
   for (const s of res.skipped)
     console.log(`skipped ${s.path} (${s.reason})`);
   console.log(`sweep: ${res.removed.length} removed, ${res.skipped.length} skipped`);
+}
+function cmdNextActions(cwd, args) {
+  const selectArg = flag(args, "--select");
+  const detected = detectState(cwd);
+  if (detected.warning)
+    console.log(`warning: ${detected.warning}`);
+  if (selectArg === undefined) {
+    console.log(renderMenu(visibleActions(detected.state)));
+    return;
+  }
+  const fresh = detectState(cwd);
+  const freshVisible = visibleActions(fresh.state);
+  const resolved = resolveSelection(selectArg, freshVisible);
+  if ("error" in resolved) {
+    console.log(resolved.error === "ambiguous" ? `"${selectArg}" matches more than one action — be more specific.` : `"${selectArg}" isn't a valid action right now.`);
+    console.log(renderMenu(freshVisible));
+    process.exitCode = 1;
+    return;
+  }
+  if (!resolved.run) {
+    console.log(`${resolved.label}: not implemented yet.`);
+    process.exitCode = 1;
+    return;
+  }
+  const result = resolved.run(cwd, { branch: fresh.branch });
+  console.log(result.message);
+  if (!result.ok)
+    process.exitCode = 1;
 }
 function main(argv) {
   const cwd = process.cwd();
@@ -9087,6 +9469,10 @@ function main(argv) {
     }
     if (cmd === "sweep") {
       cmdSweep(cwd);
+      return;
+    }
+    if (cmd === "next-actions") {
+      cmdNextActions(cwd, rest);
       return;
     }
     fail(USAGE, 2);

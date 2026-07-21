@@ -53,18 +53,30 @@ oracle and write the receipt but never edit sources.
 
 ```
 .sddx/
+  drafts/<name>.yaml         # pre-registration graph.yaml + spec drafts (planner/orchestrator authored)
+  context/<name>.md          # pre-registration research/context notes (planner authored)
   specs/<task-id>.yaml       # the registered spec (copied at task create)
   tasks/<task-id>.json       # phase, oracle, workspace, base SHA, allow list, iterations
   receipts/<task-id>.json    # immutable, written once by the verifier
   goals/<goal-id>.json       # task ids a /sddx:run goal ties together; read by `pr create`
   BOARD.md                   # generated rollup — never hand-edited
+  config.json                # materialized from the plugin manifest's userConfig; read-only to sddx code
+  sweep.json                 # last orphan-sweep result; read by the board's flagged-worktrees section
 ```
+
+Every sddx-authored artifact — draft or registered — lives under `.sddx/`. A
+few things intentionally live outside it because they aren't sddx state:
+
+- **Worktrees** live under `.sddx-worktrees/<id>` on branch `sddx/<id>`,
+  forked from `origin/HEAD`, not inside `.sddx/` — each is a real git worktree
+  checkout, and nesting one inside `.sddx/` would break the per-task isolation
+  `.sddx/` exists to keep conflict-free. The sweep and cleanup rules are
+  documented in [usage.md](usage.md).
+- **The sweep lock and `.git/info/exclude`'s `.sddx-worktrees/` entry** live
+  under `.git/` — they're git-internal bookkeeping, not sddx state.
 
 - **One file per task** — parallel worktrees merge `.sddx/` without conflicts.
 - **Every completed task is one atomic commit**: code + spec + receipt.
-- **Worktrees** live under `.sddx-worktrees/<id>` on branch `sddx/<id>`,
-  forked from `origin/HEAD`; the sweep and cleanup rules are documented in
-  [usage.md](usage.md).
 
 ## Design principles
 

@@ -13,14 +13,18 @@ Trivial single task and the user wants it in-session? `--solo` → follow
 ## Flow
 
 1. **Decompose into a graph** — dispatch the `orchestrator` agent with the goal.
-   It authors a `graph.yaml`: one node per task with an `alias`, a `spec` path,
-   and at most one `depends_on` (an alias). Concurrent tasks (not ordered by an
-   edge) must have **disjoint `scope`**; overlapping scope must be ordered with
-   `depends_on`. One task is fine — a single-task run is the degenerate case.
-2. **Plan** — one `planner` agent per node writes its spec YAML, including a
-   `scope` (globs it may write) and an executable oracle: no oracle, no goal.
+   It authors `.sddx/drafts/<date>-<goal-slug>-graph.yaml`: one node per task
+   with an `alias`, a `spec` path (a bare filename alongside the graph file —
+   `graph create` resolves it relative to `graph.yaml`'s own directory), and
+   at most one `depends_on` (an alias). Concurrent tasks (not ordered by an
+   edge) must have **disjoint `scope`**; overlapping scope must be ordered
+   with `depends_on`. One task is fine — a single-task run is the degenerate
+   case.
+2. **Plan** — one `planner` per node writes its spec YAML alongside the graph
+   file under `.sddx/drafts/`, including a `scope` and an executable oracle:
+   no oracle, no goal.
 3. **Create atomically** — from the repo root:
-   `... graph create --graph graph.yaml`
+   `... graph create --graph .sddx/drafts/<date>-<goal-slug>-graph.yaml`
    This is the gate: it validates every oracle, the single-parent forest, and
    **overlap ⟹ ordered**, then writes all task files (worktrees forked from
    origin/HEAD for roots; dependents deferred) and `.sddx/goals/<goal-id>.json`

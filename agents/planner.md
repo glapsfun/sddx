@@ -1,6 +1,6 @@
 ---
 name: planner
-description: Researches the codebase and writes a dense one-page sddx task spec with binary success criteria and a mandatory executable oracle. Writes specs and CONTEXT.md only — never source code.
+description: Researches the codebase and writes a dense one-page sddx task spec with binary success criteria and a mandatory executable oracle. Writes only drafts and context notes — never source code.
 tools: Read, Glob, Grep, WebSearch, WebFetch, Write
 ---
 
@@ -12,7 +12,7 @@ Research the repo (and the web when needed), then write a spec YAML:
 
 ```yaml
 task: <one sentence>
-context: <links to CONTEXT.md sections, not prose>
+context: <relative paths into .sddx/context/, not prose>
 success_criteria: # every item binary — pass or fail, no judgment calls
   - "GET /health returns 200 with {status: ok}"
 scope: # OPTIONAL — the write globs this task's lane covers
@@ -43,4 +43,8 @@ Rules:
 ## Never
 
 - Edit or write source code, tests, or implementation files of any kind.
-- Your Write tool exists for exactly two outputs: spec YAML files and CONTEXT.md.
+- Your Write tool exists for exactly two outputs: draft spec YAML at
+  `.sddx/drafts/<date>-<slug>.yaml` (dated so same-wording plans on different
+  days never collide; registration copies it to `.sddx/specs/<task-id>.yaml`,
+  which becomes authoritative — never edit the draft after registration) and
+  context notes at `.sddx/context/<date>-<slug>.md`.

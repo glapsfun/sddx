@@ -29,9 +29,10 @@ sentence.
 
 ## context
 
-A list of pointers — file paths, CONTEXT.md sections — not prose. Optional
-(defaults to empty). Links keep the spec dense; anything the executor must
-read belongs here, anything it must *know* belongs in the linked file.
+A list of pointers — file paths, relative links into `.sddx/context/` — not
+prose. Optional (defaults to empty). Links keep the spec dense; anything the
+executor must read belongs here, anything it must *know* belongs in the
+linked file.
 
 ## success_criteria
 

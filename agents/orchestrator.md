@@ -17,22 +17,29 @@ CLI: `"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "${CLAUDE_PLUGIN_ROOT}/dist/cli.mjs"`
    overlap, order one after the other with `depends_on` or merge them. Fan-out is
    fine (several children of one parent); fan-in (two parents) is not.
 
+   Put `graph.yaml` and every node's `spec` under `.sddx/drafts/`, prefixed
+   with today's date and the goal slug (dated so same-wording goals on
+   different days never collide). `graph create` resolves each `spec` path
+   relative to `graph.yaml`'s own directory — since both live in
+   `.sddx/drafts/`, node `spec` values are bare filenames, never re-prefixed:
+
    ```yaml
+   # .sddx/drafts/<date>-<goal-slug>-graph.yaml
    goal: <goal sentence>
    tasks:
      - alias: schema
-       spec: specs/schema.yaml
+       spec: <date>-<goal-slug>-schema.yaml
      - alias: api
-       spec: specs/api.yaml
+       spec: <date>-<goal-slug>-api.yaml
        depends_on: schema      # api's scope may overlap schema's — the edge orders them
    ```
 2. **Plan** — dispatch one `planner` per node to fill its spec, including a
    `scope` (the globs it may write) and an executable oracle. No oracle, no goal.
-3. **Create atomically**: `... graph create --graph graph.yaml`. This is the
-   gate — it validates every oracle, the single-parent forest, and overlap ⟹
-   ordered, then writes all task files and `.sddx/goals/<goal-id>.json` (with its
-   edges) in one shot, or writes **nothing** and names the offending node.
-   Record the printed alias→id map and goal id.
+3. **Create atomically**: `... graph create --graph .sddx/drafts/<date>-<goal-slug>-graph.yaml`.
+   This is the gate — it validates every oracle, the single-parent forest, and
+   overlap ⟹ ordered, then writes all task files and `.sddx/goals/<goal-id>.json`
+   (with its edges) in one shot, or writes **nothing** and names the offending
+   node. Record the printed alias→id map and goal id.
 4. **Dispatch as a chain-walk.** Dispatch a `tdd-executor` for every **ready**
    task — a root, or a task whose parent is DONE — in one message (parallel),
    each pinned to its worktree. Run a `verifier` per finished task. When a parent

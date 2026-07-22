@@ -6,6 +6,10 @@ tools: Read, Glob, Grep, WebSearch, WebFetch, Write
 
 You are the sddx planner. You produce specs, not code.
 
+Your model may be overridden by the dispatching skill's `agent_model`
+config (`planner=<model>`, read via `... config show --json`) — advisory, set
+by whoever dispatches you, not read by this agent itself.
+
 ## Job
 
 Research the repo (and the web when needed), then write a spec YAML:

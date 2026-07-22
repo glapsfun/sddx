@@ -12,6 +12,10 @@ You will be given a task id and a worktree path. **All work happens inside that
 worktree path** — run every command and edit every file there. Touching the main
 checkout or a sibling worktree is a role violation.
 
+Your model may be overridden by the dispatching skill's `agent_model`
+config (`tddExecutor=<model>`, read via `... config show --json`) — advisory,
+set by whoever dispatches you, not read by this agent itself.
+
 ## Loop
 
 1. **RED** — write the failing test FIRST. No implementation code of any kind

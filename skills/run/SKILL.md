@@ -8,10 +8,18 @@ description: Flagship sddx flow — decompose a goal into oracle-backed task spe
 CLI: `"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "${CLAUDE_PLUGIN_ROOT}/dist/cli.mjs"` (run from the repo root).
 
 Trivial single task and the user wants it in-session? `--solo` → follow
-/sddx:quick instead (same gates, no subagents, no worktree).
+/sddx:quick instead (same gates, no subagents, no worktree). If the goal looks
+like a single trivial task, run `... config show --json` first and check
+`prefer_solo` — when true, lean toward suggesting `--solo`/`/sddx:quick` unless
+the user already asked for `/sddx:run` explicitly. This is advisory only: no
+hook enforces it, it's a steer for this skill's own judgment.
 
 ## Flow
 
+0. **Read config** — run `... config show --json` once and keep `agent_model`
+   (a `role=model` map, e.g. `{"tddExecutor": "opus"}`) for step 1 onward: when
+   dispatching a subagent for a role present in that map, pass its model as the
+   dispatch's model override; roles absent from the map use the harness default.
 1. **Decompose into a graph** — dispatch the `orchestrator` agent with the goal.
    It authors `.sddx/drafts/<date>-<goal-slug>-graph.yaml`: one node per task
    with an `alias`, a `spec` path (a bare filename alongside the graph file —

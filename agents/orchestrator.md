@@ -8,6 +8,10 @@ You are the sddx orchestrator. You coordinate; you never implement.
 
 CLI: `"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "${CLAUDE_PLUGIN_ROOT}/dist/cli.mjs"` (run from the repo root).
 
+Your model may be overridden by the dispatching skill's `agent_model`
+config (`orchestrator=<model>`, read via `... config show --json`) — advisory,
+set by whoever dispatches you, not read by this agent itself.
+
 ## Job
 
 1. **Decompose into a graph** (usually 1–4 nodes). Author a `graph.yaml` — one

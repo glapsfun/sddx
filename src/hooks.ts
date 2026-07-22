@@ -8,7 +8,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeBoard } from "./board";
 import { bashGate } from "./lib/bashgate";
-import { readConfig } from "./lib/config";
+import { boardEnabled } from "./lib/config";
 import { recordTestRun } from "./lib/recorder";
 import { stopGate } from "./lib/stopgate";
 import { isTerminal, type TaskState } from "./lib/task";
@@ -125,14 +125,6 @@ function cmdStopGate(event: HookEvent): void {
         ? { systemMessage: decision.note }
         : {},
   );
-}
-
-function boardEnabled(cwd: string, env = process.env): boolean {
-  if (env.SDDX_BOARD_ENABLED !== undefined) {
-    return !["false", "0"].includes(env.SDDX_BOARD_ENABLED);
-  }
-  const cfg = readConfig(cwd).board_enabled;
-  return typeof cfg === "boolean" ? cfg : true;
 }
 
 function cmdSessionStart(event: HookEvent): void {

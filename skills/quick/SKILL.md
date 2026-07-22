@@ -11,6 +11,11 @@ No task yet? Follow /sddx:plan first — `task create --workspace branch`
 registers the spec and
 switches to the `sddx/<id>` branch.
 
+Run `... config show --json` once and keep `agent_model` around: this loop
+runs solo (no subagent dispatch), so it has no per-role model to override —
+`agent_model` only matters if a step here ever hands off to a dispatched
+agent (e.g. via `/sddx:plan`'s planner). Advisory only, not hook-enforced.
+
 Then loop, recording every phase in the task file:
 
 1. **RED** — write the failing test FIRST. No implementation code of any kind.

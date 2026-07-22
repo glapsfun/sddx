@@ -242,3 +242,45 @@ the shape is there.
 
 Used by `/sddx:quick` and `/sddx:verify` as the default post-task hand-off,
 in place of the model composing its own "what's next" prose.
+
+## sddx config show
+
+```sh
+sddx config show [--json]
+```
+
+Prints every `userConfig` key fully resolved (environment variable, then
+`.sddx/config.json`, then built-in default — see
+[installation.md](installation.md) for the full key table). Read-only: never
+writes `.sddx/config.json` or any other file. `agent_model` is printed as
+parsed `role=model` pairs (malformed segments are silently dropped here —
+run `sddx config validate` to see why). `pr_host` prints
+`(auto-detected from origin remote)` when unset, since resolving it for real
+means inspecting the git remote (see [sddx pr create](#sddx-pr-create)) — this
+command doesn't shell out to git just to show config.
+
+`/sddx:run` and `/sddx:quick` call this once at the start of their flow and
+use `agent_model` / `prefer_solo` from the result — advisory only, since no
+hook enforces a skill's own instructions.
+
+When `verbose` is true, an extra `resolution detail` block follows the
+resolved values (human-readable output only, not `--json`), naming which
+source — `env`, `config`, or `default` — won for each key. This is the one
+place `verbose` currently has an effect; it does not change any other
+command's output.
+
+## sddx config validate
+
+```sh
+sddx config validate
+```
+
+Checks `.sddx/config.json` against the known schema and reports, as warnings
+(exit 0): unrecognized top-level keys, values that fail their key's domain
+rule (not just a `typeof` mismatch — `stuck_threshold`/`oracle_runs_default`/
+`max_iterations_default` must be positive integers, `workspace_mode` must be
+one of `auto|worktree|branch|none`, `pr_host` one of `gh|glab`), and malformed
+`agent_model` segments. Missing `.sddx/config.json` is not an
+error — it just means built-in defaults apply. Unparseable JSON (or JSON
+that isn't an object) is the one case that fails loudly (exit 1): that's a
+broken file, not a schema mismatch.

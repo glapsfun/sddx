@@ -34,6 +34,11 @@ hand-edited config files and no environment variables:
 | `max_iterations_default` | `5`     | Default stop rule: max loop iterations per task                      |
 | `board_enabled`          | `true`  | Regenerate `.sddx/BOARD.md` automatically                            |
 | `pr_host`                | *(auto-detected)* | PR-host CLI for `sddx pr create`: `gh` \| `glab`. Unset detects from the `origin` remote (`github.com` → `gh`, `gitlab.com` → `glab`); refuses if neither matches |
+| `agent_model`             | *(empty)* | Comma-separated `role=model` pairs (`orchestrator`, `planner`, `tddExecutor`, `verifier`) — **advisory**: read by `/sddx:run`/`/sddx:quick` via `sddx config show --json` when dispatching a subagent, not enforced by any hook |
+| `prefer_solo`             | `false` | **Advisory** hint `/sddx:run` reads to steer a single trivial task toward `--solo`/`/sddx:quick` instead of the full worktree flow |
+| `verbose`                 | `false` | When true, `sddx config show` also prints which source (env var, `.sddx/config.json`, or built-in default) resolved each key |
+
+See [cli.md](cli.md#sddx-config-show) for `sddx config show`/`sddx config validate`, which read and check this table's values.
 
 ## Standalone CLI (npm / npx / bun)
 

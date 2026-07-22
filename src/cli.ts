@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "
 import { dirname, join, relative, resolve } from "node:path";
 import { auditReceipts } from "./audit";
 import { writeBoard } from "./board";
+import { readConfig, resolveConfig, validateConfigObject } from "./lib/config";
 import {
   branchExists,
   commit,
@@ -59,7 +60,9 @@ const USAGE = `usage:
   sddx audit [--signatures] [--ci]
   sddx cleanup <id>
   sddx sweep
-  sddx next-actions [--select <reply>]`;
+  sddx next-actions [--select <reply>]
+  sddx config show [--json]
+  sddx config validate`;
 
 function fail(message: string, code: 1 | 2 = 1): never {
   console.error(message);
@@ -542,6 +545,86 @@ function cmdNextActions(cwd: string, args: string[]): void {
   if (!result.ok) process.exitCode = 1;
 }
 
+/** Env var consulted for each key that has one, in resolveConfig's precedence. */
+const CONFIG_ENV_VAR_BY_KEY: Readonly<Record<string, string>> = {
+  test_globs: "SDDX_TEST_GLOBS",
+  exempt_globs: "SDDX_EXEMPT_GLOBS",
+  board_enabled: "SDDX_BOARD_ENABLED",
+  oracle_runs_default: "SDDX_ORACLE_RUNS",
+  red_bash_allow: "SDDX_RED_BASH_ALLOW",
+  stuck_threshold: "SDDX_STUCK_THRESHOLD",
+};
+
+function configValueSource(key: string, rawConfigHasKey: boolean): "env" | "config" | "default" {
+  const envVar = CONFIG_ENV_VAR_BY_KEY[key];
+  if (envVar && process.env[envVar] !== undefined) return "env";
+  if (rawConfigHasKey) return "config";
+  return "default";
+}
+
+function cmdConfigShow(cwd: string, args: string[]): void {
+  const cfg = resolveConfig(cwd);
+  if (args.includes("--json")) {
+    console.log(JSON.stringify(cfg, null, 2));
+    return;
+  }
+  const agentModel =
+    Object.keys(cfg.agent_model).length > 0
+      ? Object.entries(cfg.agent_model)
+          .map(([role, model]) => `${role}=${model}`)
+          .join(",")
+      : "(none)";
+  const lines = [
+    `workspace_mode: ${cfg.workspace_mode}`,
+    `test_globs: ${cfg.test_globs || "(empty)"}`,
+    `exempt_globs: ${cfg.exempt_globs || "(empty)"}`,
+    `max_iterations_default: ${cfg.max_iterations_default}`,
+    `board_enabled: ${cfg.board_enabled}`,
+    `oracle_runs_default: ${cfg.oracle_runs_default}`,
+    `red_bash_allow: ${cfg.red_bash_allow || "(empty)"}`,
+    `stuck_threshold: ${cfg.stuck_threshold}`,
+    `pr_host: ${cfg.pr_host ?? "(auto-detected from origin remote)"}`,
+    `agent_model: ${agentModel}`,
+    `prefer_solo: ${cfg.prefer_solo}`,
+    `verbose: ${cfg.verbose}`,
+  ];
+  for (const line of lines) console.log(line);
+  if (!cfg.verbose) return;
+  // verbose: name which source (env var / .sddx/config.json / built-in
+  // default) actually won for each key — real diagnostic detail, not just
+  // the resolved value the plain lines above already show.
+  const raw = readConfig(cwd) as unknown as Record<string, unknown>;
+  console.log("");
+  console.log("resolution detail (verbose):");
+  for (const key of Object.keys(cfg)) {
+    console.log(`  ${key}: source=${configValueSource(key, key in raw)}`);
+  }
+}
+
+function cmdConfigValidate(cwd: string): void {
+  const path = join(sddxDir(cwd), "config.json");
+  if (!existsSync(path)) {
+    console.log("config validate: no .sddx/config.json — using built-in defaults");
+    return;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, "utf8"));
+  } catch (e) {
+    fail(`config validate: .sddx/config.json is not valid JSON: ${(e as Error).message}`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    fail("config validate: .sddx/config.json must be a JSON object");
+  }
+  const warnings = validateConfigObject(parsed as Record<string, unknown>);
+  if (warnings.length === 0) {
+    console.log("config validate: .sddx/config.json OK — no issues found");
+    return;
+  }
+  for (const w of warnings) console.log(`warning: ${w}`);
+  console.log(`config validate: ${warnings.length} warning(s)`);
+}
+
 function main(argv: string[]): void {
   const cwd = process.cwd();
   const [cmd, ...rest] = argv;
@@ -636,6 +719,14 @@ function main(argv: string[]): void {
     }
     if (cmd === "next-actions") {
       cmdNextActions(cwd, rest);
+      return;
+    }
+    if (cmd === "config" && rest[0] === "show") {
+      cmdConfigShow(cwd, rest.slice(1));
+      return;
+    }
+    if (cmd === "config" && rest[0] === "validate") {
+      cmdConfigValidate(cwd);
       return;
     }
     fail(USAGE, 2);

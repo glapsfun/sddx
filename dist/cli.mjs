@@ -2322,7 +2322,7 @@ var require_schema = __commonJS((exports) => {
   var _null = require_null();
   var seq = require_seq();
   var string = require_string();
-  var bool = require_bool();
+  var bool2 = require_bool();
   var float = require_float();
   var int = require_int();
   var schema = [
@@ -2330,7 +2330,7 @@ var require_schema = __commonJS((exports) => {
     seq.seq,
     string.string,
     _null.nullTag,
-    bool.boolTag,
+    bool2.boolTag,
     int.intOct,
     int.int,
     int.intHex,
@@ -2930,7 +2930,7 @@ var require_schema3 = __commonJS((exports) => {
   var seq = require_seq();
   var string = require_string();
   var binary = require_binary();
-  var bool = require_bool2();
+  var bool2 = require_bool2();
   var float = require_float2();
   var int = require_int2();
   var merge = require_merge();
@@ -2943,8 +2943,8 @@ var require_schema3 = __commonJS((exports) => {
     seq.seq,
     string.string,
     _null.nullTag,
-    bool.trueTag,
-    bool.falseTag,
+    bool2.trueTag,
+    bool2.falseTag,
     int.intBin,
     int.intOct,
     int.int,
@@ -2970,7 +2970,7 @@ var require_tags = __commonJS((exports) => {
   var _null = require_null();
   var seq = require_seq();
   var string = require_string();
-  var bool = require_bool();
+  var bool2 = require_bool();
   var float = require_float();
   var int = require_int();
   var schema = require_schema();
@@ -2991,7 +2991,7 @@ var require_tags = __commonJS((exports) => {
   ]);
   var tagsByName = {
     binary: binary.binary,
-    bool: bool.boolTag,
+    bool: bool2.boolTag,
     float: float.float,
     floatExp: float.floatExp,
     floatNaN: float.floatNaN,
@@ -7261,11 +7261,164 @@ function readConfig(root) {
   }
 }
 var positiveInt = (v) => typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : null;
+function resolveValue(opts) {
+  if (opts.cliValue !== undefined)
+    return opts.cliValue;
+  const rawEnv = opts.envVar && opts.env ? opts.env[opts.envVar] : undefined;
+  if (rawEnv !== undefined) {
+    const parsed = opts.envParse ? opts.envParse(rawEnv) : rawEnv;
+    if (parsed !== null && parsed !== undefined)
+      return parsed;
+  }
+  if (opts.configValue !== undefined) {
+    const parsed = opts.configParse ? opts.configParse(opts.configValue) : opts.configValue;
+    if (parsed !== null && parsed !== undefined)
+      return parsed;
+  }
+  return opts.fallback;
+}
 function stuckThreshold(root, env = process.env) {
-  return positiveInt(Number(env.SDDX_STUCK_THRESHOLD)) ?? positiveInt(readConfig(root).stuck_threshold) ?? 3;
+  return resolveValue({
+    env,
+    envVar: "SDDX_STUCK_THRESHOLD",
+    envParse: (raw) => positiveInt(Number(raw)),
+    configValue: readConfig(root).stuck_threshold,
+    configParse: positiveInt,
+    fallback: 3
+  });
 }
 function oracleRuns(root, specRuns, env = process.env) {
-  return positiveInt(specRuns) ?? positiveInt(Number(env.SDDX_ORACLE_RUNS)) ?? positiveInt(readConfig(root).oracle_runs_default) ?? 1;
+  return resolveValue({
+    cliValue: positiveInt(specRuns) ?? undefined,
+    env,
+    envVar: "SDDX_ORACLE_RUNS",
+    envParse: (raw) => positiveInt(Number(raw)),
+    configValue: readConfig(root).oracle_runs_default,
+    configParse: positiveInt,
+    fallback: 1
+  });
+}
+function boardEnabled(root, env = process.env) {
+  return resolveValue({
+    env,
+    envVar: "SDDX_BOARD_ENABLED",
+    envParse: (raw) => !["false", "0"].includes(raw),
+    configValue: readConfig(root).board_enabled,
+    configParse: (v) => typeof v === "boolean" ? v : null,
+    fallback: true
+  });
+}
+var KNOWN_AGENT_ROLES = ["orchestrator", "planner", "tddExecutor", "verifier"];
+function parseAgentModel(raw) {
+  const models = {};
+  const warnings = [];
+  if (!raw)
+    return { models, warnings };
+  for (const segment of raw.split(",").map((s) => s.trim()).filter((s) => s !== "")) {
+    const eq = segment.indexOf("=");
+    const role = eq === -1 ? "" : segment.slice(0, eq).trim();
+    const model = eq === -1 ? "" : segment.slice(eq + 1).trim();
+    if (eq === -1 || model === "" || !KNOWN_AGENT_ROLES.includes(role)) {
+      warnings.push(`agent_model: ignoring "${segment}" — expected one of ${KNOWN_AGENT_ROLES.join("|")} followed by =<model>`);
+      continue;
+    }
+    models[role] = model;
+  }
+  return { models, warnings };
+}
+var WORKSPACE_MODES = ["auto", "worktree", "branch", "none"];
+var bool = (v) => typeof v === "boolean" ? v : null;
+function resolveConfig(root, env = process.env) {
+  const cfg = readConfig(root);
+  return {
+    workspace_mode: WORKSPACE_MODES.includes(cfg.workspace_mode ?? "") ? cfg.workspace_mode : "auto",
+    test_globs: resolveValue({
+      env,
+      envVar: "SDDX_TEST_GLOBS",
+      configValue: cfg.test_globs,
+      fallback: ""
+    }),
+    exempt_globs: resolveValue({
+      env,
+      envVar: "SDDX_EXEMPT_GLOBS",
+      configValue: cfg.exempt_globs,
+      fallback: ""
+    }),
+    max_iterations_default: resolveValue({
+      configValue: cfg.max_iterations_default,
+      configParse: positiveInt,
+      fallback: 5
+    }),
+    board_enabled: resolveValue({
+      env,
+      envVar: "SDDX_BOARD_ENABLED",
+      envParse: (raw) => !["false", "0"].includes(raw),
+      configValue: cfg.board_enabled,
+      configParse: bool,
+      fallback: true
+    }),
+    oracle_runs_default: resolveValue({
+      env,
+      envVar: "SDDX_ORACLE_RUNS",
+      envParse: (raw) => positiveInt(Number(raw)),
+      configValue: cfg.oracle_runs_default,
+      configParse: positiveInt,
+      fallback: 1
+    }),
+    red_bash_allow: resolveValue({
+      env,
+      envVar: "SDDX_RED_BASH_ALLOW",
+      configValue: cfg.red_bash_allow,
+      fallback: ""
+    }),
+    stuck_threshold: resolveValue({
+      env,
+      envVar: "SDDX_STUCK_THRESHOLD",
+      envParse: (raw) => positiveInt(Number(raw)),
+      configValue: cfg.stuck_threshold,
+      configParse: positiveInt,
+      fallback: 3
+    }),
+    pr_host: cfg.pr_host ?? null,
+    agent_model: parseAgentModel(cfg.agent_model).models,
+    prefer_solo: resolveValue({ configValue: cfg.prefer_solo, configParse: bool, fallback: false }),
+    verbose: resolveValue({ configValue: cfg.verbose, configParse: bool, fallback: false })
+  };
+}
+var isString = (v) => typeof v === "string";
+var isBoolean = (v) => typeof v === "boolean";
+var isPositiveInt = (v) => positiveInt(v) !== null;
+var isOneOf = (values) => (v) => typeof v === "string" && values.includes(v);
+var CONFIG_SCHEMA = [
+  ["workspace_mode", isOneOf(WORKSPACE_MODES), `one of ${WORKSPACE_MODES.join("|")}`],
+  ["test_globs", isString, "a string"],
+  ["exempt_globs", isString, "a string"],
+  ["max_iterations_default", isPositiveInt, "a positive integer"],
+  ["board_enabled", isBoolean, "a boolean"],
+  ["oracle_runs_default", isPositiveInt, "a positive integer"],
+  ["red_bash_allow", isString, "a string"],
+  ["stuck_threshold", isPositiveInt, "a positive integer"],
+  ["pr_host", isOneOf(["gh", "glab"]), "one of gh|glab"],
+  ["agent_model", isString, "a string"],
+  ["prefer_solo", isBoolean, "a boolean"],
+  ["verbose", isBoolean, "a boolean"]
+];
+var KNOWN_CONFIG_KEYS = new Set(CONFIG_SCHEMA.map(([key]) => key));
+function validateConfigObject(obj) {
+  const warnings = [];
+  for (const key of Object.keys(obj)) {
+    if (!KNOWN_CONFIG_KEYS.has(key))
+      warnings.push(`unrecognized key "${key}"`);
+  }
+  for (const [key, isValid, expectation] of CONFIG_SCHEMA) {
+    if (key in obj && !isValid(obj[key])) {
+      warnings.push(`"${key}" must be ${expectation} — got ${JSON.stringify(obj[key])}`);
+    }
+  }
+  if (typeof obj.agent_model === "string") {
+    warnings.push(...parseAgentModel(obj.agent_model).warnings);
+  }
+  return warnings;
 }
 
 // src/lib/task.ts
@@ -8976,7 +9129,9 @@ var USAGE = `usage:
   sddx audit [--signatures] [--ci]
   sddx cleanup <id>
   sddx sweep
-  sddx next-actions [--select <reply>]`;
+  sddx next-actions [--select <reply>]
+  sddx config show [--json]
+  sddx config validate`;
 function fail(message, code = 1) {
   console.error(message);
   process.exit(code);
@@ -9010,7 +9165,7 @@ function pluginVersion() {
 function packageVersion() {
   return readVersionField("../package.json");
 }
-var WORKSPACE_MODES = ["auto", "worktree", "branch", "none"];
+var WORKSPACE_MODES2 = ["auto", "worktree", "branch", "none"];
 function pickWorkspace(cwd, requested) {
   if (requested !== "auto")
     return requested;
@@ -9077,7 +9232,7 @@ function cmdTaskCreate(cwd, args) {
   if (!specArg)
     fail(USAGE, 2);
   const requested = flag(args, "--workspace") ?? (args.includes("--no-branch") ? "none" : "auto");
-  if (!WORKSPACE_MODES.includes(requested))
+  if (!WORKSPACE_MODES2.includes(requested))
     fail(USAGE, 2);
   let yamlText;
   try {
@@ -9140,7 +9295,7 @@ function cmdGraphCreate(cwd, args) {
   if (!graphArg)
     fail(USAGE, 2);
   const requested = flag(args, "--workspace") ?? "auto";
-  if (!WORKSPACE_MODES.includes(requested))
+  if (!WORKSPACE_MODES2.includes(requested))
     fail(USAGE, 2);
   let graphText;
   try {
@@ -9370,6 +9525,78 @@ function cmdNextActions(cwd, args) {
   if (!result.ok)
     process.exitCode = 1;
 }
+var CONFIG_ENV_VAR_BY_KEY = {
+  test_globs: "SDDX_TEST_GLOBS",
+  exempt_globs: "SDDX_EXEMPT_GLOBS",
+  board_enabled: "SDDX_BOARD_ENABLED",
+  oracle_runs_default: "SDDX_ORACLE_RUNS",
+  red_bash_allow: "SDDX_RED_BASH_ALLOW",
+  stuck_threshold: "SDDX_STUCK_THRESHOLD"
+};
+function configValueSource(key, rawConfigHasKey) {
+  const envVar = CONFIG_ENV_VAR_BY_KEY[key];
+  if (envVar && process.env[envVar] !== undefined)
+    return "env";
+  if (rawConfigHasKey)
+    return "config";
+  return "default";
+}
+function cmdConfigShow(cwd, args) {
+  const cfg = resolveConfig(cwd);
+  if (args.includes("--json")) {
+    console.log(JSON.stringify(cfg, null, 2));
+    return;
+  }
+  const agentModel = Object.keys(cfg.agent_model).length > 0 ? Object.entries(cfg.agent_model).map(([role, model]) => `${role}=${model}`).join(",") : "(none)";
+  const lines = [
+    `workspace_mode: ${cfg.workspace_mode}`,
+    `test_globs: ${cfg.test_globs || "(empty)"}`,
+    `exempt_globs: ${cfg.exempt_globs || "(empty)"}`,
+    `max_iterations_default: ${cfg.max_iterations_default}`,
+    `board_enabled: ${cfg.board_enabled}`,
+    `oracle_runs_default: ${cfg.oracle_runs_default}`,
+    `red_bash_allow: ${cfg.red_bash_allow || "(empty)"}`,
+    `stuck_threshold: ${cfg.stuck_threshold}`,
+    `pr_host: ${cfg.pr_host ?? "(auto-detected from origin remote)"}`,
+    `agent_model: ${agentModel}`,
+    `prefer_solo: ${cfg.prefer_solo}`,
+    `verbose: ${cfg.verbose}`
+  ];
+  for (const line of lines)
+    console.log(line);
+  if (!cfg.verbose)
+    return;
+  const raw = readConfig(cwd);
+  console.log("");
+  console.log("resolution detail (verbose):");
+  for (const key of Object.keys(cfg)) {
+    console.log(`  ${key}: source=${configValueSource(key, key in raw)}`);
+  }
+}
+function cmdConfigValidate(cwd) {
+  const path = join12(sddxDir(cwd), "config.json");
+  if (!existsSync10(path)) {
+    console.log("config validate: no .sddx/config.json — using built-in defaults");
+    return;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync10(path, "utf8"));
+  } catch (e) {
+    fail(`config validate: .sddx/config.json is not valid JSON: ${e.message}`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    fail("config validate: .sddx/config.json must be a JSON object");
+  }
+  const warnings = validateConfigObject(parsed);
+  if (warnings.length === 0) {
+    console.log("config validate: .sddx/config.json OK — no issues found");
+    return;
+  }
+  for (const w of warnings)
+    console.log(`warning: ${w}`);
+  console.log(`config validate: ${warnings.length} warning(s)`);
+}
 function main(argv) {
   const cwd = process.cwd();
   const [cmd, ...rest] = argv;
@@ -9473,6 +9700,14 @@ function main(argv) {
     }
     if (cmd === "next-actions") {
       cmdNextActions(cwd, rest);
+      return;
+    }
+    if (cmd === "config" && rest[0] === "show") {
+      cmdConfigShow(cwd, rest.slice(1));
+      return;
+    }
+    if (cmd === "config" && rest[0] === "validate") {
+      cmdConfigValidate(cwd);
       return;
     }
     fail(USAGE, 2);

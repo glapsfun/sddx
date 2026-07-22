@@ -25,11 +25,164 @@ function readConfig(root) {
   }
 }
 var positiveInt = (v) => typeof v === "number" && Number.isInteger(v) && v >= 1 ? v : null;
+function resolveValue(opts) {
+  if (opts.cliValue !== undefined)
+    return opts.cliValue;
+  const rawEnv = opts.envVar && opts.env ? opts.env[opts.envVar] : undefined;
+  if (rawEnv !== undefined) {
+    const parsed = opts.envParse ? opts.envParse(rawEnv) : rawEnv;
+    if (parsed !== null && parsed !== undefined)
+      return parsed;
+  }
+  if (opts.configValue !== undefined) {
+    const parsed = opts.configParse ? opts.configParse(opts.configValue) : opts.configValue;
+    if (parsed !== null && parsed !== undefined)
+      return parsed;
+  }
+  return opts.fallback;
+}
 function stuckThreshold(root, env = process.env) {
-  return positiveInt(Number(env.SDDX_STUCK_THRESHOLD)) ?? positiveInt(readConfig(root).stuck_threshold) ?? 3;
+  return resolveValue({
+    env,
+    envVar: "SDDX_STUCK_THRESHOLD",
+    envParse: (raw) => positiveInt(Number(raw)),
+    configValue: readConfig(root).stuck_threshold,
+    configParse: positiveInt,
+    fallback: 3
+  });
 }
 function oracleRuns(root, specRuns, env = process.env) {
-  return positiveInt(specRuns) ?? positiveInt(Number(env.SDDX_ORACLE_RUNS)) ?? positiveInt(readConfig(root).oracle_runs_default) ?? 1;
+  return resolveValue({
+    cliValue: positiveInt(specRuns) ?? undefined,
+    env,
+    envVar: "SDDX_ORACLE_RUNS",
+    envParse: (raw) => positiveInt(Number(raw)),
+    configValue: readConfig(root).oracle_runs_default,
+    configParse: positiveInt,
+    fallback: 1
+  });
+}
+function boardEnabled(root, env = process.env) {
+  return resolveValue({
+    env,
+    envVar: "SDDX_BOARD_ENABLED",
+    envParse: (raw) => !["false", "0"].includes(raw),
+    configValue: readConfig(root).board_enabled,
+    configParse: (v) => typeof v === "boolean" ? v : null,
+    fallback: true
+  });
+}
+var KNOWN_AGENT_ROLES = ["orchestrator", "planner", "tddExecutor", "verifier"];
+function parseAgentModel(raw) {
+  const models = {};
+  const warnings = [];
+  if (!raw)
+    return { models, warnings };
+  for (const segment of raw.split(",").map((s) => s.trim()).filter((s) => s !== "")) {
+    const eq = segment.indexOf("=");
+    const role = eq === -1 ? "" : segment.slice(0, eq).trim();
+    const model = eq === -1 ? "" : segment.slice(eq + 1).trim();
+    if (eq === -1 || model === "" || !KNOWN_AGENT_ROLES.includes(role)) {
+      warnings.push(`agent_model: ignoring "${segment}" — expected one of ${KNOWN_AGENT_ROLES.join("|")} followed by =<model>`);
+      continue;
+    }
+    models[role] = model;
+  }
+  return { models, warnings };
+}
+var WORKSPACE_MODES = ["auto", "worktree", "branch", "none"];
+var bool = (v) => typeof v === "boolean" ? v : null;
+function resolveConfig(root, env = process.env) {
+  const cfg = readConfig(root);
+  return {
+    workspace_mode: WORKSPACE_MODES.includes(cfg.workspace_mode ?? "") ? cfg.workspace_mode : "auto",
+    test_globs: resolveValue({
+      env,
+      envVar: "SDDX_TEST_GLOBS",
+      configValue: cfg.test_globs,
+      fallback: ""
+    }),
+    exempt_globs: resolveValue({
+      env,
+      envVar: "SDDX_EXEMPT_GLOBS",
+      configValue: cfg.exempt_globs,
+      fallback: ""
+    }),
+    max_iterations_default: resolveValue({
+      configValue: cfg.max_iterations_default,
+      configParse: positiveInt,
+      fallback: 5
+    }),
+    board_enabled: resolveValue({
+      env,
+      envVar: "SDDX_BOARD_ENABLED",
+      envParse: (raw) => !["false", "0"].includes(raw),
+      configValue: cfg.board_enabled,
+      configParse: bool,
+      fallback: true
+    }),
+    oracle_runs_default: resolveValue({
+      env,
+      envVar: "SDDX_ORACLE_RUNS",
+      envParse: (raw) => positiveInt(Number(raw)),
+      configValue: cfg.oracle_runs_default,
+      configParse: positiveInt,
+      fallback: 1
+    }),
+    red_bash_allow: resolveValue({
+      env,
+      envVar: "SDDX_RED_BASH_ALLOW",
+      configValue: cfg.red_bash_allow,
+      fallback: ""
+    }),
+    stuck_threshold: resolveValue({
+      env,
+      envVar: "SDDX_STUCK_THRESHOLD",
+      envParse: (raw) => positiveInt(Number(raw)),
+      configValue: cfg.stuck_threshold,
+      configParse: positiveInt,
+      fallback: 3
+    }),
+    pr_host: cfg.pr_host ?? null,
+    agent_model: parseAgentModel(cfg.agent_model).models,
+    prefer_solo: resolveValue({ configValue: cfg.prefer_solo, configParse: bool, fallback: false }),
+    verbose: resolveValue({ configValue: cfg.verbose, configParse: bool, fallback: false })
+  };
+}
+var isString = (v) => typeof v === "string";
+var isBoolean = (v) => typeof v === "boolean";
+var isPositiveInt = (v) => positiveInt(v) !== null;
+var isOneOf = (values) => (v) => typeof v === "string" && values.includes(v);
+var CONFIG_SCHEMA = [
+  ["workspace_mode", isOneOf(WORKSPACE_MODES), `one of ${WORKSPACE_MODES.join("|")}`],
+  ["test_globs", isString, "a string"],
+  ["exempt_globs", isString, "a string"],
+  ["max_iterations_default", isPositiveInt, "a positive integer"],
+  ["board_enabled", isBoolean, "a boolean"],
+  ["oracle_runs_default", isPositiveInt, "a positive integer"],
+  ["red_bash_allow", isString, "a string"],
+  ["stuck_threshold", isPositiveInt, "a positive integer"],
+  ["pr_host", isOneOf(["gh", "glab"]), "one of gh|glab"],
+  ["agent_model", isString, "a string"],
+  ["prefer_solo", isBoolean, "a boolean"],
+  ["verbose", isBoolean, "a boolean"]
+];
+var KNOWN_CONFIG_KEYS = new Set(CONFIG_SCHEMA.map(([key]) => key));
+function validateConfigObject(obj) {
+  const warnings = [];
+  for (const key of Object.keys(obj)) {
+    if (!KNOWN_CONFIG_KEYS.has(key))
+      warnings.push(`unrecognized key "${key}"`);
+  }
+  for (const [key, isValid, expectation] of CONFIG_SCHEMA) {
+    if (key in obj && !isValid(obj[key])) {
+      warnings.push(`"${key}" must be ${expectation} — got ${JSON.stringify(obj[key])}`);
+    }
+  }
+  if (typeof obj.agent_model === "string") {
+    warnings.push(...parseAgentModel(obj.agent_model).warnings);
+  }
+  return warnings;
 }
 
 // src/lib/task.ts
@@ -1295,13 +1448,6 @@ function cmdRecordTest(event) {
 function cmdStopGate(event) {
   const decision = stopGate({ cwd: event.cwd, stop_hook_active: event.stop_hook_active });
   emit(decision.block ? { decision: "block", reason: decision.reason } : decision.note ? { systemMessage: decision.note } : {});
-}
-function boardEnabled(cwd, env = process.env) {
-  if (env.SDDX_BOARD_ENABLED !== undefined) {
-    return !["false", "0"].includes(env.SDDX_BOARD_ENABLED);
-  }
-  const cfg = readConfig(cwd).board_enabled;
-  return typeof cfg === "boolean" ? cfg : true;
 }
 function cmdSessionStart(event) {
   const cwd = event.cwd ?? process.cwd();

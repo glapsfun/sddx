@@ -69,6 +69,24 @@
       "title": "PR host",
       "default": "",
       "description": "PR-host CLI for `sddx pr create`: gh | glab. Empty auto-detects from the origin remote"
+    },
+    "agent_model": {
+      "type": "string",
+      "title": "Agent model overrides",
+      "default": "",
+      "description": "Comma-separated role=model pairs (roles: orchestrator, planner, tddExecutor, verifier) — advisory, read by /sddx:run and /sddx:quick when dispatching subagents"
+    },
+    "prefer_solo": {
+      "type": "boolean",
+      "title": "Prefer solo",
+      "default": false,
+      "description": "Advisory hint read by /sddx:run to steer a single trivial task toward --solo / /sddx:quick"
+    },
+    "verbose": {
+      "type": "boolean",
+      "title": "Verbose CLI output",
+      "default": false,
+      "description": "When true, sddx config show also prints which source (env var, .sddx/config.json, or built-in default) resolved each key"
     }
   }
 }

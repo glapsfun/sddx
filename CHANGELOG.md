@@ -4,6 +4,13 @@ All notable changes to sddx are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sddx adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0](https://github.com/glapsfun/sddx/compare/v1.0.0...v1.1.0) (2026-07-22)
+
+
+### Added
+
+* add generalized config precedence resolver and sddx config commands ([68290c8](https://github.com/glapsfun/sddx/commit/68290c872da6cfa38a0885c23ee2f37257aa2857))
+
 ## [1.0.0](https://github.com/glapsfun/sddx/compare/v0.4.0...v1.0.0) (2026-07-21)
 
 

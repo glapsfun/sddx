@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { blockedOn, resolveTaskState } from "../src/lib/task";
+import { rematerializeStaleDependents } from "../src/lib/worktree";
 import { fixtureClone, fixtureRepo } from "./fixtures";
 import { fakeRedCheck, repoRoot } from "./helpers";
 
@@ -113,5 +114,160 @@ describe("dependency chain end-to-end", () => {
     const r = cli(clone, "task", "materialize", bId);
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("not DONE");
+  });
+});
+
+function driveToDone(worktree: string, id: string): void {
+  cli(worktree, "task", "phase", id, "RED", "--test-exit", "1");
+  cli(worktree, "task", "phase", id, "GREEN", "--test-exit", "0");
+  cli(worktree, "task", "phase", id, "VERIFY");
+  fakeRedCheck(worktree, id);
+  expect(cli(worktree, "verify", id).status).toBe(0);
+}
+
+describe("fan-in dependency end-to-end", () => {
+  function fanInGraph(cwd: string): void {
+    mkdirSync(join(cwd, "specs"), { recursive: true });
+    writeFileSync(
+      join(cwd, "specs", "a.yaml"),
+      `task: root task alpha\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/a/**\n`,
+    );
+    writeFileSync(
+      join(cwd, "specs", "b.yaml"),
+      `task: root task bravo\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/b/**\n`,
+    );
+    writeFileSync(
+      join(cwd, "specs", "d.yaml"),
+      `task: fan-in task delta\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/d/**\n`,
+    );
+    writeFileSync(
+      join(cwd, "graph.yaml"),
+      "goal: ship the fan-in\ntasks:\n  - alias: a\n    spec: specs/a.yaml\n  - alias: b\n    spec: specs/b.yaml\n  - alias: d\n    spec: specs/d.yaml\n    depends_on: [a, b]\n",
+    );
+  }
+
+  test("a two-parent fan-in child materializes via a clean merge of both DONE commits", () => {
+    const { clone } = fixtureClone();
+    fanInGraph(clone);
+
+    const created = cli(clone, "graph", "create", "--graph", "graph.yaml");
+    expect(created.status).toBe(0);
+    const goalId = /created goal (\S+)/.exec(created.stdout)![1]!;
+    const shown = JSON.parse(cli(clone, "goal", "show", goalId).stdout);
+    const [aId, bId, dId] = shown.task_ids as [string, string, string];
+
+    // A and B are independent root worktrees; D is deferred
+    expect(existsSync(join(clone, ".sddx-worktrees", aId))).toBe(true);
+    expect(existsSync(join(clone, ".sddx-worktrees", bId))).toBe(true);
+    expect(existsSync(join(clone, ".sddx-worktrees", dId))).toBe(false);
+    expect(blockedOn(clone, resolveTaskState(clone, dId)!)).toBe(aId);
+
+    driveToDone(join(clone, ".sddx-worktrees", aId), aId);
+    // still blocked on B even though A is DONE
+    expect(blockedOn(clone, resolveTaskState(clone, dId)!)).toBe(bId);
+    driveToDone(join(clone, ".sddx-worktrees", bId), bId);
+    expect(blockedOn(clone, resolveTaskState(clone, dId)!)).toBeNull();
+
+    const mat = cli(clone, "task", "materialize", dId);
+    expect(mat.status).toBe(0);
+    const dWt = join(clone, ".sddx-worktrees", dId);
+    expect(existsSync(dWt)).toBe(true);
+
+    const aSha = g(clone, "rev-parse", `sddx/${aId}`);
+    const bSha = g(clone, "rev-parse", `sddx/${bId}`);
+    const dHead = g(dWt, "rev-parse", "HEAD");
+    const parents = g(dWt, "log", "-1", "--format=%P", dHead).split(" ").filter(Boolean);
+    expect(parents).toEqual([aSha, bSha]);
+    expect(resolveTaskState(clone, dId)!.workspace.base_sha).toBe(dHead);
+  });
+});
+
+describe("retry end-to-end", () => {
+  test("a fresh retry resets a worktree task to PLAN, then abandons once attempts are exhausted", () => {
+    const { clone } = fixtureClone();
+    writeFileSync(
+      join(clone, "spec.yaml"),
+      `task: flaky root task\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nretry:\n  max_attempts: 2\n  workspace: fresh\n`,
+    );
+    const created = cli(clone, "task", "create", "--spec", "spec.yaml", "--workspace", "worktree");
+    const id = /created (\S+)/.exec(created.stdout)![1]!;
+    const wt = join(clone, ".sddx-worktrees", id);
+    const originalBase = resolveTaskState(clone, id)!.workspace.base_sha;
+
+    cli(wt, "task", "phase", id, "RED", "--test-exit", "1");
+    cli(wt, "task", "phase", id, "GREEN", "--test-exit", "0");
+
+    const firstAbandon = cli(wt, "task", "phase", id, "ABANDONED");
+    expect(firstAbandon.status).toBe(0);
+    expect(firstAbandon.stdout).toContain("retry 2/2");
+    const afterRetry = resolveTaskState(clone, id)!;
+    expect(afterRetry.phase).toBe("PLAN");
+    expect(afterRetry.attempt_count).toBe(2);
+    // fresh: the worktree still exists at the same relative path, re-forked
+    // from the same base, with no leftover GREEN-phase evidence
+    expect(existsSync(wt)).toBe(true);
+    expect(afterRetry.evidence).toEqual({});
+    expect(afterRetry.workspace.base_sha).toBe(originalBase);
+    expect(g(wt, "rev-parse", "HEAD")).toBe(originalBase);
+
+    // second attempt exhausts the retry budget
+    cli(wt, "task", "phase", id, "RED", "--test-exit", "1");
+    cli(wt, "task", "phase", id, "GREEN", "--test-exit", "0");
+    const secondAbandon = cli(wt, "task", "phase", id, "ABANDONED");
+    expect(secondAbandon.status).toBe(0);
+    expect(secondAbandon.stdout).not.toContain("retry");
+    expect(resolveTaskState(clone, id)!.phase).toBe("ABANDONED");
+  });
+
+  test("the cascade mechanism discards and re-materializes an already-materialized dependent once its parent's commit moves", () => {
+    // `abandonOrRetry` only ever fires on a non-terminal task, and a dependent
+    // only ever materializes once its parent is DONE — so in normal operation
+    // a retry can never catch a dependent already built against a stale
+    // commit. `rematerializeStaleDependents` exists as the defensive-by-
+    // construction guarantee behind that invariant; this test exercises it
+    // directly against a hand-constructed "parent's commit moved" state,
+    // which is the only way to observe it without violating the invariant.
+    const { clone } = fixtureClone();
+    mkdirSync(join(clone, "specs"), { recursive: true });
+    writeFileSync(
+      join(clone, "specs", "a.yaml"),
+      `task: chain parent\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/a/**\n`,
+    );
+    writeFileSync(
+      join(clone, "specs", "b.yaml"),
+      `task: chain child\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/a/child.ts\n`,
+    );
+    writeFileSync(
+      join(clone, "graph.yaml"),
+      "goal: ship the chain\ntasks:\n  - alias: a\n    spec: specs/a.yaml\n  - alias: b\n    spec: specs/b.yaml\n    depends_on: a\n",
+    );
+    const created = cli(clone, "graph", "create", "--graph", "graph.yaml");
+    const goalId = /created goal (\S+)/.exec(created.stdout)![1]!;
+    const [aId, bId] = JSON.parse(cli(clone, "goal", "show", goalId).stdout).task_ids as [
+      string,
+      string,
+    ];
+    const aWt = join(clone, ".sddx-worktrees", aId);
+
+    driveToDone(aWt, aId);
+    const firstDoneSha = g(clone, "rev-parse", `sddx/${aId}`);
+    expect(cli(clone, "task", "materialize", bId).status).toBe(0);
+    const bWt = join(clone, ".sddx-worktrees", bId);
+    expect(g(bWt, "rev-parse", "HEAD")).toBe(firstDoneSha);
+
+    // simulate "A's commit moved" directly at the git level, from inside A's
+    // own worktree (which already has `sddx/<aId>` checked out) — bypassing
+    // the task lifecycle, which has no path to produce this on its own
+    mkdirSync(join(aWt, "src", "a"), { recursive: true });
+    writeFileSync(join(aWt, "src", "a", "extra.ts"), "// superseding commit\n");
+    spawnSync("git", ["add", "-A"], { cwd: aWt });
+    spawnSync("git", ["commit", "-qm", "superseding commit"], { cwd: aWt });
+    const secondSha = g(clone, "rev-parse", `sddx/${aId}`);
+    expect(secondSha).not.toBe(firstDoneSha);
+
+    const rebuilt = rematerializeStaleDependents(clone, aId);
+    expect(rebuilt).toEqual([bId]);
+    expect(g(bWt, "rev-parse", "HEAD")).toBe(secondSha);
+    expect(resolveTaskState(clone, bId)!.workspace.base_sha).toBe(secondSha);
   });
 });

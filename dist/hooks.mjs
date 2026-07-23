@@ -268,6 +268,19 @@ var TRANSITIONS = {
   DONE: [],
   ABANDONED: []
 };
+var DEFAULT_RETRY = { max_attempts: 1, workspace: "fresh" };
+function dependsOnList(t) {
+  const d = t.depends_on;
+  if (d === undefined)
+    return [];
+  return Array.isArray(d) ? d : [d];
+}
+function retryPolicyOf(t) {
+  return { ...DEFAULT_RETRY, ...t.retry };
+}
+function failurePolicyOf(t) {
+  return t.on_dependency_failure ?? "skip";
+}
 var sddxDir = (cwd) => join2(cwd, ".sddx");
 var taskPath = (cwd, id) => join2(sddxDir(cwd), "tasks", `${id}.json`);
 function taskId(sentence, date = new Date) {
@@ -277,6 +290,7 @@ function taskId(sentence, date = new Date) {
 }
 function createTask(cwd, spec, specPath, workspace, opts = {}) {
   const now = new Date().toISOString();
+  const dependsOn = opts.dependsOn === undefined ? [] : dependsOnList({ depends_on: opts.dependsOn });
   const t = {
     id: taskId(spec.task),
     task: spec.task,
@@ -285,7 +299,10 @@ function createTask(cwd, spec, specPath, workspace, opts = {}) {
     oracle: spec.oracle,
     workspace,
     scope: spec.scope,
-    ...opts.dependsOn ? { depends_on: opts.dependsOn } : {},
+    ...dependsOn.length > 0 ? { depends_on: dependsOn } : {},
+    ...spec.on_dependency_failure ? { on_dependency_failure: spec.on_dependency_failure } : {},
+    ...spec.retry ? { retry: spec.retry } : {},
+    attempt_count: 1,
     allow: [],
     iterations: 0,
     evidence: {},
@@ -352,16 +369,53 @@ function allowPath(t, path) {
   return t;
 }
 function blockedOn(cwd, task) {
-  const seen = new Set([task.id]);
-  let parentId = task.depends_on ?? null;
-  while (parentId && !seen.has(parentId)) {
-    seen.add(parentId);
+  for (const parentId of dependsOnList(task)) {
+    if (parentId === task.id)
+      continue;
     const parent = resolveTaskState(cwd, parentId);
-    if (!parent || parent.phase !== "DONE")
+    if (parent?.phase !== "DONE")
       return parentId;
-    parentId = parent.depends_on ?? null;
   }
   return null;
+}
+function skippedOn(cwd, task, seen = new Set) {
+  if (failurePolicyOf(task) !== "skip")
+    return null;
+  if (seen.has(task.id))
+    return null;
+  seen.add(task.id);
+  for (const parentId of dependsOnList(task)) {
+    if (parentId === task.id)
+      continue;
+    const parent = resolveTaskState(cwd, parentId);
+    if (!parent)
+      continue;
+    if (parent.phase === "ABANDONED")
+      return parentId;
+    if (skippedOn(cwd, parent, seen))
+      return parentId;
+  }
+  return null;
+}
+function abandonOrRetry(t) {
+  if (isTerminal(t.phase)) {
+    throw new Error(`illegal transition ${t.phase} → ABANDONED`);
+  }
+  const policy = retryPolicyOf(t);
+  const attempts = t.attempt_count ?? 1;
+  const at = new Date().toISOString();
+  if (attempts < policy.max_attempts) {
+    t.attempt_count = attempts + 1;
+    t.phase = "PLAN";
+    t.iterations = 0;
+    t.evidence = {};
+    t.stuck = undefined;
+    t.history.push({ phase: "PLAN", at });
+    return { retried: true, attempt_count: t.attempt_count, max_attempts: policy.max_attempts };
+  }
+  t.phase = "ABANDONED";
+  t.history.push({ phase: "ABANDONED", at });
+  return { retried: false, attempt_count: attempts, max_attempts: policy.max_attempts };
 }
 function markShipped(t, goalId, prUrl) {
   t.shipped = { goal_id: goalId, pr_url: prUrl, at: new Date().toISOString() };
@@ -406,7 +460,7 @@ import {
   statSync,
   writeFileSync as writeFileSync2
 } from "node:fs";
-import { join as join3, relative } from "node:path";
+import { dirname, isAbsolute, join as join3, relative } from "node:path";
 
 // src/lib/git.ts
 import { spawnSync as spawnSync2 } from "node:child_process";
@@ -513,8 +567,9 @@ function resolveBaseRef(cwd) {
 }
 var gitCommonDir = (cwd) => {
   const dir = git(cwd, "rev-parse", "--git-common-dir");
-  return join3(cwd, dir);
+  return isAbsolute(dir) ? dir : join3(cwd, dir);
 };
+var resolveMainRepoRoot = (cwd) => dirname(gitCommonDir(cwd));
 var EXCLUDE_LINE = ".sddx-worktrees/";
 function ensureExcluded(cwd) {
   const infoDir = join3(gitCommonDir(cwd), "info");
@@ -545,30 +600,76 @@ function createWorktree(cwd, id, baseSha) {
   git(cwd, "worktree", "add", "-q", path, "-b", `sddx/${id}`, baseSha);
   return path;
 }
+function mergeParentsSequential(worktreePath, remaining) {
+  for (const sha of remaining) {
+    const r = spawnSync3("git", ["merge", "--no-ff", "-m", `sddx: merge dependency ${sha}`, sha], {
+      cwd: worktreePath,
+      encoding: "utf8"
+    });
+    if (r.status !== 0) {
+      spawnSync3("git", ["merge", "--abort"], { cwd: worktreePath });
+      throw new Error(`merge of ${sha} failed: ${(r.stderr ?? r.stdout ?? "").trim()}`);
+    }
+  }
+  return git(worktreePath, "rev-parse", "HEAD");
+}
+function mergeParentsInBranch(cwd, taskId2, remaining) {
+  const tmpPath = join3(worktreesDir(cwd), `materialize-${taskId2}`);
+  git(cwd, "worktree", "add", "-q", tmpPath, `sddx/${taskId2}`);
+  try {
+    return mergeParentsSequential(tmpPath, remaining);
+  } finally {
+    removeWorktreeForced(cwd, tmpPath);
+  }
+}
 function materializeDependent(cwd, taskId2) {
   const task = resolveTaskState(cwd, taskId2);
   if (!task)
     throw new Error(`no such task: ${taskId2}`);
-  const parentId = task.depends_on;
-  if (!parentId)
+  const parentIds = dependsOnList(task);
+  if (parentIds.length === 0) {
     throw new Error(`task ${taskId2} has no depends_on to materialize from`);
-  const parent = resolveTaskState(cwd, parentId);
-  if (!parent)
-    throw new Error(`cannot materialize ${taskId2}: parent ${parentId} not found`);
-  if (parent.phase !== "DONE") {
-    throw new Error(`cannot materialize ${taskId2}: parent ${parentId} is ${parent.phase}, not DONE`);
   }
-  const baseSha = tryRev(cwd, `refs/heads/sddx/${parentId}`) ?? tryRev(cwd, `sddx/${parentId}`);
-  if (!baseSha) {
-    throw new Error(`cannot materialize ${taskId2}: parent ${parentId}'s DONE commit is unresolvable`);
+  const parentShas = [];
+  for (const parentId of parentIds) {
+    const parent = resolveTaskState(cwd, parentId);
+    if (!parent)
+      throw new Error(`cannot materialize ${taskId2}: parent ${parentId} not found`);
+    if (parent.phase !== "DONE") {
+      throw new Error(`cannot materialize ${taskId2}: parent ${parentId} is ${parent.phase}, not DONE`);
+    }
+    const sha = tryRev(cwd, `refs/heads/sddx/${parentId}`) ?? tryRev(cwd, `sddx/${parentId}`);
+    if (!sha) {
+      throw new Error(`cannot materialize ${taskId2}: parent ${parentId}'s DONE commit is unresolvable`);
+    }
+    parentShas.push(sha);
   }
+  const forkSha = parentShas[0];
+  const rest = parentShas.slice(1);
   if (task.workspace.mode === "branch") {
-    git(cwd, "branch", `sddx/${taskId2}`, baseSha);
-    task.workspace = { mode: "branch", branch: `sddx/${taskId2}`, base_sha: baseSha };
+    git(cwd, "branch", `sddx/${taskId2}`, forkSha);
+    let finalSha2 = forkSha;
+    if (rest.length > 0) {
+      try {
+        finalSha2 = mergeParentsInBranch(cwd, taskId2, rest);
+      } catch (e) {
+        throw new Error(`cannot materialize ${taskId2}: fan-in merge conflict combining parents [${parentIds.join(", ")}] — ${e.message}`);
+      }
+    }
+    task.workspace = { mode: "branch", branch: `sddx/${taskId2}`, base_sha: finalSha2 };
     writeTask(cwd, task);
-    return { baseSha, mode: "branch" };
+    return { baseSha: finalSha2, mode: "branch" };
   }
-  const path = createWorktree(cwd, taskId2, baseSha);
+  const path = createWorktree(cwd, taskId2, forkSha);
+  let finalSha = forkSha;
+  if (rest.length > 0) {
+    try {
+      finalSha = mergeParentsSequential(path, rest);
+    } catch (e) {
+      removeWorktreeForced(cwd, path);
+      throw new Error(`cannot materialize ${taskId2}: fan-in merge conflict combining parents [${parentIds.join(", ")}] — ${e.message}`);
+    }
+  }
   const relSpec = task.spec_path;
   const specSrc = join3(cwd, relSpec);
   if (existsSync3(specSrc)) {
@@ -578,14 +679,92 @@ function materializeDependent(cwd, taskId2) {
   task.workspace = {
     mode: "worktree",
     branch: `sddx/${taskId2}`,
-    base_sha: baseSha,
+    base_sha: finalSha,
     path: join3(".sddx-worktrees", taskId2)
   };
   writeTask(path, task);
   rmSync(join3(cwd, ".sddx", "tasks", `${taskId2}.json`), { force: true });
   if (existsSync3(specSrc))
     rmSync(specSrc, { force: true });
-  return { path, baseSha, mode: "worktree" };
+  return { path, baseSha: finalSha, mode: "worktree" };
+}
+function retryWorkspace(cwd, task) {
+  const policy = retryPolicyOf(task);
+  const root = resolveMainRepoRoot(cwd);
+  if (policy.workspace === "fresh") {
+    const branch = `sddx/${task.id}`;
+    if (task.workspace.mode === "worktree" && task.workspace.path) {
+      const oldAbs = join3(root, task.workspace.path);
+      const specAbs = join3(oldAbs, task.spec_path);
+      const specBytes = existsSync3(specAbs) ? readFileSync3(specAbs) : null;
+      if (existsSync3(oldAbs)) {
+        try {
+          removeWorktreeForced(root, oldAbs);
+        } catch {}
+      }
+      if (branchExists(root, branch))
+        forceDeleteBranch(root, branch);
+      const newAbs = createWorktree(root, task.id, task.workspace.base_sha);
+      mkdirSync2(join3(sddxDir(newAbs), "tasks"), { recursive: true });
+      if (specBytes) {
+        mkdirSync2(dirname(join3(newAbs, task.spec_path)), { recursive: true });
+        writeFileSync2(join3(newAbs, task.spec_path), specBytes);
+      }
+      task.workspace = { ...task.workspace, path: relative(root, newAbs) };
+    } else if (task.workspace.mode === "branch" && task.workspace.branch) {
+      git(root, "branch", "-f", branch, task.workspace.base_sha);
+    }
+  }
+  rematerializeStaleDependents(root, task.id);
+}
+var allKnownTaskIds = (cwd) => {
+  const ids = new Set;
+  const mainDir = join3(cwd, ".sddx", "tasks");
+  if (existsSync3(mainDir)) {
+    for (const f of readdirSync(mainDir))
+      if (f.endsWith(".json"))
+        ids.add(f.slice(0, -5));
+  }
+  for (const id of worktreeIds(cwd))
+    ids.add(id);
+  return [...ids];
+};
+var isMaterialized = (t) => !t.workspace.base_sha.startsWith("pending:");
+function rematerializeStaleDependents(cwd, retriedTaskId) {
+  const rebuilt = [];
+  for (const id of allKnownTaskIds(cwd)) {
+    if (id === retriedTaskId)
+      continue;
+    const t = resolveTaskState(cwd, id);
+    if (!t)
+      continue;
+    if (!dependsOnList(t).includes(retriedTaskId))
+      continue;
+    if (!isMaterialized(t))
+      continue;
+    const staleBranch = `sddx/${id}`;
+    if (t.workspace.mode === "worktree" && t.workspace.path) {
+      const abs = join3(cwd, t.workspace.path);
+      if (existsSync3(abs)) {
+        try {
+          removeWorktreeForced(cwd, abs);
+        } catch {}
+      }
+    }
+    if (branchExists(cwd, staleBranch))
+      forceDeleteBranch(cwd, staleBranch);
+    t.workspace = {
+      mode: t.workspace.mode,
+      branch: null,
+      base_sha: `pending:${dependsOnList(t).join(",")}`
+    };
+    mkdirSync2(join3(cwd, ".sddx", "tasks"), { recursive: true });
+    writeTask(cwd, t);
+    materializeDependent(cwd, id);
+    rebuilt.push(id);
+    rebuilt.push(...rematerializeStaleDependents(cwd, id));
+  }
+  return rebuilt;
 }
 var isDirty = (worktreePath) => git(worktreePath, "status", "--porcelain") !== "";
 function removeWorktree(cwd, path) {
@@ -718,6 +897,7 @@ function sweep(cwd, opts = {}) {
   }
   return { removed, skipped, locked: false };
 }
+var worktreeIds = (cwd) => existsSync3(worktreesDir(cwd)) ? readdirSync(worktreesDir(cwd)) : [];
 
 // src/board.ts
 var DASH = "—";
@@ -739,8 +919,8 @@ function taskRow(taskPath2, id, receiptsDirs, threshold) {
   } catch {
     return {
       id,
-      phase: "UNREADABLE",
       rawPhase: "UNREADABLE",
+      stuck: false,
       sentence: "task file failed to parse",
       workspace: DASH,
       branch: null,
@@ -755,11 +935,13 @@ function taskRow(taskPath2, id, receiptsDirs, threshold) {
     if (receipt !== DASH)
       break;
   }
+  const deps = dependsOnList(t);
   return {
     id: t.id,
-    phase: t.stuck && t.stuck.count >= threshold ? `${t.phase} ⚠stuck` : t.phase,
     rawPhase: t.phase,
-    ...t.depends_on ? { dependsOn: t.depends_on } : {},
+    stuck: Boolean(t.stuck && t.stuck.count >= threshold),
+    ...deps.length > 0 ? { dependsOn: deps } : {},
+    ...t.on_dependency_failure ? { onDependencyFailure: t.on_dependency_failure } : {},
     sentence: t.task,
     workspace: t.workspace.mode,
     branch: t.workspace.branch,
@@ -819,15 +1001,43 @@ function collectRows(cwd) {
   }
   return rows;
 }
-function blockedOnId(cwd, r, id) {
-  return r.rawPhase === "DONE" ? null : blockedOn(cwd, { id, depends_on: r.dependsOn });
+function computeStatus(cwd, r, id) {
+  if (r.rawPhase === "UNREADABLE") {
+    return { status: "UNREADABLE", blockedOnId: null, skippedOnId: null };
+  }
+  if (r.rawPhase === "DONE")
+    return { status: "Completed", blockedOnId: null, skippedOnId: null };
+  if (r.rawPhase === "ABANDONED") {
+    return { status: "Abandoned", blockedOnId: null, skippedOnId: null };
+  }
+  const taskLike = { id, depends_on: r.dependsOn, on_dependency_failure: r.onDependencyFailure };
+  const skipper = skippedOn(cwd, taskLike);
+  if (skipper)
+    return { status: "Skipped", blockedOnId: null, skippedOnId: skipper };
+  const blocker = blockedOn(cwd, taskLike);
+  if (blocker)
+    return { status: "Blocked", blockedOnId: blocker, skippedOnId: null };
+  return {
+    status: r.rawPhase === "PLAN" ? "Ready" : "Running",
+    blockedOnId: null,
+    skippedOnId: null
+  };
+}
+function statusLabel(status, stuck, blockedOnId, skippedOnId) {
+  let label = String(status);
+  if (stuck)
+    label += " ⚠stuck";
+  if (blockedOnId)
+    label += ` ⏸blocked-on-${blockedOnId}`;
+  if (skippedOnId)
+    label += ` skipped-on-${skippedOnId}`;
+  return label;
 }
 function boardDataFromRows(cwd, rows, flags) {
   const tasks = [...rows.keys()].sort().map((id) => {
     const r = rows.get(id);
-    const blocker = blockedOnId(cwd, r, id);
-    const phase = blocker ? `${r.phase} ⏸blocked-on-${blocker}` : r.phase;
-    return { ...r, phase, blockedOnId: blocker };
+    const { status, blockedOnId, skippedOnId } = computeStatus(cwd, r, id);
+    return { ...r, status, blockedOnId, skippedOnId };
   });
   return { tasks, flaggedWorktrees: flags.entries, flaggedWorktreesUnreadable: flags.unreadable };
 }
@@ -836,12 +1046,13 @@ function renderBoardFromRows(cwd, rows, flags) {
   if (rows.size === 0) {
     lines.push("_No tasks registered._", "");
   } else {
-    lines.push("| Task | Phase | Depends | Sentence | Workspace | Iter | Receipt | Allow |", "| --- | --- | --- | --- | --- | --- | --- | --- |");
+    lines.push("| Task | Status | Depends | Sentence | Workspace | Iter | Receipt | Allow |", "| --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const id of [...rows.keys()].sort()) {
       const r = rows.get(id);
-      const blocker = blockedOnId(cwd, r, id);
-      const phase = blocker ? `${r.phase} ⏸blocked-on-${blocker}` : r.phase;
-      lines.push(`| ${cell(r.id)} | ${phase} | ${r.dependsOn ? cell(r.dependsOn) : DASH} | ${cell(r.sentence)} | ${r.workspace} | ${r.iterations} | ${r.receipt} | ${cell(r.allow)} |`);
+      const { status, blockedOnId, skippedOnId } = computeStatus(cwd, r, id);
+      const label = statusLabel(status, r.stuck, blockedOnId, skippedOnId);
+      const depends = r.dependsOn && r.dependsOn.length > 0 ? cell(r.dependsOn.join(", ")) : DASH;
+      lines.push(`| ${cell(r.id)} | ${label} | ${depends} | ${cell(r.sentence)} | ${r.workspace} | ${r.iterations} | ${r.receipt} | ${cell(r.allow)} |`);
     }
     lines.push("");
   }
@@ -871,19 +1082,19 @@ function computeBoard(cwd) {
 
 // src/lib/resolve.ts
 import { existsSync as existsSync5, readdirSync as readdirSync3, readFileSync as readFileSync5, statSync as statSync2 } from "node:fs";
-import { basename, dirname, join as join5, resolve as resolvePath } from "node:path";
+import { basename, dirname as dirname2, join as join5, resolve as resolvePath } from "node:path";
 function workspaceRoot(startPath) {
   let dir = resolvePath(startPath);
   try {
     if (statSync2(dir).isFile())
-      dir = dirname(dir);
+      dir = dirname2(dir);
   } catch {
-    dir = dirname(dir);
+    dir = dirname2(dir);
   }
   while (true) {
     if (existsSync5(join5(dir, ".git")))
       return dir;
-    const parent = dirname(dir);
+    const parent = dirname2(dir);
     if (parent === dir)
       return null;
     dir = parent;
@@ -929,7 +1140,7 @@ function resolveTask(startPath) {
   const root = workspaceRoot(startPath);
   if (!root || !existsSync5(join5(root, ".sddx")))
     return { kind: "none" };
-  if (basename(dirname(root)) === ".sddx-worktrees") {
+  if (basename(dirname2(root)) === ".sddx-worktrees") {
     const byName = readTaskFile(root, basename(root));
     if (byName)
       return byName;
@@ -1338,7 +1549,7 @@ function stopGate(event) {
 }
 
 // src/tdd-gate.ts
-import { isAbsolute, relative as relative2, resolve } from "node:path";
+import { isAbsolute as isAbsolute2, relative as relative2, resolve } from "node:path";
 function loadGateConfig(root, env = process.env) {
   const fileConfig = readConfig(root);
   return {
@@ -1376,7 +1587,7 @@ function scopeBlockMessage(task, relPath, scope) {
 `);
 }
 function tddGate(input, env = process.env) {
-  const anchor = input.filePath ? isAbsolute(input.filePath) ? input.filePath : resolve(input.cwd ?? process.cwd(), input.filePath) : input.cwd ?? process.cwd();
+  const anchor = input.filePath ? isAbsolute2(input.filePath) ? input.filePath : resolve(input.cwd ?? process.cwd(), input.filePath) : input.cwd ?? process.cwd();
   const res = resolveTask(anchor);
   if (res.kind === "none")
     return { allow: true };

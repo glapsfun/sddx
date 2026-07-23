@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { renderBoard, writeBoard } from "../src/board";
+import { boardData, renderBoard, writeBoard } from "../src/board";
 import { createTask, transition, writeTask } from "../src/lib/task";
 import { fixtureRepo } from "./fixtures";
 
@@ -44,7 +44,7 @@ describe("renderBoard", () => {
     );
     const a = renderBoard(repo);
     expect(a).toBe(renderBoard(repo));
-    expect(a).toContain(`| ${t.id} | PLAN | — | board demo | none | 0 | #3 | src/migration.sql |`);
+    expect(a).toContain(`| ${t.id} | Ready | — | board demo | none | 0 | #3 | src/migration.sql |`);
     expect(a).not.toMatch(/\d{4}-\d{2}-\d{2}T/); // no timestamps anywhere
   });
 
@@ -60,7 +60,7 @@ describe("renderBoard", () => {
     );
 
     const blocked = renderBoard(repo);
-    expect(blocked).toContain("| Task | Phase | Depends |");
+    expect(blocked).toContain("| Task | Status | Depends |");
     expect(blocked).toContain(`⏸blocked-on-${parent.id}`);
     // the child names its parent in the Depends column
     expect(blocked).toMatch(new RegExp(`\\| ${child.id} \\|.*\\| ${parent.id} \\|`));
@@ -84,10 +84,10 @@ describe("renderBoard", () => {
     writeFileSync(join(wt, ".sddx", "tasks", `${t.id}.json`), JSON.stringify(live, null, 2));
     writeFileSync(join(wt, ".sddx", "receipts", `${t.id}.json`), JSON.stringify({ seq: 1 }));
     const board = renderBoard(repo);
-    expect(board).toContain(`| ${t.id} | GREEN |`);
+    expect(board).toContain(`| ${t.id} | Running |`);
     expect(board).toContain("| worktree |");
     expect(board).toContain("| #1 |");
-    expect(board).not.toContain("| PLAN |");
+    expect(board).not.toContain("| Ready |");
   });
 
   test("corrupt task file renders a flagged row, board still renders others", () => {
@@ -98,6 +98,67 @@ describe("renderBoard", () => {
     expect(board).toContain("20260101-bad");
     expect(board).toContain("UNREADABLE");
     expect(board).toContain(ok.id);
+  });
+});
+
+describe("five-status board (Ready / Running / Blocked / Skipped / Completed)", () => {
+  test("a mixed graph renders all five buckets plus a distinct Abandoned marker", () => {
+    const repo = fixtureRepo();
+
+    const ready = makeTask(repo, "ready root");
+
+    const running = makeTask(repo, "running root");
+    transition(running, "RED", { testExit: 1 });
+    writeTask(repo, running);
+
+    const failedParent = makeTask(repo, "failed parent");
+    transition(failedParent, "RED", { testExit: 1 });
+    transition(failedParent, "ABANDONED");
+    writeTask(repo, failedParent);
+
+    // default policy (skip) — reacts to the failed parent by skipping
+    const skipped = createTask(
+      repo,
+      { ...SPEC, task: "skipped dependent" },
+      ".sddx/specs/skip.yaml",
+      { mode: "none", branch: null, base_sha: `pending:${failedParent.id}` },
+      { dependsOn: failedParent.id },
+    );
+
+    // block policy — stays blocked on the same failed parent instead
+    const blocked = createTask(
+      repo,
+      { ...SPEC, task: "blocked dependent", on_dependency_failure: "block" },
+      ".sddx/specs/block.yaml",
+      { mode: "none", branch: null, base_sha: `pending:${failedParent.id}` },
+      { dependsOn: failedParent.id },
+    );
+
+    const completed = makeTask(repo, "completed root");
+    transition(completed, "RED", { testExit: 1 });
+    transition(completed, "GREEN", { testExit: 0 });
+    transition(completed, "VERIFY");
+    transition(completed, "DONE", { internal: true });
+    writeTask(repo, completed);
+
+    const data = boardData(repo);
+    const statusOf = (id: string) => data.tasks.find((t) => t.id === id)?.status;
+    expect(statusOf(ready.id)).toBe("Ready");
+    expect(statusOf(running.id)).toBe("Running");
+    expect(statusOf(failedParent.id)).toBe("Abandoned");
+    expect(statusOf(skipped.id)).toBe("Skipped");
+    expect(statusOf(blocked.id)).toBe("Blocked");
+    expect(statusOf(completed.id)).toBe("Completed");
+
+    const skippedRow = data.tasks.find((t) => t.id === skipped.id)!;
+    expect(skippedRow.skippedOnId).toBe(failedParent.id);
+    const blockedRow = data.tasks.find((t) => t.id === blocked.id)!;
+    expect(blockedRow.blockedOnId).toBe(failedParent.id);
+
+    const rendered = renderBoard(repo);
+    expect(rendered).toContain(`| ${skipped.id} | Skipped skipped-on-${failedParent.id} |`);
+    expect(rendered).toContain(`| ${blocked.id} | Blocked ⏸blocked-on-${failedParent.id} |`);
+    expect(rendered).toContain(`| ${failedParent.id} | Abandoned |`);
   });
 });
 

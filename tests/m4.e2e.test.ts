@@ -71,7 +71,7 @@ describe("M4 oracle", () => {
     const board = sddx(repo, "board");
     expect(board.status).toBe(0);
     const rendered = readFileSync(join(repo, ".sddx", "BOARD.md"), "utf8");
-    expect(rendered).toContain(`| ${id} | DONE | — | m4 full loop | none | 1 | #1 |`);
+    expect(rendered).toContain(`| ${id} | Completed | — | m4 full loop | none | 1 | #1 |`);
 
     // byte-identical re-render, reported as unchanged
     const again = sddx(repo, "board");

@@ -47,11 +47,12 @@ describe("sddx board --output json", () => {
     const row = envelope.data.tasks.find((t: { id: string }) => t.id === id);
     expect(row).toBeDefined();
     expect(row.rawPhase).toBe("DONE");
+    expect(row.status).toBe("Completed");
     expect(row.receipt).toBe("#1");
 
     const board = readFileSync(join(cwd, ".sddx", "BOARD.md"), "utf8");
     expect(board).toContain(id);
-    expect(board).toContain("DONE");
+    expect(board).toContain("Completed");
     expect(board).toContain("#1");
   });
 

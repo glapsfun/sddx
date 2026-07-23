@@ -56,6 +56,6 @@ describe("stuck tracking", () => {
   test("board marks stuck tasks", () => {
     const { cwd, id } = repoWithRedTask();
     for (let i = 0; i < 3; i += 1) recordTestRun(cwd, "bun test", 1, "FAIL same");
-    expect(renderBoard(cwd)).toContain(`| ${id} | RED ⚠stuck |`);
+    expect(renderBoard(cwd)).toContain(`| ${id} | Running ⚠stuck |`);
   });
 });

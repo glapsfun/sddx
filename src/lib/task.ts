@@ -30,6 +30,15 @@ export interface Workspace {
   path?: string;
 }
 
+export type DependencyFailurePolicy = "skip" | "block";
+
+export interface RetryPolicy {
+  max_attempts: number;
+  workspace: "fresh" | "reuse";
+}
+
+export const DEFAULT_RETRY: RetryPolicy = { max_attempts: 1, workspace: "fresh" };
+
 export interface TaskState {
   id: string;
   task: string;
@@ -39,9 +48,20 @@ export interface TaskState {
   workspace: Workspace;
   /** Write globs the task may touch, copied from the spec. Empty = unconfined. */
   scope: string[];
-  /** Single predecessor task id (LINE). Absent for a root task. A dependent runs
-   * only once this parent is DONE and forks its worktree from the parent's commit. */
-  depends_on?: string;
+  /** Zero or more predecessor task ids (a DAG, not just a forest). Absent/empty
+   * for a root task. A dependent runs only once every named parent is DONE and
+   * forks its worktree from the parent's commit (or a merge of several — see
+   * `materializeDependent` in worktree.ts). A bare string is the pre-DAG shape
+   * still readable via `dependsOnList()`. */
+  depends_on?: string | string[];
+  /** What a dependent of this task does if this task never reaches DONE (goes
+   * ABANDONED). Default `skip` when absent — read via `failurePolicyOf()`. */
+  on_dependency_failure?: DependencyFailurePolicy;
+  /** Bounded automatic retry before this task is truly ABANDONED. Absent means
+   * `DEFAULT_RETRY` (single attempt, today's behavior) — read via `retryPolicyOf()`. */
+  retry?: Partial<RetryPolicy>;
+  /** Attempts consumed so far, starting at 1. Incremented by `abandonOrRetry`. */
+  attempt_count?: number;
   allow: string[];
   iterations: number;
   /** Consecutive identical test failures; cleared by any pass or a different failure. */
@@ -64,6 +84,24 @@ export interface TaskState {
   updated_at: string;
 }
 
+/** Normalizes `depends_on` to a list regardless of the on-disk shape: absent → `[]`,
+ * a legacy bare string → a one-element list, an array → itself. */
+export function dependsOnList(t: { depends_on?: string | string[] }): string[] {
+  const d = t.depends_on;
+  if (d === undefined) return [];
+  return Array.isArray(d) ? d : [d];
+}
+
+export function retryPolicyOf(t: { retry?: Partial<RetryPolicy> }): RetryPolicy {
+  return { ...DEFAULT_RETRY, ...t.retry };
+}
+
+export function failurePolicyOf(t: {
+  on_dependency_failure?: DependencyFailurePolicy;
+}): DependencyFailurePolicy {
+  return t.on_dependency_failure ?? "skip";
+}
+
 export const sddxDir = (cwd: string): string => join(cwd, ".sddx");
 export const taskPath = (cwd: string, id: string): string =>
   join(sddxDir(cwd), "tasks", `${id}.json`);
@@ -84,9 +122,11 @@ export function createTask(
   spec: Spec,
   specPath: string,
   workspace: Workspace,
-  opts: { dependsOn?: string } = {},
+  opts: { dependsOn?: string | string[] } = {},
 ): TaskState {
   const now = new Date().toISOString();
+  const dependsOn =
+    opts.dependsOn === undefined ? [] : dependsOnList({ depends_on: opts.dependsOn });
   const t: TaskState = {
     id: taskId(spec.task),
     task: spec.task,
@@ -95,7 +135,10 @@ export function createTask(
     oracle: spec.oracle,
     workspace,
     scope: spec.scope,
-    ...(opts.dependsOn ? { depends_on: opts.dependsOn } : {}),
+    ...(dependsOn.length > 0 ? { depends_on: dependsOn } : {}),
+    ...(spec.on_dependency_failure ? { on_dependency_failure: spec.on_dependency_failure } : {}),
+    ...(spec.retry ? { retry: spec.retry } : {}),
+    attempt_count: 1,
     allow: [],
     iterations: 0,
     evidence: {},
@@ -171,23 +214,94 @@ export function allowPath(t: TaskState, path: string): TaskState {
 }
 
 /**
- * The nearest ancestor that is not yet DONE, or null when the task is ready to
- * dispatch (a root, or every ancestor DONE). Derived at read time from
- * `depends_on` plus the ancestors' phases (resolved wherever they live — main
+ * The first named parent that is not yet DONE, or null when the task is ready
+ * to dispatch (a root, or every named parent DONE). Derived at read time from
+ * `depends_on` plus each parent's phase (resolved wherever it lives — main
  * checkout, live worktree, or a swept task's branch tip) — "blocked" is never a
- * persisted phase. A missing ancestor blocks too (its id is returned). Takes a
- * structural subset of TaskState so the board can share this one derivation.
+ * persisted phase. A missing parent blocks too (its id is returned). Only the
+ * task's *direct* parents are checked — a parent that is itself DONE already
+ * had its own parents satisfied, so there is nothing further to walk up.
+ * Applies regardless of `on_dependency_failure`: a `block`-policy task stays
+ * blocked here even once a parent goes ABANDONED (see `skippedOn` for the
+ * `skip`-policy reaction to that same fact). Takes a structural subset of
+ * TaskState so the board can share this one derivation.
  */
-export function blockedOn(cwd: string, task: { id: string; depends_on?: string }): string | null {
-  const seen = new Set<string>([task.id]);
-  let parentId = task.depends_on ?? null;
-  while (parentId && !seen.has(parentId)) {
-    seen.add(parentId);
+export function blockedOn(
+  cwd: string,
+  task: { id: string; depends_on?: string | string[] },
+): string | null {
+  for (const parentId of dependsOnList(task)) {
+    if (parentId === task.id) continue;
     const parent = resolveTaskState(cwd, parentId);
-    if (!parent || parent.phase !== "DONE") return parentId;
-    parentId = parent.depends_on ?? null;
+    if (parent?.phase !== "DONE") return parentId;
   }
   return null;
+}
+
+/**
+ * The first named parent whose terminal failure this task (a `skip`-policy
+ * dependent, the default) reacts to by skipping — or null when no parent has
+ * failed, or when this task's own policy is `block` (see `blockedOn` for that
+ * case). A parent counts as failed either directly (ABANDONED) or by itself
+ * being derived-skipped, so the cascade propagates transitively down a chain
+ * of skip-policy tasks. `seen` guards against a malformed cyclic file.
+ */
+export function skippedOn(
+  cwd: string,
+  task: {
+    id: string;
+    depends_on?: string | string[];
+    on_dependency_failure?: DependencyFailurePolicy;
+  },
+  seen: Set<string> = new Set(),
+): string | null {
+  if (failurePolicyOf(task) !== "skip") return null;
+  if (seen.has(task.id)) return null;
+  seen.add(task.id);
+  for (const parentId of dependsOnList(task)) {
+    if (parentId === task.id) continue;
+    const parent = resolveTaskState(cwd, parentId);
+    if (!parent) continue; // a missing (not-yet-existing) parent is blockedOn's concern, not a failure
+    if (parent.phase === "ABANDONED") return parentId;
+    if (skippedOn(cwd, parent, seen)) return parentId;
+  }
+  return null;
+}
+
+export interface RetryOutcome {
+  retried: boolean;
+  attempt_count: number;
+  max_attempts: number;
+}
+
+/**
+ * The retry gate that stands in front of a manual/automatic ABANDONED
+ * transition: if attempts remain under the task's `retry` policy, the task is
+ * reset to PLAN for another attempt instead of going terminal. This bypasses
+ * `transition()`'s TRANSITIONS map on purpose — a retry is a full loop reset,
+ * not a normal forward phase move. Workspace handling (fresh re-fork vs reuse)
+ * is the caller's job (see `retryWorkspace` in worktree.ts), since only the
+ * caller knows how to reach git.
+ */
+export function abandonOrRetry(t: TaskState): RetryOutcome {
+  if (isTerminal(t.phase)) {
+    throw new Error(`illegal transition ${t.phase} → ABANDONED`);
+  }
+  const policy = retryPolicyOf(t);
+  const attempts = t.attempt_count ?? 1;
+  const at = new Date().toISOString();
+  if (attempts < policy.max_attempts) {
+    t.attempt_count = attempts + 1;
+    t.phase = "PLAN";
+    t.iterations = 0;
+    t.evidence = {};
+    t.stuck = undefined;
+    t.history.push({ phase: "PLAN", at });
+    return { retried: true, attempt_count: t.attempt_count, max_attempts: policy.max_attempts };
+  }
+  t.phase = "ABANDONED";
+  t.history.push({ phase: "ABANDONED", at });
+  return { retried: false, attempt_count: attempts, max_attempts: policy.max_attempts };
 }
 
 export function markShipped(t: TaskState, goalId: string, prUrl: string): TaskState {

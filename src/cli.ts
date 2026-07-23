@@ -22,8 +22,10 @@ import { createGoalPr } from "./lib/pr";
 import { redCheck } from "./lib/redcheck";
 import { parseSpec, type Spec } from "./lib/spec";
 import {
+  abandonOrRetry,
   allowPath,
   createTask,
+  dependsOnList,
   type Phase,
   readTask,
   resolveTaskState,
@@ -40,13 +42,14 @@ import {
   materializeDependent,
   removeWorktree,
   resolveBaseRef,
+  retryWorkspace,
   sweep,
   worktreeAvailable,
   worktreesDir,
 } from "./lib/worktree";
 
 const USAGE = `usage:
-  sddx task create --spec <path> [--workspace auto|worktree|branch|none] [--no-branch] [--depends-on <id>]
+  sddx task create --spec <path> [--workspace auto|worktree|branch|none] [--no-branch] [--depends-on <id>]...
   sddx task phase <id> <PHASE> [--test-exit <n>]
   sddx task allow <id> <path>
   sddx task show <id>
@@ -122,6 +125,19 @@ function flag(args: string[], name: string): string | undefined {
   const v = args[i + 1];
   if (v === undefined) fail(`${name} requires a value`, 2);
   return v;
+}
+
+/** Every occurrence of a repeatable flag, in order (e.g. multiple `--depends-on`). */
+function flags(args: string[], name: string): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === name) {
+      const v = args[i + 1];
+      if (v === undefined) fail(`${name} requires a value`, 2);
+      out.push(v);
+    }
+  }
+  return out;
 }
 
 function readVersionField(relativePath: string): string {
@@ -206,13 +222,14 @@ function createRootTask(
 }
 
 /** Create a deferred dependent task in the main checkout — no worktree yet, base
- * `pending:<parent-id>`. Materialized from the parent's DONE commit at dispatch. */
+ * `pending:<parent-id>[,<parent-id>...]`. Materialized once every named parent
+ * is DONE (single fork, or a sequential merge for fan-in — see worktree.ts). */
 function createDeferredTask(
   cwd: string,
   spec: Spec,
   specSrc: string,
   mode: "worktree" | "branch" | "none",
-  dependsOn: string,
+  dependsOn: string[],
 ): string {
   // A dependent forks from its parent's DONE commit (the tip of `sddx/<parent>`).
   // `none` mode never creates that branch, so the dependent could never be
@@ -230,7 +247,7 @@ function createDeferredTask(
     cwd,
     spec,
     specPath,
-    { mode, branch: null, base_sha: `pending:${dependsOn}` },
+    { mode, branch: null, base_sha: `pending:${dependsOn.join(",")}` },
     { dependsOn },
   );
   return id;
@@ -256,24 +273,26 @@ function cmdTaskCreate(cwd: string, args: string[], format: OutputFormat, noColo
   const mode = pickWorkspace(cwd, requested, reporter);
   const specSrc = join(cwd, specArg);
 
-  // A dependent task cannot fork now — its parent's DONE commit does not exist
-  // yet. Record it deferred (base `pending:<parent-id>`, no worktree); its
-  // workspace is materialized once the parent verifies.
-  const dependsOn = flag(args, "--depends-on");
-  if (dependsOn !== undefined) {
-    if (!resolveTaskState(cwd, dependsOn)) fail(`--depends-on: no such task ${dependsOn}`);
-    // Apply the overlap ⟹ ordered gate against true siblings (tasks sharing this
-    // parent — they materialize from the same commit and run concurrently), so an
-    // individually-created dependent can't slip an overlapping sibling past the
-    // graph/goal gates. The prospective task joins the sibling set for the check.
+  // A dependent task cannot fork now — its parents' DONE commits do not exist
+  // yet. Record it deferred (base `pending:<parent-id>[,...]`, no worktree); its
+  // workspace is materialized once every named parent verifies.
+  const dependsOn = flags(args, "--depends-on");
+  if (dependsOn.length > 0) {
+    for (const parentId of dependsOn) {
+      if (!resolveTaskState(cwd, parentId)) fail(`--depends-on: no such task ${parentId}`);
+    }
+    // Apply the overlap ⟹ ordered gate against true siblings (tasks sharing at
+    // least one parent — they may run concurrently), so an individually-created
+    // dependent can't slip an overlapping sibling past the graph/goal gates.
+    // The prospective task joins the sibling set for the check.
     const newId = taskId(spec.task);
-    const siblings: Array<{ id: string; dependsOn: string | null; scope: string[] }> = [
+    const siblings: Array<{ id: string; dependsOn: string[]; scope: string[] }> = [
       { id: newId, dependsOn, scope: spec.scope },
     ];
     for (const tid of mainTaskIds(cwd)) {
       const t = resolveTaskState(cwd, tid);
-      if (t?.depends_on === dependsOn && t.id !== newId) {
-        siblings.push({ id: t.id, dependsOn, scope: t.scope ?? [] });
+      if (t && t.id !== newId && dependsOnList(t).some((p) => dependsOn.includes(p))) {
+        siblings.push({ id: t.id, dependsOn: dependsOnList(t), scope: t.scope ?? [] });
       }
     }
     const sibErrs = validateSchedule(siblings);
@@ -282,7 +301,7 @@ function cmdTaskCreate(cwd: string, args: string[], format: OutputFormat, noColo
     }
     const id = createDeferredTask(cwd, spec, specSrc, mode, dependsOn);
     reporter.success(
-      `created ${id} phase=PLAN depends_on=${dependsOn} workspace=deferred(${mode})`,
+      `created ${id} phase=PLAN depends_on=${dependsOn.join(",")} workspace=deferred(${mode})`,
     );
     reporter.finish({ id, phase: "PLAN", dependsOn, workspace: "deferred", mode });
     return;
@@ -293,14 +312,14 @@ function cmdTaskCreate(cwd: string, args: string[], format: OutputFormat, noColo
   reporter.finish({ id, phase: "PLAN", mode });
 }
 
-/** Roots first, children only after their parent — cherry-pick/commit order must
- * equal dependency order. Assumes an already-validated (acyclic) graph. */
+/** Roots first, a node only after every one of its parents — cherry-pick/commit
+ * order must equal dependency order. Assumes an already-validated (acyclic) graph. */
 function topoOrder(nodes: GraphNode[]): GraphNode[] {
   const out: GraphNode[] = [];
   const emitted = new Set<string>();
   let remaining = [...nodes];
   while (remaining.length > 0) {
-    const ready = remaining.filter((n) => n.depends_on === null || emitted.has(n.depends_on));
+    const ready = remaining.filter((n) => n.depends_on.every((d) => emitted.has(d)));
     if (ready.length === 0) break; // defensive: a cycle slipped past validation
     for (const n of ready) {
       out.push(n);
@@ -336,7 +355,7 @@ function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noCol
   // `none` mode can't isolate a dependent's base (no `sddx/<parent>` branch to
   // fork from), so a graph with any edge is incompatible with it — catch it here,
   // atomically, rather than mid-creation.
-  if (requested === "none" && graph.tasks.some((n) => n.depends_on !== null)) {
+  if (requested === "none" && graph.tasks.some((n) => n.depends_on.length > 0)) {
     errs.push("workspace none is incompatible with dependent tasks — use worktree or branch mode");
   }
   const loaded = new Map<string, { spec: Spec; src: string }>();
@@ -380,23 +399,23 @@ function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noCol
   // workspaces; dependents are deferred), then register the goal with its edges.
   const mode = pickWorkspace(cwd, requested, reporter);
   const aliasToId = new Map<string, string>();
-  const deps: Record<string, string> = {};
+  const deps: Record<string, string[]> = {};
   const created: string[] = [];
   for (const node of topoOrder(graph.tasks)) {
     const { spec, src } = loaded.get(node.alias) as { spec: Spec; src: string };
-    if (node.depends_on === null) {
+    if (node.depends_on.length === 0) {
       const { id, line } = createRootTask(cwd, spec, src, mode, reporter);
       aliasToId.set(node.alias, id);
       created.push(id);
       reporter.success(line);
     } else {
-      const parentId = aliasToId.get(node.depends_on) as string;
-      const id = createDeferredTask(cwd, spec, src, mode, parentId);
+      const parentIds = node.depends_on.map((alias) => aliasToId.get(alias) as string);
+      const id = createDeferredTask(cwd, spec, src, mode, parentIds);
       aliasToId.set(node.alias, id);
       created.push(id);
-      deps[id] = parentId;
+      deps[id] = parentIds;
       reporter.success(
-        `created ${id} phase=PLAN depends_on=${parentId} workspace=deferred(${mode})`,
+        `created ${id} phase=PLAN depends_on=${parentIds.join(",")} workspace=deferred(${mode})`,
       );
     }
   }
@@ -414,6 +433,26 @@ function cmdTaskPhase(cwd: string, args: string[], format: OutputFormat, noColor
   if (!id || !phase) fail(USAGE, 2);
   const testExitRaw = flag(args, "--test-exit");
   const task = readTask(cwd, id);
+  if (phase === "ABANDONED") {
+    const outcome = abandonOrRetry(task);
+    if (outcome.retried) {
+      retryWorkspace(cwd, task);
+      writeTask(cwd, task);
+      reporter.success(`${id} retry ${outcome.attempt_count}/${outcome.max_attempts} → phase=PLAN`);
+      reporter.finish({
+        id,
+        phase: task.phase,
+        retried: true,
+        attempt_count: outcome.attempt_count,
+        max_attempts: outcome.max_attempts,
+      });
+      return;
+    }
+    writeTask(cwd, task);
+    reporter.success(`${id} phase=${task.phase}`);
+    reporter.finish({ id, phase: task.phase, retried: false });
+    return;
+  }
   transition(task, phase as Phase, {
     testExit: testExitRaw === undefined ? undefined : Number(testExitRaw),
   });
@@ -558,7 +597,7 @@ function cmdGoalCreate(cwd: string, args: string[], format: OutputFormat, noColo
   const scheduleErrs = validateSchedule(
     taskIds.map((tid) => {
       const t = resolveTaskState(cwd, tid);
-      return { id: tid, dependsOn: t?.depends_on ?? null, scope: t?.scope ?? [] };
+      return { id: tid, dependsOn: t ? dependsOnList(t) : [], scope: t?.scope ?? [] };
     }),
   );
   if (scheduleErrs.length > 0) {

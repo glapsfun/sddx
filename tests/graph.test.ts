@@ -16,8 +16,16 @@ tasks:
     expect(errors).toEqual([]);
     expect(graph!.goal).toBe("ship the thing");
     expect(graph!.tasks.map((t) => t.alias)).toEqual(["schema", "api"]);
-    expect(graph!.tasks[1]!.depends_on).toBe("schema");
-    expect(graph!.tasks[0]!.depends_on).toBeNull();
+    expect(graph!.tasks[1]!.depends_on).toEqual(["schema"]);
+    expect(graph!.tasks[0]!.depends_on).toEqual([]);
+  });
+
+  test("parses a fan-in node with a depends_on list", () => {
+    const y =
+      "goal: g\ntasks:\n  - alias: a\n    spec: a.yaml\n  - alias: b\n    spec: b.yaml\n  - alias: d\n    spec: d.yaml\n    depends_on: [a, b]\n";
+    const { graph, errors } = parseGraph(y);
+    expect(errors).toEqual([]);
+    expect(graph!.tasks.find((t) => t.alias === "d")!.depends_on).toEqual(["a", "b"]);
   });
 
   test("rejects duplicate alias", () => {
@@ -44,9 +52,9 @@ tasks:
 });
 
 describe("validateSchedule (overlap ⟹ ordered)", () => {
-  const n = (id: string, dependsOn: string | null, scope: string[]): ScheduleNode => ({
+  const n = (id: string, dependsOn: string | string[] | null, scope: string[]): ScheduleNode => ({
     id,
-    dependsOn,
+    dependsOn: dependsOn === null ? [] : Array.isArray(dependsOn) ? dependsOn : [dependsOn],
     scope,
   });
 
@@ -107,5 +115,41 @@ describe("validateSchedule (overlap ⟹ ordered)", () => {
 
   test("legacy all-root, no-scope goal passes unchanged", () => {
     expect(validateSchedule([n("a", null, []), n("b", null, []), n("c", null, [])])).toEqual([]);
+  });
+
+  test("fan-in (two parents, no cycle) is accepted when scopes are disjoint", () => {
+    expect(
+      validateSchedule([
+        n("a", null, ["src/a.ts"]),
+        n("b", null, ["src/b.ts"]),
+        n("d", ["a", "b"], ["src/d.ts"]),
+      ]),
+    ).toEqual([]);
+  });
+
+  test("co-parents of a shared fan-in child with overlapping scope are rejected", () => {
+    const errs = validateSchedule([
+      n("a", null, ["src/shared/**"]),
+      n("b", null, ["src/shared/x.ts"]),
+      n("d", ["a", "b"], ["src/d.ts"]),
+    ]);
+    expect(errs.join(" ")).toContain("scope overlap");
+    expect(errs.join(" ")).toContain('"a"');
+    expect(errs.join(" ")).toContain('"b"');
+  });
+
+  test("cycle through a multi-parent edge is rejected", () => {
+    const errs = validateSchedule([n("a", ["c"], []), n("b", ["a"], []), n("c", ["b"], [])]);
+    expect(errs.join(" ")).toContain("cycle");
+  });
+
+  test("a fan-in child may overlap either of its (disjoint) parents' scope", () => {
+    expect(
+      validateSchedule([
+        n("a", null, ["src/a.ts"]),
+        n("b", null, ["src/b.ts"]),
+        n("d", ["a", "b"], ["src/a.ts"]),
+      ]),
+    ).toEqual([]);
   });
 });

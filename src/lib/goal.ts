@@ -1,19 +1,30 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveReceipt } from "./receipt";
-import { resolveTaskState, sddxDir, taskId } from "./task";
+import { dependsOnList, resolveTaskState, sddxDir, taskId } from "./task";
 
 export interface Goal {
   id: string;
   goal: string;
   task_ids: string[];
-  /** Single-parent edges: task id → its predecessor task id. Absent/empty for a
-   * goal of all-root tasks (the legacy shape). Set by `graph create`. */
-  deps?: Record<string, string>;
+  /** Dependency edges: task id → its predecessor task id(s) (fan-in allowed). A
+   * legacy single-string value (the pre-DAG shape) is still readable via
+   * `depsList()`. Absent/empty for a goal of all-root tasks. Set by `graph create`. */
+  deps?: Record<string, string | string[]>;
   created_at: string;
   updated_at: string;
   /** Set once by `sddx pr create` after a successful PR open. */
   shipped?: { pr_url: string; at: string };
+}
+
+/** Normalizes a `Goal.deps` entry to a list, same read-compat as `dependsOnList`. */
+export function depsList(
+  g: { deps?: Record<string, string | string[]> },
+  taskId: string,
+): string[] {
+  const d = g.deps?.[taskId];
+  if (d === undefined) return [];
+  return dependsOnList({ depends_on: d });
 }
 
 export const goalsDir = (cwd: string): string => join(sddxDir(cwd), "goals");
@@ -28,7 +39,7 @@ export function createGoal(
   cwd: string,
   goalSentence: string,
   taskIds: string[],
-  deps?: Record<string, string>,
+  deps?: Record<string, string[]>,
 ): Goal {
   if (taskIds.length === 0) {
     throw new Error("a goal requires at least one task id");

@@ -29,6 +29,10 @@ stop_rules:
   - max_iterations: 5
 out_of_scope:
   - "auth, rate limiting"
+on_dependency_failure: skip # OPTIONAL — skip (default) | block; see below
+retry: # OPTIONAL — bounded automatic re-attempts before ABANDONED
+  max_attempts: 1 # default 1 = today's behavior, no automatic retry
+  workspace: fresh # fresh (default, re-fork clean) | reuse (keep the worktree)
 ```
 
 Rules:
@@ -41,7 +45,15 @@ Rules:
 - When the task runs alongside siblings, declare a `scope` — the globs it may
   write. It is both the conflict-check the orchestrator's graph gate uses and the
   executor's write-boundary at run time (writes outside it are blocked). Keep it
-  tight: the smallest lane that covers the work.
+  tight: the smallest lane that covers the work. `depends_on` (who this task's
+  scope may overlap with) is the orchestrator's call in `graph.yaml`, not
+  yours — you only declare `scope` here, never a sibling reference.
+- Leave `on_dependency_failure` and `retry` unset unless the task genuinely
+  needs them: most tasks are fine skipping past a failed ancestor with no
+  automatic retry (today's behavior). Set `on_dependency_failure: block` only
+  when this task truly cannot proceed without its dependency (e.g. a deploy
+  step). Set `retry.max_attempts` > 1 only for a task whose oracle is known to
+  be flaky or whose failure mode is worth a clean second attempt.
 - Keep it to one page. Dense context links beat prose.
 
 ## Never

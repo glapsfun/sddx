@@ -5,10 +5,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseSpec } from "../src/lib/spec";
 import {
+  abandonOrRetry,
+  blockedOn,
   createTask,
+  dependsOnList,
+  failurePolicyOf,
   markShipped,
+  type Phase,
   readTask,
   resolveTaskState,
+  retryPolicyOf,
+  skippedOn,
   taskId,
   transition,
   writeTask,
@@ -111,7 +118,7 @@ describe("scope and depends_on", () => {
     expect(back.depends_on).toBeUndefined();
   });
 
-  test("depends_on recorded and round-trips when provided", () => {
+  test("depends_on recorded as a list and round-trips when a single parent is given", () => {
     const cwd = tmpCwd();
     const t = createTask(
       cwd,
@@ -121,9 +128,192 @@ describe("scope and depends_on", () => {
       { dependsOn: "20260721-parent" },
     );
     const back = readTask(cwd, t.id);
-    expect(back.depends_on).toBe("20260721-parent");
+    expect(back.depends_on).toEqual(["20260721-parent"]);
     expect(back.workspace.base_sha).toBe("pending:20260721-parent");
     expect(back.workspace.path).toBeUndefined();
+  });
+
+  test("depends_on records multiple parents (fan-in)", () => {
+    const cwd = tmpCwd();
+    const t = createTask(
+      cwd,
+      scopedSpec,
+      "s",
+      { mode: "worktree", branch: null, base_sha: "pending:a,b" },
+      { dependsOn: ["20260721-a", "20260721-b"] },
+    );
+    const back = readTask(cwd, t.id);
+    expect(back.depends_on).toEqual(["20260721-a", "20260721-b"]);
+  });
+
+  test("legacy single-string depends_on on disk reads as a one-element list", () => {
+    const cwd = tmpCwd();
+    const t = createTask(cwd, scopedSpec, "s", { mode: "none", branch: null, base_sha: "a" });
+    // simulate a pre-DAG task file written with the old scalar shape
+    const legacy = { ...readTask(cwd, t.id), depends_on: "20260721-parent" };
+    writeTask(cwd, legacy as never);
+    expect(dependsOnList(readTask(cwd, t.id))).toEqual(["20260721-parent"]);
+  });
+
+  test("attempt_count defaults to 1 and on_dependency_failure/retry default via helpers", () => {
+    const cwd = tmpCwd();
+    const t = createTask(cwd, scopedSpec, "s", { mode: "none", branch: null, base_sha: "a" });
+    expect(t.attempt_count).toBe(1);
+    expect(failurePolicyOf(t)).toBe("skip");
+    expect(retryPolicyOf(t)).toEqual({ max_attempts: 1, workspace: "fresh" });
+  });
+
+  test("on_dependency_failure and retry are copied from the spec", () => {
+    const specWithPolicy = parseSpec(
+      "task: build the api\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: t\non_dependency_failure: block\nretry:\n  max_attempts: 3\n  workspace: reuse\n",
+    ).spec!;
+    const cwd = tmpCwd();
+    const t = createTask(cwd, specWithPolicy, "s", { mode: "none", branch: null, base_sha: "a" });
+    expect(t.on_dependency_failure).toBe("block");
+    expect(retryPolicyOf(t)).toEqual({ max_attempts: 3, workspace: "reuse" });
+  });
+});
+
+describe("blockedOn / skippedOn", () => {
+  function makeTask(cwd: string, sentence: string, dependsOn?: string | string[]) {
+    const s = parseSpec(
+      `task: ${sentence}\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: t\n`,
+    ).spec!;
+    return createTask(
+      cwd,
+      s,
+      "s",
+      { mode: "none", branch: null, base_sha: "a" },
+      dependsOn ? { dependsOn } : {},
+    );
+  }
+
+  test("blocked until every named parent is DONE", () => {
+    const cwd = tmpCwd();
+    const a = makeTask(cwd, "parent a");
+    const b = makeTask(cwd, "parent b");
+    const d = makeTask(cwd, "child d", [a.id, b.id]);
+    expect(blockedOn(cwd, d)).toBe(a.id);
+
+    const aDone = { ...readTask(cwd, a.id), phase: "DONE" as const };
+    writeTask(cwd, aDone);
+    // A is DONE, B is not — blocked-on-B specifically, not A
+    expect(blockedOn(cwd, d)).toBe(b.id);
+
+    const bDone = { ...readTask(cwd, b.id), phase: "DONE" as const };
+    writeTask(cwd, bDone);
+    expect(blockedOn(cwd, d)).toBeNull();
+  });
+
+  test("block-policy dependent stays blocked when its parent is ABANDONED", () => {
+    const cwd = tmpCwd();
+    const a = makeTask(cwd, "parent a");
+    const bSpec = parseSpec(
+      "task: block child\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: t\non_dependency_failure: block\n",
+    ).spec!;
+    const b = createTask(
+      cwd,
+      bSpec,
+      "s",
+      { mode: "none", branch: null, base_sha: "a" },
+      {
+        dependsOn: a.id,
+      },
+    );
+    writeTask(cwd, { ...readTask(cwd, a.id), phase: "ABANDONED" as const });
+    expect(blockedOn(cwd, b)).toBe(a.id);
+    expect(skippedOn(cwd, b)).toBeNull();
+  });
+
+  test("skip-policy (default) dependent is skipped when its parent is ABANDONED", () => {
+    const cwd = tmpCwd();
+    const a = makeTask(cwd, "parent a");
+    const b = makeTask(cwd, "child b", a.id);
+    writeTask(cwd, { ...readTask(cwd, a.id), phase: "ABANDONED" as const });
+    expect(skippedOn(cwd, b)).toBe(a.id);
+  });
+
+  test("fan-in child skips if any one of several parents is ABANDONED, even if others are DONE", () => {
+    const cwd = tmpCwd();
+    const a = makeTask(cwd, "parent a");
+    const b = makeTask(cwd, "parent b");
+    const d = makeTask(cwd, "child d", [a.id, b.id]);
+    writeTask(cwd, { ...readTask(cwd, a.id), phase: "DONE" as const });
+    writeTask(cwd, { ...readTask(cwd, b.id), phase: "ABANDONED" as const });
+    expect(skippedOn(cwd, d)).toBe(b.id);
+  });
+
+  test("skip cascades transitively through a chain of skip-policy tasks", () => {
+    const cwd = tmpCwd();
+    const a = makeTask(cwd, "root a");
+    const s1 = makeTask(cwd, "mid s1", a.id);
+    const s2 = makeTask(cwd, "leaf s2", s1.id);
+    writeTask(cwd, { ...readTask(cwd, a.id), phase: "ABANDONED" as const });
+    expect(skippedOn(cwd, s1)).toBe(a.id);
+    expect(skippedOn(cwd, s2)).toBe(s1.id);
+  });
+
+  test("an unrelated sibling with no shared edge is unaffected", () => {
+    const cwd = tmpCwd();
+    const a = makeTask(cwd, "root a");
+    makeTask(cwd, "dependent b", a.id);
+    const r = makeTask(cwd, "unrelated root r");
+    writeTask(cwd, { ...readTask(cwd, a.id), phase: "ABANDONED" as const });
+    expect(blockedOn(cwd, r)).toBeNull();
+    expect(skippedOn(cwd, r)).toBeNull();
+  });
+});
+
+describe("abandonOrRetry", () => {
+  test("default policy (max_attempts 1) abandons immediately", () => {
+    const t = createTask(tmpCwd(), spec, "s", { mode: "none", branch: null, base_sha: "a" });
+    const outcome = abandonOrRetry(t);
+    expect(outcome).toEqual({ retried: false, attempt_count: 1, max_attempts: 1 });
+    expect(t.phase).toBe("ABANDONED");
+  });
+
+  test("retries twice before reaching ABANDONED on the third exhaustion", () => {
+    const retrySpec = parseSpec(
+      "task: flaky\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: t\nretry:\n  max_attempts: 3\n",
+    ).spec!;
+    const t = createTask(tmpCwd(), retrySpec, "s", { mode: "none", branch: null, base_sha: "a" });
+    t.phase = "GREEN" as Phase;
+
+    const first = abandonOrRetry(t);
+    expect(first).toEqual({ retried: true, attempt_count: 2, max_attempts: 3 });
+    expect(t.phase).toBe("PLAN");
+
+    t.phase = "GREEN" as Phase;
+    const second = abandonOrRetry(t);
+    expect(second).toEqual({ retried: true, attempt_count: 3, max_attempts: 3 });
+    expect(t.phase).toBe("PLAN");
+
+    t.phase = "GREEN" as Phase;
+    const third = abandonOrRetry(t);
+    expect(third).toEqual({ retried: false, attempt_count: 3, max_attempts: 3 });
+    expect(t.phase).toBe("ABANDONED");
+  });
+
+  test("a retry clears iterations, evidence, and stuck; appends a PLAN history entry", () => {
+    const retrySpec = parseSpec(
+      "task: flaky\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: t\nretry:\n  max_attempts: 2\n",
+    ).spec!;
+    const t = createTask(tmpCwd(), retrySpec, "s", { mode: "none", branch: null, base_sha: "a" });
+    t.phase = "GREEN" as Phase;
+    t.iterations = 4;
+    t.evidence.red = { test_exit: 1, at: new Date().toISOString() };
+    t.stuck = { fingerprint: "x", count: 3, since: new Date().toISOString() };
+    abandonOrRetry(t);
+    expect(t.iterations).toBe(0);
+    expect(t.evidence).toEqual({});
+    expect(t.stuck).toBeUndefined();
+    expect(t.history.at(-1)?.phase).toBe("PLAN");
+  });
+
+  test("refuses on an already-terminal task", () => {
+    const t = createTask(tmpCwd(), spec, "s", { mode: "none", branch: null, base_sha: "a" });
+    t.phase = "DONE";
+    expect(() => abandonOrRetry(t)).toThrow(/illegal transition/);
   });
 });
 

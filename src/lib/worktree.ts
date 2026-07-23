@@ -12,9 +12,17 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { join, relative } from "node:path";
-import { git } from "./git";
-import { type Phase, resolveTaskState, sddxDir, type TaskState, writeTask } from "./task";
+import { dirname, isAbsolute, join, relative } from "node:path";
+import { branchExists, forceDeleteBranch, git } from "./git";
+import {
+  dependsOnList,
+  type Phase,
+  resolveTaskState,
+  retryPolicyOf,
+  sddxDir,
+  type TaskState,
+  writeTask,
+} from "./task";
 
 export const worktreesDir = (cwd: string): string => join(cwd, ".sddx-worktrees");
 
@@ -53,8 +61,15 @@ export function resolveBaseRef(cwd: string): BaseRef {
 
 const gitCommonDir = (cwd: string): string => {
   const dir = git(cwd, "rev-parse", "--git-common-dir");
-  return join(cwd, dir);
+  // Absolute already when run from inside a linked worktree; relative (".git")
+  // when run from the main worktree.
+  return isAbsolute(dir) ? dir : join(cwd, dir);
 };
+
+/** The main repo root, resolvable from anywhere in the repo — including from
+ * inside a linked worktree, whose own directory a retry may be about to
+ * discard (see `retryWorkspace`). */
+export const resolveMainRepoRoot = (cwd: string): string => dirname(gitCommonDir(cwd));
 
 const EXCLUDE_LINE = ".sddx-worktrees/";
 
@@ -85,19 +100,56 @@ export function createWorktree(cwd: string, id: string, baseSha: string): string
   return path;
 }
 
+/** Sequentially `git merge --no-ff` each remaining parent commit into whatever is
+ * already checked out in `worktreePath` (the first parent's commit). Never an
+ * octopus merge. Aborts and rethrows naming the failing SHA on conflict — a
+ * conflict here means a gate blind spot (STRICT scope proof missed a shared
+ * file), not something to auto-resolve. Returns the final commit SHA. */
+function mergeParentsSequential(worktreePath: string, remaining: readonly string[]): string {
+  for (const sha of remaining) {
+    const r = spawnSync("git", ["merge", "--no-ff", "-m", `sddx: merge dependency ${sha}`, sha], {
+      cwd: worktreePath,
+      encoding: "utf8",
+    });
+    if (r.status !== 0) {
+      spawnSync("git", ["merge", "--abort"], { cwd: worktreePath });
+      throw new Error(`merge of ${sha} failed: ${(r.stderr ?? r.stdout ?? "").trim()}`);
+    }
+  }
+  return git(worktreePath, "rev-parse", "HEAD");
+}
+
+/** Branch mode has no isolated worktree of its own, so a fan-in merge borrows a
+ * throwaway one (the same technique `pr.ts` uses for goal-branch assembly):
+ * check the branch out into a scratch worktree, merge there, force-remove the
+ * scratch worktree — the branch pointer keeps the merge commit. */
+function mergeParentsInBranch(cwd: string, taskId: string, remaining: readonly string[]): string {
+  const tmpPath = join(worktreesDir(cwd), `materialize-${taskId}`);
+  git(cwd, "worktree", "add", "-q", tmpPath, `sddx/${taskId}`);
+  try {
+    return mergeParentsSequential(tmpPath, remaining);
+  } finally {
+    removeWorktreeForced(cwd, tmpPath);
+  }
+}
+
 /**
- * Materialize a deferred dependent task's workspace at dispatch time. Its parent
- * must be DONE; the workspace is forked from the parent's DONE commit (the tip of
- * `sddx/<parent-id>`) rather than origin/HEAD, so the dependent's writes land on
- * top of the parent's committed tree. Honors the mode chosen at create time:
- *   - worktree → a worktree forked from the parent commit; the task state + spec
- *     move into it (where resolveTaskState finds the live copy first) and the
- *     deferred main-checkout copies are removed.
- *   - branch → a `sddx/<id>` branch at the parent commit; the task stays in the
- *     main checkout (worktrees would be unsafe here — this is why branch mode was
- *     chosen, e.g. submodules).
- * Fails loud — never forks from a wrong base — if the parent is not DONE or its
- * commit is unresolvable.
+ * Materialize a deferred dependent task's workspace once every named parent is
+ * DONE. With one parent, the workspace forks directly from its DONE commit
+ * (tip of `sddx/<parent-id>`) rather than origin/HEAD, so the dependent's
+ * writes land on top of the parent's committed tree. With several parents
+ * (fan-in), it forks from the first-listed parent's commit and sequentially
+ * merges the rest in — safe by construction because `graph create`'s overlap
+ * ⟹ ordered gate already proved every pair of co-parents has disjoint scope.
+ * Honors the mode chosen at create time:
+ *   - worktree → a worktree forked from the fork/merge commit; the task state
+ *     + spec move into it (where resolveTaskState finds the live copy first)
+ *     and the deferred main-checkout copies are removed.
+ *   - branch → a `sddx/<id>` branch at the fork/merge commit; the task stays
+ *     in the main checkout (worktrees would be unsafe here — this is why
+ *     branch mode was chosen, e.g. submodules).
+ * Fails loud — never forks from a wrong or partial base — if any parent is not
+ * DONE, a parent's commit is unresolvable, or the merge conflicts.
  */
 export function materializeDependent(
   cwd: string,
@@ -105,32 +157,61 @@ export function materializeDependent(
 ): { path?: string; baseSha: string; mode: "worktree" | "branch" } {
   const task = resolveTaskState(cwd, taskId);
   if (!task) throw new Error(`no such task: ${taskId}`);
-  const parentId = task.depends_on;
-  if (!parentId) throw new Error(`task ${taskId} has no depends_on to materialize from`);
-  const parent = resolveTaskState(cwd, parentId);
-  if (!parent) throw new Error(`cannot materialize ${taskId}: parent ${parentId} not found`);
-  if (parent.phase !== "DONE") {
-    throw new Error(
-      `cannot materialize ${taskId}: parent ${parentId} is ${parent.phase}, not DONE`,
-    );
+  const parentIds = dependsOnList(task);
+  if (parentIds.length === 0) {
+    throw new Error(`task ${taskId} has no depends_on to materialize from`);
   }
-  const baseSha = tryRev(cwd, `refs/heads/sddx/${parentId}`) ?? tryRev(cwd, `sddx/${parentId}`);
-  if (!baseSha) {
-    throw new Error(
-      `cannot materialize ${taskId}: parent ${parentId}'s DONE commit is unresolvable`,
-    );
+  const parentShas: string[] = [];
+  for (const parentId of parentIds) {
+    const parent = resolveTaskState(cwd, parentId);
+    if (!parent) throw new Error(`cannot materialize ${taskId}: parent ${parentId} not found`);
+    if (parent.phase !== "DONE") {
+      throw new Error(
+        `cannot materialize ${taskId}: parent ${parentId} is ${parent.phase}, not DONE`,
+      );
+    }
+    const sha = tryRev(cwd, `refs/heads/sddx/${parentId}`) ?? tryRev(cwd, `sddx/${parentId}`);
+    if (!sha) {
+      throw new Error(
+        `cannot materialize ${taskId}: parent ${parentId}'s DONE commit is unresolvable`,
+      );
+    }
+    parentShas.push(sha);
   }
+  const forkSha = parentShas[0] as string;
+  const rest = parentShas.slice(1);
 
   if (task.workspace.mode === "branch") {
     // no worktree — worktrees are unsafe in this repo (why branch mode was picked).
-    // Create the branch at the parent commit; the task/spec stay in the main checkout.
-    git(cwd, "branch", `sddx/${taskId}`, baseSha);
-    task.workspace = { mode: "branch", branch: `sddx/${taskId}`, base_sha: baseSha };
+    // Create the branch at the fork commit; the task/spec stay in the main checkout.
+    git(cwd, "branch", `sddx/${taskId}`, forkSha);
+    let finalSha = forkSha;
+    if (rest.length > 0) {
+      try {
+        finalSha = mergeParentsInBranch(cwd, taskId, rest);
+      } catch (e) {
+        throw new Error(
+          `cannot materialize ${taskId}: fan-in merge conflict combining parents [${parentIds.join(", ")}] — ${(e as Error).message}`,
+        );
+      }
+    }
+    task.workspace = { mode: "branch", branch: `sddx/${taskId}`, base_sha: finalSha };
     writeTask(cwd, task);
-    return { baseSha, mode: "branch" };
+    return { baseSha: finalSha, mode: "branch" };
   }
 
-  const path = createWorktree(cwd, taskId, baseSha);
+  const path = createWorktree(cwd, taskId, forkSha);
+  let finalSha = forkSha;
+  if (rest.length > 0) {
+    try {
+      finalSha = mergeParentsSequential(path, rest);
+    } catch (e) {
+      removeWorktreeForced(cwd, path);
+      throw new Error(
+        `cannot materialize ${taskId}: fan-in merge conflict combining parents [${parentIds.join(", ")}] — ${(e as Error).message}`,
+      );
+    }
+  }
   // carry the spec into the new worktree, then write the updated task state there
   const relSpec = task.spec_path;
   const specSrc = join(cwd, relSpec);
@@ -141,7 +222,7 @@ export function materializeDependent(
   task.workspace = {
     mode: "worktree",
     branch: `sddx/${taskId}`,
-    base_sha: baseSha,
+    base_sha: finalSha,
     path: join(".sddx-worktrees", taskId),
   };
   writeTask(path, task);
@@ -152,7 +233,111 @@ export function materializeDependent(
   rmSync(join(cwd, ".sddx", "tasks", `${taskId}.json`), { force: true });
   if (existsSync(specSrc)) rmSync(specSrc, { force: true });
 
-  return { path, baseSha, mode: "worktree" };
+  return { path, baseSha: finalSha, mode: "worktree" };
+}
+
+/**
+ * Applies a task's `retry.workspace` policy after `abandonOrRetry` resets it to
+ * PLAN for another attempt: `fresh` (default) discards the current worktree/
+ * branch and re-forks from the same recorded base, so a dirty build or partial
+ * edit from the failed attempt can't poison the next one; `reuse` leaves the
+ * workspace untouched. `cwd` may be the task's own worktree (the common case —
+ * `task phase <id> ABANDONED` runs from inside it); the main repo root is
+ * resolved independently since a `fresh` retry is about to discard that very
+ * directory. Also discards and re-materializes any dependent that had already
+ * materialized against this task's prior (now-superseded) commit — recursively,
+ * through its own dependents — never rebasing any of them.
+ */
+export function retryWorkspace(cwd: string, task: TaskState): void {
+  const policy = retryPolicyOf(task);
+  const root = resolveMainRepoRoot(cwd);
+  if (policy.workspace === "fresh") {
+    const branch = `sddx/${task.id}`;
+    if (task.workspace.mode === "worktree" && task.workspace.path) {
+      const oldAbs = join(root, task.workspace.path);
+      const specAbs = join(oldAbs, task.spec_path);
+      const specBytes = existsSync(specAbs) ? readFileSync(specAbs) : null;
+      if (existsSync(oldAbs)) {
+        try {
+          removeWorktreeForced(root, oldAbs);
+        } catch {
+          // best-effort — a manually-removed or already-gone worktree is fine
+        }
+      }
+      if (branchExists(root, branch)) forceDeleteBranch(root, branch);
+      const newAbs = createWorktree(root, task.id, task.workspace.base_sha);
+      mkdirSync(join(sddxDir(newAbs), "tasks"), { recursive: true });
+      if (specBytes) {
+        mkdirSync(dirname(join(newAbs, task.spec_path)), { recursive: true });
+        writeFileSync(join(newAbs, task.spec_path), specBytes);
+      }
+      task.workspace = { ...task.workspace, path: relative(root, newAbs) };
+    } else if (task.workspace.mode === "branch" && task.workspace.branch) {
+      // never left the main checkout — just park the branch back at its base
+      git(root, "branch", "-f", branch, task.workspace.base_sha);
+    }
+    // mode "none": nothing isolated to reset
+  }
+  rematerializeStaleDependents(root, task.id);
+}
+
+const allKnownTaskIds = (cwd: string): string[] => {
+  const ids = new Set<string>();
+  const mainDir = join(cwd, ".sddx", "tasks");
+  if (existsSync(mainDir)) {
+    for (const f of readdirSync(mainDir)) if (f.endsWith(".json")) ids.add(f.slice(0, -5));
+  }
+  for (const id of worktreeIds(cwd)) ids.add(id);
+  return [...ids];
+};
+
+/** A dependent counts as already-materialized once its base is a real SHA
+ * rather than the deferred `pending:...` placeholder. */
+const isMaterialized = (t: TaskState): boolean => !t.workspace.base_sha.startsWith("pending:");
+
+/**
+ * After `retriedTaskId` produces a new commit, discard and re-materialize any
+ * dependent whose workspace was already built from its earlier (now stale)
+ * commit — recursing into that dependent's own already-materialized
+ * dependents. Never rebases; always tears down and recreates via the same
+ * fork-or-merge path `materializeDependent` uses for a first materialization.
+ */
+export function rematerializeStaleDependents(cwd: string, retriedTaskId: string): string[] {
+  const rebuilt: string[] = [];
+  for (const id of allKnownTaskIds(cwd)) {
+    if (id === retriedTaskId) continue;
+    const t = resolveTaskState(cwd, id);
+    if (!t) continue;
+    if (!dependsOnList(t).includes(retriedTaskId)) continue;
+    if (!isMaterialized(t)) continue; // not yet materialized — nothing to discard
+
+    const staleBranch = `sddx/${id}`;
+    if (t.workspace.mode === "worktree" && t.workspace.path) {
+      const abs = join(cwd, t.workspace.path);
+      if (existsSync(abs)) {
+        try {
+          removeWorktreeForced(cwd, abs);
+        } catch {
+          // best-effort
+        }
+      }
+    }
+    // the stale branch (worktree or branch mode) must go too, or re-materializing
+    // via createWorktree/`git branch` would collide with the old tip
+    if (branchExists(cwd, staleBranch)) forceDeleteBranch(cwd, staleBranch);
+    // reset to deferred so materializeDependent treats it as a fresh dispatch
+    t.workspace = {
+      mode: t.workspace.mode,
+      branch: null,
+      base_sha: `pending:${dependsOnList(t).join(",")}`,
+    };
+    mkdirSync(join(cwd, ".sddx", "tasks"), { recursive: true });
+    writeTask(cwd, t); // re-home the state to the main checkout before rebuilding
+    materializeDependent(cwd, id);
+    rebuilt.push(id);
+    rebuilt.push(...rematerializeStaleDependents(cwd, id));
+  }
+  return rebuilt;
 }
 
 export const isDirty = (worktreePath: string): boolean =>

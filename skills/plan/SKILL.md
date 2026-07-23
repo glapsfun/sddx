@@ -30,12 +30,19 @@ CLI: `"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "${CLAUDE_PLUGIN_ROOT}/dist/cli.mjs"`
      - max_iterations: 5
    out_of_scope:
      - "<explicitly not doing>"
+   on_dependency_failure: skip  # optional — skip (default) | block
+   retry:                       # optional — bounded automatic retry before ABANDONED
+     max_attempts: 1            # default 1 = no automatic retry, today's behavior
+     workspace: fresh           # fresh (default) | reuse
    ```
 
    Declare `scope` when the task will run alongside others: it's the write-lane
    the graph gate checks for conflicts and the gate enforces at run time. A
-   dependent task (one that needs another's committed result) is expressed in
-   the graph with `depends_on`, not in this spec — see `/sddx:run`.
+   dependent task (one that needs another's committed result — possibly
+   several, for a fan-in task) is expressed in the graph with `depends_on`,
+   not in this spec — see `/sddx:run`. Leave `on_dependency_failure`/`retry`
+   unset unless this task specifically needs to block on (rather than skip
+   past) a failed ancestor, or needs more than one automatic attempt.
 
 4. **Register it.** Save the YAML to `.sddx/drafts/<date>-<slug>.yaml` (dated
    so same-wording plans on different days never collide) and run:

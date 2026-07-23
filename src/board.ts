@@ -6,14 +6,15 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { stuckThreshold } from "./lib/config";
 import type { Receipt } from "./lib/receipt";
-import { blockedOn, type TaskState } from "./lib/task";
+import { blockedOn, dependsOnList, skippedOn, type TaskState } from "./lib/task";
 import { worktreesDir } from "./lib/worktree";
 
 interface BoardRow {
   id: string;
-  phase: string;
   rawPhase: string;
-  dependsOn?: string;
+  stuck: boolean;
+  dependsOn?: string[];
+  onDependencyFailure?: "skip" | "block";
   sentence: string;
   workspace: string;
   branch: string | null;
@@ -21,6 +22,18 @@ interface BoardRow {
   receipt: string;
   allow: string;
 }
+
+/** The five board buckets, plus the task's own terminal-failure marker
+ * (distinct from Skipped, which describes a *dependent's* reaction to
+ * someone else's failure) and the unreadable-file case. */
+type Status =
+  | "Ready"
+  | "Running"
+  | "Blocked"
+  | "Skipped"
+  | "Completed"
+  | "Abandoned"
+  | "UNREADABLE";
 
 const DASH = "—";
 
@@ -48,8 +61,8 @@ function taskRow(
   } catch {
     return {
       id,
-      phase: "UNREADABLE",
       rawPhase: "UNREADABLE",
+      stuck: false,
       sentence: "task file failed to parse",
       workspace: DASH,
       branch: null,
@@ -63,11 +76,13 @@ function taskRow(
     receipt = receiptRef(dir, id);
     if (receipt !== DASH) break;
   }
+  const deps = dependsOnList(t);
   return {
     id: t.id,
-    phase: t.stuck && t.stuck.count >= threshold ? `${t.phase} ⚠stuck` : t.phase,
     rawPhase: t.phase,
-    ...(t.depends_on ? { dependsOn: t.depends_on } : {}),
+    stuck: Boolean(t.stuck && t.stuck.count >= threshold),
+    ...(deps.length > 0 ? { dependsOn: deps } : {}),
+    ...(t.on_dependency_failure ? { onDependencyFailure: t.on_dependency_failure } : {}),
     sentence: t.task,
     workspace: t.workspace.mode,
     branch: t.workspace.branch,
@@ -157,7 +172,9 @@ function collectRows(cwd: string): Map<string, BoardRow> {
 }
 
 export interface BoardTaskData extends BoardRow {
+  status: Status;
   blockedOnId: string | null;
+  skippedOnId: string | null;
 }
 
 export interface BoardData {
@@ -166,18 +183,58 @@ export interface BoardData {
   flaggedWorktreesUnreadable: boolean;
 }
 
-/** Same fact `renderBoard`'s table shows inline: null once a task is DONE
- * (nothing can still block it), otherwise the nearest non-DONE ancestor. */
-function blockedOnId(cwd: string, r: BoardRow, id: string): string | null {
-  return r.rawPhase === "DONE" ? null : blockedOn(cwd, { id, depends_on: r.dependsOn });
+/**
+ * The board's status derivation, in precedence order: a task's own terminal
+ * outcome (Completed/Abandoned) always wins; otherwise a `skip`-policy task
+ * whose named parent failed is Skipped; otherwise any unmet named parent makes
+ * it Blocked (this covers a `block`-policy task whose parent went ABANDONED,
+ * per `blockedOn`); otherwise its own TDD phase distinguishes Ready (still in
+ * PLAN, nothing dispatched yet) from Running (RED..VERIFY).
+ */
+function computeStatus(
+  cwd: string,
+  r: BoardRow,
+  id: string,
+): { status: Status; blockedOnId: string | null; skippedOnId: string | null } {
+  if (r.rawPhase === "UNREADABLE") {
+    return { status: "UNREADABLE", blockedOnId: null, skippedOnId: null };
+  }
+  if (r.rawPhase === "DONE") return { status: "Completed", blockedOnId: null, skippedOnId: null };
+  if (r.rawPhase === "ABANDONED") {
+    return { status: "Abandoned", blockedOnId: null, skippedOnId: null };
+  }
+  const taskLike = { id, depends_on: r.dependsOn, on_dependency_failure: r.onDependencyFailure };
+  const skipper = skippedOn(cwd, taskLike);
+  if (skipper) return { status: "Skipped", blockedOnId: null, skippedOnId: skipper };
+  const blocker = blockedOn(cwd, taskLike);
+  if (blocker) return { status: "Blocked", blockedOnId: blocker, skippedOnId: null };
+  return {
+    status: r.rawPhase === "PLAN" ? "Ready" : "Running",
+    blockedOnId: null,
+    skippedOnId: null,
+  };
+}
+
+/** The status word plus stuck/blocked/skipped suffixes, shared by the Markdown
+ * table and the structured JSON/Markdown data so both stay in sync. */
+function statusLabel(
+  status: Status,
+  stuck: boolean,
+  blockedOnId: string | null,
+  skippedOnId: string | null,
+): string {
+  let label = String(status);
+  if (stuck) label += " ⚠stuck";
+  if (blockedOnId) label += ` ⏸blocked-on-${blockedOnId}`;
+  if (skippedOnId) label += ` skipped-on-${skippedOnId}`;
+  return label;
 }
 
 function boardDataFromRows(cwd: string, rows: Map<string, BoardRow>, flags: FlagState): BoardData {
   const tasks = [...rows.keys()].sort().map((id) => {
     const r = rows.get(id) as BoardRow;
-    const blocker = blockedOnId(cwd, r, id);
-    const phase = blocker ? `${r.phase} ⏸blocked-on-${blocker}` : r.phase;
-    return { ...r, phase, blockedOnId: blocker };
+    const { status, blockedOnId, skippedOnId } = computeStatus(cwd, r, id);
+    return { ...r, status, blockedOnId, skippedOnId };
   });
   return { tasks, flaggedWorktrees: flags.entries, flaggedWorktreesUnreadable: flags.unreadable };
 }
@@ -188,17 +245,19 @@ function renderBoardFromRows(cwd: string, rows: Map<string, BoardRow>, flags: Fl
     lines.push("_No tasks registered._", "");
   } else {
     lines.push(
-      "| Task | Phase | Depends | Sentence | Workspace | Iter | Receipt | Allow |",
+      "| Task | Status | Depends | Sentence | Workspace | Iter | Receipt | Allow |",
       "| --- | --- | --- | --- | --- | --- | --- | --- |",
     );
     for (const id of [...rows.keys()].sort()) {
       const r = rows.get(id) as BoardRow;
-      // Share the CLI's blocked derivation so the board and `blockedOn` agree even
-      // when an ancestor's worktree was swept (resolveTaskState reads its branch tip).
-      const blocker = blockedOnId(cwd, r, id);
-      const phase = blocker ? `${r.phase} ⏸blocked-on-${blocker}` : r.phase;
+      // Share the CLI's blocked/skipped derivation so the board agrees with
+      // `blockedOn`/`skippedOn` even when an ancestor's worktree was swept
+      // (resolveTaskState reads its branch tip).
+      const { status, blockedOnId, skippedOnId } = computeStatus(cwd, r, id);
+      const label = statusLabel(status, r.stuck, blockedOnId, skippedOnId);
+      const depends = r.dependsOn && r.dependsOn.length > 0 ? cell(r.dependsOn.join(", ")) : DASH;
       lines.push(
-        `| ${cell(r.id)} | ${phase} | ${r.dependsOn ? cell(r.dependsOn) : DASH} | ${cell(r.sentence)} | ${r.workspace} | ${r.iterations} | ${r.receipt} | ${cell(r.allow)} |`,
+        `| ${cell(r.id)} | ${label} | ${depends} | ${cell(r.sentence)} | ${r.workspace} | ${r.iterations} | ${r.receipt} | ${cell(r.allow)} |`,
       );
     }
     lines.push("");

@@ -281,7 +281,7 @@ describe("sddx cli", () => {
     expect(child.stdout).toContain("workspace=deferred");
     const childId = /created (\S+)/.exec(child.stdout)![1]!;
     const state = JSON.parse(readFileSync(join(cwd, ".sddx", "tasks", `${childId}.json`), "utf8"));
-    expect(state.depends_on).toBe(parentId);
+    expect(state.depends_on).toEqual([parentId]);
     expect(state.workspace.base_sha).toBe(`pending:${parentId}`);
     expect(state.workspace.path).toBeUndefined();
     expect(existsSync(join(cwd, ".sddx-worktrees", childId))).toBe(false);
@@ -303,9 +303,9 @@ describe("sddx cli", () => {
     expect(goal.task_ids.length).toBe(2);
     // the dependent records its parent as an edge and is deferred
     const [rootId, childId] = goal.task_ids as [string, string];
-    expect(goal.deps[childId]).toBe(rootId);
+    expect(goal.deps[childId]).toEqual([rootId]);
     const child = JSON.parse(readFileSync(join(cwd, ".sddx", "tasks", `${childId}.json`), "utf8"));
-    expect(child.depends_on).toBe(rootId);
+    expect(child.depends_on).toEqual([rootId]);
     expect(child.workspace.base_sha).toBe(`pending:${rootId}`);
   });
 
@@ -353,6 +353,87 @@ describe("sddx cli", () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("none is incompatible with dependent tasks");
     expect(existsSync(join(cwd, ".sddx", "tasks"))).toBe(false);
+  });
+
+  test("task create with repeated --depends-on records multiple parents (fan-in)", () => {
+    const cwd = fixtureRepo();
+    writeFileSync(join(cwd, "p1.yaml"), SPEC);
+    const p1 = /created (\S+)/.exec(
+      cli(cwd, "task", "create", "--spec", "p1.yaml", "--workspace", "branch").stdout,
+    )![1]!;
+    writeFileSync(
+      join(cwd, "p2.yaml"),
+      `task: another root\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\n`,
+    );
+    const p2 = /created (\S+)/.exec(
+      cli(cwd, "task", "create", "--spec", "p2.yaml", "--workspace", "branch").stdout,
+    )![1]!;
+    writeFileSync(
+      join(cwd, "child.yaml"),
+      `task: fan-in child\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\n`,
+    );
+    const child = cli(
+      cwd,
+      "task",
+      "create",
+      "--spec",
+      "child.yaml",
+      "--depends-on",
+      p1,
+      "--depends-on",
+      p2,
+      "--workspace",
+      "branch",
+    );
+    expect(child.status).toBe(0);
+    const childId = /created (\S+)/.exec(child.stdout)![1]!;
+    const state = JSON.parse(readFileSync(join(cwd, ".sddx", "tasks", `${childId}.json`), "utf8"));
+    expect(state.depends_on).toEqual([p1, p2]);
+  });
+
+  test("graph create copies on_dependency_failure/retry from the spec, defaulting when absent", () => {
+    const cwd = fixtureRepo();
+    writeFileSync(
+      join(cwd, "root.yaml"),
+      `task: policy root\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\non_dependency_failure: block\nretry:\n  max_attempts: 3\n  workspace: reuse\n`,
+    );
+    writeFileSync(
+      join(cwd, "plain.yaml"),
+      `task: plain root\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\n`,
+    );
+    writeFileSync(
+      join(cwd, "graph.yaml"),
+      "goal: g\ntasks:\n  - alias: policy\n    spec: root.yaml\n  - alias: plain\n    spec: plain.yaml\n",
+    );
+    const r = cli(cwd, "graph", "create", "--graph", "graph.yaml", "--workspace", "none");
+    expect(r.status).toBe(0);
+    const goalId = /created goal (\S+)/.exec(r.stdout)![1]!;
+    const goal = JSON.parse(readFileSync(join(cwd, ".sddx", "goals", `${goalId}.json`), "utf8"));
+    const policyState = JSON.parse(
+      readFileSync(join(cwd, ".sddx", "tasks", `${goal.task_ids[0]}.json`), "utf8"),
+    );
+    expect(policyState.on_dependency_failure).toBe("block");
+    expect(policyState.retry).toEqual({ max_attempts: 3, workspace: "reuse" });
+    const plainState = JSON.parse(
+      readFileSync(join(cwd, ".sddx", "tasks", `${goal.task_ids[1]}.json`), "utf8"),
+    );
+    expect(plainState.on_dependency_failure).toBeUndefined();
+    expect(plainState.retry).toBeUndefined();
+    expect(plainState.attempt_count).toBe(1);
+  });
+
+  test("graph create refuses atomically on an invalid on_dependency_failure/retry value", () => {
+    const cwd = fixtureRepo();
+    writeFileSync(
+      join(cwd, "bad.yaml"),
+      `task: bad policy\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\non_dependency_failure: retry\n`,
+    );
+    writeFileSync(join(cwd, "graph.yaml"), "goal: g\ntasks:\n  - alias: bad\n    spec: bad.yaml\n");
+    const r = cli(cwd, "graph", "create", "--graph", "graph.yaml", "--workspace", "none");
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain("on_dependency_failure");
+    expect(existsSync(join(cwd, ".sddx", "tasks"))).toBe(false);
+    expect(existsSync(join(cwd, ".sddx", "goals"))).toBe(false);
   });
 
   test("task create --depends-on refuses none mode and overlapping siblings", () => {

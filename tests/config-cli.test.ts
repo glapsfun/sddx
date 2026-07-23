@@ -21,8 +21,9 @@ describe("sddx config show", () => {
     const cwd = fixtureRepo();
     const r = cli(cwd, process.env, "config", "show", "--json");
     expect(r.status).toBe(0);
-    const parsed = JSON.parse(r.stdout);
-    expect(parsed).toMatchObject({
+    const envelope = JSON.parse(r.stdout);
+    expect(envelope.schema_version).toBe("1.0");
+    expect(envelope.data).toMatchObject({
       workspace_mode: "auto",
       stuck_threshold: 3,
       oracle_runs_default: 1,
@@ -39,7 +40,25 @@ describe("sddx config show", () => {
     withConfig(cwd, { stuck_threshold: 9 });
     const r = cli(cwd, { ...process.env, SDDX_STUCK_THRESHOLD: "12" }, "config", "show", "--json");
     expect(r.status).toBe(0);
-    expect(JSON.parse(r.stdout).stuck_threshold).toBe(12);
+    expect(JSON.parse(r.stdout).data.stuck_threshold).toBe(12);
+  });
+
+  test("--json is a deprecated alias for --output json, with a stderr notice", () => {
+    const cwd = fixtureRepo();
+    const r = cli(cwd, process.env, "config", "show", "--json");
+    expect(r.status).toBe(0);
+    expect(r.stderr).toContain("--json is deprecated");
+    expect(JSON.parse(r.stdout).command).toBe("config show");
+  });
+
+  test("--output json matches the --json alias shape", () => {
+    const cwd = fixtureRepo();
+    const r = cli(cwd, process.env, "config", "show", "--output", "json");
+    expect(r.status).toBe(0);
+    expect(r.stderr).toBe("");
+    const envelope = JSON.parse(r.stdout);
+    expect(envelope.schema_version).toBe("1.0");
+    expect(envelope.data.workspace_mode).toBe("auto");
   });
 
   test("agent_model parsed for human-readable output", () => {

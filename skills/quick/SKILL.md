@@ -11,10 +11,13 @@ No task yet? Follow /sddx:plan first — `task create --workspace branch`
 registers the spec and
 switches to the `sddx/<id>` branch.
 
-Run `... config show --json` once and keep `agent_model` around: this loop
+Run `... config show --output json` once and keep `.data.agent_model` around
+(the resolved config lives under `data`, not at the top level): this loop
 runs solo (no subagent dispatch), so it has no per-role model to override —
 `agent_model` only matters if a step here ever hands off to a dispatched
 agent (e.g. via `/sddx:plan`'s planner). Advisory only, not hook-enforced.
+(`--json` still works as a deprecated alias for `--output json`, reading the
+same `.data.*` shape.)
 
 Then loop, recording every phase in the task file:
 

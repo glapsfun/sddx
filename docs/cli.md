@@ -24,7 +24,55 @@ usage:
 
 Exit codes across all commands: `0` success, `1` operation failed (spec
 rejected, oracle failed, audit findings, refused cleanup), `2` usage error
-(unknown command/flag, missing argument).
+(unknown command/flag, missing argument). Exit codes never depend on
+`--output` — the same command run with a different output format always
+exits the same way.
+
+## Output formats
+
+Every command accepts two global flags, in addition to its own:
+
+- `--output <terminal|json|markdown|all>` (default `terminal`) — selects how
+  the command's result is rendered. An unrecognized value exits 2 naming the
+  accepted set.
+- `--no-color` — disables ANSI color in terminal output (also honored via the
+  `NO_COLOR` environment variable, and automatically when stdout isn't a TTY).
+
+`terminal` (the default) is unchanged from earlier sddx releases: plain,
+human-readable text, colorized only when attached to a TTY.
+
+`json` emits exactly one JSON object to stdout, versioned independently of
+the package version:
+
+```json
+{
+  "schema_version": "1.0",
+  "command": "board",
+  "status": "success",
+  "data": { "...": "command-specific payload" },
+  "warnings": [],
+  "errors": [],
+  "metadata": { "plugin_version": "1.2.0", "harness": "claude-code", "messages": [] }
+}
+```
+
+`schema_version`'s minor component increases for additive fields; its major
+component increases only for a removed/renamed field or a type change — safe
+to depend on for automation and AI agents parsing sddx output. `data` holds
+the same information a human would read in terminal mode, just structured
+per command (see each command's section below for its shape).
+
+`markdown` emits a report — execution summary, task/receipt results (when
+the command has any), warnings/errors, and a raw-data block — suitable for
+pasting into a PR description or doc. `json` and `markdown` are always
+built from the exact same result a given command run produced: selecting an
+output format never changes what a command actually does, only how the
+outcome is displayed.
+
+`all` prints `terminal` to stdout as usual, and additionally writes
+`sddx-<command>.json` and `sddx-<command>.md` to the current directory
+(never overwriting an existing file — a numeric suffix is appended instead),
+printing both paths as a final line.
 
 ## sddx task create
 
@@ -246,7 +294,7 @@ in place of the model composing its own "what's next" prose.
 ## sddx config show
 
 ```sh
-sddx config show [--json]
+sddx config show [--output <terminal|json|markdown|all>]
 ```
 
 Prints every `userConfig` key fully resolved (environment variable, then
@@ -259,15 +307,21 @@ run `sddx config validate` to see why). `pr_host` prints
 means inspecting the git remote (see [sddx pr create](#sddx-pr-create)) — this
 command doesn't shell out to git just to show config.
 
-`/sddx:run` and `/sddx:quick` call this once at the start of their flow and
-use `agent_model` / `prefer_solo` from the result — advisory only, since no
-hook enforces a skill's own instructions.
+`/sddx:run` and `/sddx:quick` call `config show --output json` once at the
+start of their flow and use `.data.agent_model` / `.data.prefer_solo` from the
+result — advisory only, since no hook enforces a skill's own instructions.
 
 When `verbose` is true, an extra `resolution detail` block follows the
-resolved values (human-readable output only, not `--json`), naming which
-source — `env`, `config`, or `default` — won for each key. This is the one
-place `verbose` currently has an effect; it does not change any other
-command's output.
+resolved values in `terminal` mode, naming which source — `env`, `config`, or
+`default` — won for each key. This is the one place `verbose` currently has
+an effect on `terminal` output; it does not change any other command's
+output.
+
+`--json` (bare, not `--output json`) still works as a **deprecated alias**
+for `--output json`: it emits the same versioned JSON envelope described in
+[Output formats](#output-formats) (the resolved config lives under `data`,
+not at the top level as in sddx releases before this one) and prints a
+one-line deprecation notice to stderr. Prefer `--output json` going forward.
 
 ## sddx config validate
 

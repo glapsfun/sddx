@@ -9,17 +9,21 @@ CLI: `"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "${CLAUDE_PLUGIN_ROOT}/dist/cli.mjs"`
 
 Trivial single task and the user wants it in-session? `--solo` → follow
 /sddx:quick instead (same gates, no subagents, no worktree). If the goal looks
-like a single trivial task, run `... config show --json` first and check
-`prefer_solo` — when true, lean toward suggesting `--solo`/`/sddx:quick` unless
-the user already asked for `/sddx:run` explicitly. This is advisory only: no
-hook enforces it, it's a steer for this skill's own judgment.
+like a single trivial task, run `... config show --output json` first and
+check `.data.prefer_solo` — when true, lean toward suggesting
+`--solo`/`/sddx:quick` unless the user already asked for `/sddx:run`
+explicitly. This is advisory only: no hook enforces it, it's a steer for this
+skill's own judgment.
 
 ## Flow
 
-0. **Read config** — run `... config show --json` once and keep `agent_model`
-   (a `role=model` map, e.g. `{"tddExecutor": "opus"}`) for step 1 onward: when
-   dispatching a subagent for a role present in that map, pass its model as the
-   dispatch's model override; roles absent from the map use the harness default.
+0. **Read config** — run `... config show --output json` once and keep
+   `.data.agent_model` (a `role=model` map, e.g. `{"tddExecutor": "opus"}`) for
+   step 1 onward: when dispatching a subagent for a role present in that map,
+   pass its model as the dispatch's model override; roles absent from the map
+   use the harness default. (`--json` still works as a deprecated alias for
+   `--output json`, but reads the same `.data.*` shape — not the bare fields
+   an older sddx once printed at the top level.)
 1. **Decompose into a graph** — dispatch the `orchestrator` agent with the goal.
    It authors `.sddx/drafts/<date>-<goal-slug>-graph.yaml`: one node per task
    with an `alias`, a `spec` path (a bare filename alongside the graph file —
@@ -52,12 +56,16 @@ hook enforces it, it's a steer for this skill's own judgment.
    `... task materialize <child-id>` (forks its worktree from the parent's
    DONE commit) and dispatch it. Repeat until the forest drains. A stuck task
    leaves its descendants **blocked** — report them, never dispatch them.
-6. **Report** — one line per task: id · branch · phase (or `blocked-on-<id>`) ·
-   receipt path, plus the goal id. Then run `... sweep` to clear disposable
-   leftovers (it skips anything dirty or unverified, loudly). `next-actions`
-   is single-branch and doesn't know about goals, so it isn't run here: if
-   every task is DONE, mention that `sddx pr create --goal <goal-id>` will
-   open one PR for the whole goal — but offer it, never run it unasked.
+6. **Report** — run `... board --output markdown` and relay it: task rows
+   (id · branch · phase, including `blocked-on-<id>`) and receipt references
+   come from the same board data that `.sddx/BOARD.md` is built from, so the
+   report and the committed board can never disagree. Prefer `--output json`
+   instead when relaying to another tool/agent rather than a human. Then run
+   `... sweep` to clear disposable leftovers (it skips anything dirty or
+   unverified, loudly). `next-actions` is single-branch and doesn't know about
+   goals, so it isn't run here: if every task is DONE, mention that
+   `sddx pr create --goal <goal-id>` will open one PR for the whole goal — but
+   offer it, never run it unasked.
 
 ## Rules
 

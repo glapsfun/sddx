@@ -1,7 +1,7 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { auditReceipts } from "./audit";
-import { writeBoard } from "./board";
+import { computeBoard } from "./board";
 import { readConfig, resolveConfig, validateConfigObject } from "./lib/config";
 import {
   branchExists,
@@ -17,6 +17,7 @@ import {
 import { createGoal, goalPath, readGoal } from "./lib/goal";
 import { type GraphNode, parseGraph, validateSchedule } from "./lib/graph";
 import { detectState, renderMenu, resolveSelection, visibleActions } from "./lib/next-actions";
+import { type OutputFormat, parseOutputFlag, printError, printLine, Reporter } from "./lib/output";
 import { createGoalPr } from "./lib/pr";
 import { redCheck } from "./lib/redcheck";
 import { parseSpec, type Spec } from "./lib/spec";
@@ -61,12 +62,48 @@ const USAGE = `usage:
   sddx cleanup <id>
   sddx sweep
   sddx next-actions [--select <reply>]
-  sddx config show [--json]
-  sddx config validate`;
+  sddx config show [--json (deprecated, use --output json)]
+  sddx config validate
+
+global flags (any command):
+  --output <terminal|json|markdown|all>  (default: terminal)
+  --no-color`;
+
+// Set once at the top of main() from the parsed --output/--no-color flags, so
+// fail()/failWith() — called from validation code that runs before any
+// command-specific Reporter exists — can still honor the requested format
+// instead of always falling back to plain stderr text.
+let currentFormat: OutputFormat = "terminal";
+let currentNoColor = false;
+let currentCommand = "sddx";
+
+/** Fatal error exit, format-aware: plain stderr text in terminal mode (as
+ * before), or a proper `status: "error"` envelope in json/markdown mode so
+ * automation parsing `--output json` never has to handle unstructured text. */
+function failWith(messages: string[], code: 1 | 2 = 1): never {
+  if (currentFormat === "terminal") {
+    for (const m of messages) printError(m);
+  } else {
+    const reporter = makeReporter(currentCommand, currentFormat, currentNoColor);
+    for (const m of messages) reporter.error(m);
+    reporter.finish(null, { status: "error" });
+  }
+  process.exit(code);
+}
 
 function fail(message: string, code: 1 | 2 = 1): never {
-  console.error(message);
-  process.exit(code);
+  failWith([message], code);
+}
+
+function makeReporter(command: string, format: OutputFormat, noColor: boolean): Reporter {
+  currentFormat = format;
+  currentNoColor = noColor;
+  currentCommand = command;
+  return new Reporter(command, format, {
+    noColor,
+    pluginVersion: pluginVersion(),
+    harness: "claude-code",
+  });
 }
 
 /** Task ids with a state file in the main checkout's `.sddx/tasks/` (deferred and
@@ -107,15 +144,19 @@ function packageVersion(): string {
 const WORKSPACE_MODES = ["auto", "worktree", "branch", "none"] as const;
 type WorkspaceFlag = (typeof WORKSPACE_MODES)[number];
 
-function pickWorkspace(cwd: string, requested: WorkspaceFlag): "worktree" | "branch" | "none" {
+function pickWorkspace(
+  cwd: string,
+  requested: WorkspaceFlag,
+  reporter: Reporter,
+): "worktree" | "branch" | "none" {
   if (requested !== "auto") return requested;
   if (!worktreeAvailable(cwd)) {
-    console.log("git worktree unavailable → branch mode");
+    reporter.success("git worktree unavailable → branch mode");
     return "branch";
   }
   const base = resolveBaseRef(cwd);
   if (hasSubmodules(cwd, base.sha)) {
-    console.log("submodules detected → branch mode");
+    reporter.success("submodules detected → branch mode");
     return "branch";
   }
   return "worktree";
@@ -128,11 +169,12 @@ function createRootTask(
   spec: Spec,
   specSrc: string,
   mode: "worktree" | "branch" | "none",
+  reporter: Reporter,
 ): { id: string; line: string } {
   const id = taskId(spec.task);
   if (mode === "worktree") {
     const base = resolveBaseRef(cwd);
-    if (base.source === "HEAD") console.log("no origin remote — forking from local HEAD");
+    if (base.source === "HEAD") reporter.success("no origin remote — forking from local HEAD");
     const wtPath = createWorktree(cwd, id, base.sha);
     const relPath = join(".sddx-worktrees", id);
     mkdirSync(join(sddxDir(wtPath), "specs"), { recursive: true });
@@ -194,7 +236,8 @@ function createDeferredTask(
   return id;
 }
 
-function cmdTaskCreate(cwd: string, args: string[]): void {
+function cmdTaskCreate(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
+  const reporter = makeReporter("task create", format, noColor);
   const specArg = flag(args, "--spec");
   if (!specArg) fail(USAGE, 2);
   const requested = (flag(args, "--workspace") ??
@@ -208,10 +251,9 @@ function cmdTaskCreate(cwd: string, args: string[]): void {
   }
   const { spec, errors } = parseSpec(yamlText);
   if (!spec) {
-    for (const e of errors) console.error(`spec error: ${e}`);
-    process.exit(1);
+    failWith(errors.map((e) => `spec error: ${e}`));
   }
-  const mode = pickWorkspace(cwd, requested);
+  const mode = pickWorkspace(cwd, requested, reporter);
   const specSrc = join(cwd, specArg);
 
   // A dependent task cannot fork now — its parent's DONE commit does not exist
@@ -236,15 +278,19 @@ function cmdTaskCreate(cwd: string, args: string[]): void {
     }
     const sibErrs = validateSchedule(siblings);
     if (sibErrs.length > 0) {
-      for (const e of sibErrs) console.error(`task error: ${e}`);
-      process.exit(1);
+      failWith(sibErrs.map((e) => `task error: ${e}`));
     }
     const id = createDeferredTask(cwd, spec, specSrc, mode, dependsOn);
-    console.log(`created ${id} phase=PLAN depends_on=${dependsOn} workspace=deferred(${mode})`);
+    reporter.success(
+      `created ${id} phase=PLAN depends_on=${dependsOn} workspace=deferred(${mode})`,
+    );
+    reporter.finish({ id, phase: "PLAN", dependsOn, workspace: "deferred", mode });
     return;
   }
 
-  console.log(createRootTask(cwd, spec, specSrc, mode).line);
+  const { id, line } = createRootTask(cwd, spec, specSrc, mode, reporter);
+  reporter.success(line);
+  reporter.finish({ id, phase: "PLAN", mode });
 }
 
 /** Roots first, children only after their parent — cherry-pick/commit order must
@@ -265,7 +311,8 @@ function topoOrder(nodes: GraphNode[]): GraphNode[] {
   return out;
 }
 
-function cmdGraphCreate(cwd: string, args: string[]): void {
+function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
+  const reporter = makeReporter("graph create", format, noColor);
   const graphArg = flag(args, "--graph");
   if (!graphArg) fail(USAGE, 2);
   const requested = (flag(args, "--workspace") ?? "auto") as WorkspaceFlag;
@@ -278,8 +325,7 @@ function cmdGraphCreate(cwd: string, args: string[]): void {
   }
   const { graph, errors: graphErrors } = parseGraph(graphText);
   if (!graph) {
-    for (const e of graphErrors) console.error(`graph error: ${e}`);
-    process.exit(1);
+    failWith(graphErrors.map((e) => `graph error: ${e}`));
   }
 
   // Validate EVERYTHING before writing anything (atomic): each node's spec has a
@@ -327,40 +373,43 @@ function cmdGraphCreate(cwd: string, args: string[]): void {
     ),
   );
   if (errs.length > 0) {
-    for (const e of errs) console.error(`graph error: ${e}`);
-    process.exit(1);
+    failWith(errs.map((e) => `graph error: ${e}`));
   }
 
   // Gate passed — now create tasks in dependency order (roots create real
   // workspaces; dependents are deferred), then register the goal with its edges.
-  const mode = pickWorkspace(cwd, requested);
+  const mode = pickWorkspace(cwd, requested, reporter);
   const aliasToId = new Map<string, string>();
   const deps: Record<string, string> = {};
   const created: string[] = [];
   for (const node of topoOrder(graph.tasks)) {
     const { spec, src } = loaded.get(node.alias) as { spec: Spec; src: string };
     if (node.depends_on === null) {
-      const { id, line } = createRootTask(cwd, spec, src, mode);
+      const { id, line } = createRootTask(cwd, spec, src, mode, reporter);
       aliasToId.set(node.alias, id);
       created.push(id);
-      console.log(line);
+      reporter.success(line);
     } else {
       const parentId = aliasToId.get(node.depends_on) as string;
       const id = createDeferredTask(cwd, spec, src, mode, parentId);
       aliasToId.set(node.alias, id);
       created.push(id);
       deps[id] = parentId;
-      console.log(`created ${id} phase=PLAN depends_on=${parentId} workspace=deferred(${mode})`);
+      reporter.success(
+        `created ${id} phase=PLAN depends_on=${parentId} workspace=deferred(${mode})`,
+      );
     }
   }
   const g = createGoal(cwd, graph.goal, created, deps);
   stagePath(cwd, goalPath(cwd, g.id));
   commit(cwd, `sddx: register goal ${g.id}`);
-  console.log(`created goal ${g.id} tasks=[${g.task_ids.join(", ")}]`);
-  for (const [alias, id] of aliasToId) console.log(`  ${alias} → ${id}`);
+  reporter.success(`created goal ${g.id} tasks=[${g.task_ids.join(", ")}]`);
+  for (const [alias, id] of aliasToId) reporter.success(`  ${alias} → ${id}`);
+  reporter.finish({ goalId: g.id, taskIds: g.task_ids, aliasToId: Object.fromEntries(aliasToId) });
 }
 
-function cmdTaskPhase(cwd: string, args: string[]): void {
+function cmdTaskPhase(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
+  const reporter = makeReporter("task phase", format, noColor);
   const [id, phase] = args;
   if (!id || !phase) fail(USAGE, 2);
   const testExitRaw = flag(args, "--test-exit");
@@ -369,10 +418,12 @@ function cmdTaskPhase(cwd: string, args: string[]): void {
     testExit: testExitRaw === undefined ? undefined : Number(testExitRaw),
   });
   writeTask(cwd, task);
-  console.log(`${id} phase=${task.phase}`);
+  reporter.success(`${id} phase=${task.phase}`);
+  reporter.finish({ id, phase: task.phase });
 }
 
-function cmdRedCheck(cwd: string, args: string[]): void {
+function cmdRedCheck(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
+  const reporter = makeReporter("red-check", format, noColor);
   const [id] = args;
   if (!id) fail(USAGE, 2);
   const res = redCheck(cwd, id);
@@ -381,26 +432,53 @@ function cmdRedCheck(cwd: string, args: string[]): void {
       `red-check: oracle exited 0 while task ${id} is RED — the oracle does not discriminate; fix the spec's oracle before implementing`,
     );
   }
-  console.log(`red-check: oracle failed as required (exit ${res.exitCode}) — recorded oracle_red`);
+  reporter.success(
+    `red-check: oracle failed as required (exit ${res.exitCode}) — recorded oracle_red`,
+  );
+  reporter.finish({ id, exitCode: res.exitCode });
 }
 
-function cmdVerify(cwd: string, args: string[]): void {
+function cmdVerify(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
+  currentCommand = "verify";
   const [id] = args;
   if (!id) fail(USAGE, 2);
+  const reporter = makeReporter("verify", format, noColor);
+  reporter.progress(`running oracle for ${id}...`);
   const res = verifyTask(cwd, id, {
     model: flag(args, "--model") ?? null,
     harness: flag(args, "--harness"),
     pluginVersion: pluginVersion(),
   });
   if (res.verdict === "pass") {
-    console.log(
+    reporter.success(
       `verdict=pass receipt=${res.receiptPath} commit=${res.commitSha} duration_ms=${res.durationMs}`,
     );
+    reporter.finish({
+      id,
+      verdict: "pass",
+      receiptPath: res.receiptPath,
+      commitSha: res.commitSha,
+      durationMs: res.durationMs,
+      exitCode: res.exitCode,
+    });
     return;
   }
-  fail(
-    `verdict=fail oracle_exit=${res.exitCode} duration_ms=${res.durationMs} iterations=${readTask(cwd, id).iterations}`,
+  const iterations = readTask(cwd, id).iterations;
+  reporter.error(
+    `verdict=fail oracle_exit=${res.exitCode} duration_ms=${res.durationMs} iterations=${iterations}`,
   );
+  reporter.finish(
+    {
+      id,
+      verdict: "fail",
+      receiptPath: null,
+      exitCode: res.exitCode,
+      durationMs: res.durationMs,
+      iterations,
+    },
+    { status: "error" },
+  );
+  process.exit(1);
 }
 
 /**
@@ -423,7 +501,8 @@ function corroboratedShip(
   }
 }
 
-function cmdCleanup(cwd: string, args: string[]): void {
+function cmdCleanup(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
+  const reporter = makeReporter("cleanup", format, noColor);
   const [id] = args;
   if (!id) fail(USAGE, 2);
   const branch = `sddx/${id}`;
@@ -433,10 +512,11 @@ function cmdCleanup(cwd: string, args: string[]): void {
       fail(`refusing: worktree ${join(".sddx-worktrees", id)} has uncommitted changes`);
     }
     removeWorktree(cwd, wtPath);
-    console.log(`removed worktree ${join(".sddx-worktrees", id)}`);
+    reporter.success(`removed worktree ${join(".sddx-worktrees", id)}`);
   }
   if (!branchExists(cwd, branch)) {
-    console.log(`no branch ${branch} — nothing to clean up`);
+    reporter.success(`no branch ${branch} — nothing to clean up`);
+    reporter.finish({ id, branch, removed: false });
     return;
   }
   if (currentBranch(cwd) === branch) {
@@ -450,18 +530,21 @@ function cmdCleanup(cwd: string, args: string[]): void {
     if (!shipped || !corroboratedShip(cwd, id, shipped)) {
       fail(`refusing: ${branch} is not merged into HEAD`);
     }
-    console.log(
+    reporter.success(
       `${branch} not merged by ancestry but shipped in goal ${shipped.goal_id} (${shipped.pr_url})`,
     );
     forceDeleteBranch(cwd, branch);
-    console.log(`deleted shipped branch ${branch}`);
+    reporter.success(`deleted shipped branch ${branch}`);
+    reporter.finish({ id, branch, removed: true, shipped: true });
     return;
   }
   deleteBranch(cwd, branch);
-  console.log(`deleted merged branch ${branch}`);
+  reporter.success(`deleted merged branch ${branch}`);
+  reporter.finish({ id, branch, removed: true, shipped: false });
 }
 
-function cmdGoalCreate(cwd: string, args: string[]): void {
+function cmdGoalCreate(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
+  const reporter = makeReporter("goal create", format, noColor);
   const goalSentence = flag(args, "--goal");
   const tasksArg = flag(args, "--tasks");
   if (!goalSentence || !tasksArg) fail(USAGE, 2);
@@ -479,8 +562,7 @@ function cmdGoalCreate(cwd: string, args: string[]): void {
     }),
   );
   if (scheduleErrs.length > 0) {
-    for (const e of scheduleErrs) console.error(`goal error: ${e}`);
-    process.exit(1);
+    failWith(scheduleErrs.map((e) => `goal error: ${e}`));
   }
   const g = createGoal(cwd, goalSentence, taskIds);
   // committed narrowly (not `git add -A`) so registering a goal in the main
@@ -488,37 +570,46 @@ function cmdGoalCreate(cwd: string, args: string[]): void {
   // files in git, and a goal is meaningless if it's only ever on disk
   stagePath(cwd, goalPath(cwd, g.id));
   commit(cwd, `sddx: register goal ${g.id}`);
-  console.log(`created goal ${g.id} tasks=[${g.task_ids.join(", ")}]`);
+  reporter.success(`created goal ${g.id} tasks=[${g.task_ids.join(", ")}]`);
+  reporter.finish({ id: g.id, taskIds: g.task_ids });
 }
 
-function cmdPrCreate(cwd: string, args: string[]): void {
+function cmdPrCreate(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
+  const reporter = makeReporter("pr create", format, noColor);
   const goalIdArg = flag(args, "--goal");
   if (!goalIdArg) fail(USAGE, 2);
   const res = createGoalPr(cwd, goalIdArg, { title: flag(args, "--title") });
-  console.log(`pr=${res.prUrl} branch=${res.branch} tasks=[${res.taskIds.join(", ")}]`);
+  reporter.success(`pr=${res.prUrl} branch=${res.branch} tasks=[${res.taskIds.join(", ")}]`);
+  reporter.finish({ prUrl: res.prUrl, branch: res.branch, taskIds: res.taskIds });
 }
 
-function cmdSweep(cwd: string): void {
+function cmdSweep(cwd: string, format: OutputFormat, noColor: boolean): void {
+  const reporter = makeReporter("sweep", format, noColor);
   const res = sweep(cwd);
   if (res.locked) {
-    console.log("sweep: another sweep holds the lock — skipped");
+    reporter.success("sweep: another sweep holds the lock — skipped");
+    reporter.finish({ locked: true, removed: [], skipped: [] });
     return;
   }
-  for (const path of res.removed) console.log(`swept ${path}`);
-  for (const s of res.skipped) console.log(`skipped ${s.path} (${s.reason})`);
-  console.log(`sweep: ${res.removed.length} removed, ${res.skipped.length} skipped`);
+  for (const path of res.removed) reporter.success(`swept ${path}`);
+  for (const s of res.skipped) reporter.success(`skipped ${s.path} (${s.reason})`);
+  reporter.success(`sweep: ${res.removed.length} removed, ${res.skipped.length} skipped`);
+  reporter.finish({ locked: false, removed: res.removed, skipped: res.skipped });
 }
 
-function cmdNextActions(cwd: string, args: string[]): void {
+function cmdNextActions(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
+  const reporter = makeReporter("next-actions", format, noColor);
   const selectArg = flag(args, "--select");
   // detected fresh here, and again just before executing a selection — state
   // between "show the menu" and "act on a reply" spans a model turn, so it
   // can drift (the user may commit or push by hand outside sddx meanwhile)
   const detected = detectState(cwd);
-  if (detected.warning) console.log(`warning: ${detected.warning}`);
+  if (detected.warning) reporter.success(`warning: ${detected.warning}`);
 
   if (selectArg === undefined) {
-    console.log(renderMenu(visibleActions(detected.state)));
+    const visible = visibleActions(detected.state);
+    reporter.success(renderMenu(visible));
+    reporter.finish({ selected: null, nextActions: visible.map((a) => a.label) });
     return;
   }
 
@@ -526,23 +617,37 @@ function cmdNextActions(cwd: string, args: string[]): void {
   const freshVisible = visibleActions(fresh.state);
   const resolved = resolveSelection(selectArg, freshVisible);
   if ("error" in resolved) {
-    console.log(
+    // stdout, matching next-actions' historical convention (exit code carries
+    // the failure signal) — but recorded as a real `error` message so the
+    // JSON/Markdown envelope's `errors` array isn't empty despite status "error"
+    reporter.error(
       resolved.error === "ambiguous"
         ? `"${selectArg}" matches more than one action — be more specific.`
         : `"${selectArg}" isn't a valid action right now.`,
+      { stream: "stdout" },
     );
-    console.log(renderMenu(freshVisible));
+    reporter.success(renderMenu(freshVisible));
     process.exitCode = 1;
+    reporter.finish({ selected: selectArg, error: resolved.error }, { status: "error" });
     return;
   }
   if (!resolved.run) {
-    console.log(`${resolved.label}: not implemented yet.`);
+    reporter.error(`${resolved.label}: not implemented yet.`, { stream: "stdout" });
     process.exitCode = 1;
+    reporter.finish({ selected: resolved.label, implemented: false }, { status: "error" });
     return;
   }
   const result = resolved.run(cwd, { branch: fresh.branch });
-  console.log(result.message);
-  if (!result.ok) process.exitCode = 1;
+  if (result.ok) {
+    reporter.success(result.message);
+  } else {
+    reporter.error(result.message, { stream: "stdout" });
+    process.exitCode = 1;
+  }
+  reporter.finish(
+    { selected: resolved.label, ok: result.ok },
+    { status: result.ok ? "success" : "error" },
+  );
 }
 
 /** Env var consulted for each key that has one, in resolveConfig's precedence. */
@@ -562,12 +667,13 @@ function configValueSource(key: string, rawConfigHasKey: boolean): "env" | "conf
   return "default";
 }
 
-function cmdConfigShow(cwd: string, args: string[]): void {
+function cmdConfigShow(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
+  const legacyJson = args.includes("--json");
+  if (legacyJson) printError("warning: --json is deprecated; use --output json instead");
+  const effectiveFormat: OutputFormat = legacyJson ? "json" : format;
+  const reporter = makeReporter("config show", effectiveFormat, noColor);
   const cfg = resolveConfig(cwd);
-  if (args.includes("--json")) {
-    console.log(JSON.stringify(cfg, null, 2));
-    return;
-  }
+
   const agentModel =
     Object.keys(cfg.agent_model).length > 0
       ? Object.entries(cfg.agent_model)
@@ -588,23 +694,30 @@ function cmdConfigShow(cwd: string, args: string[]): void {
     `prefer_solo: ${cfg.prefer_solo}`,
     `verbose: ${cfg.verbose}`,
   ];
-  for (const line of lines) console.log(line);
-  if (!cfg.verbose) return;
-  // verbose: name which source (env var / .sddx/config.json / built-in
-  // default) actually won for each key — real diagnostic detail, not just
-  // the resolved value the plain lines above already show.
-  const raw = readConfig(cwd) as unknown as Record<string, unknown>;
-  console.log("");
-  console.log("resolution detail (verbose):");
-  for (const key of Object.keys(cfg)) {
-    console.log(`  ${key}: source=${configValueSource(key, key in raw)}`);
+  reporter.success(lines.join("\n"));
+
+  // verbose only affects terminal output (per docs/cli.md) — json/markdown
+  // already carry every key, fully resolved, under `data`
+  if (cfg.verbose && effectiveFormat === "terminal") {
+    // name which source (env var / .sddx/config.json / built-in default)
+    // actually won for each key — real diagnostic detail, not just the
+    // resolved value the plain lines above already show.
+    const raw = readConfig(cwd) as unknown as Record<string, unknown>;
+    const detail = ["", "resolution detail (verbose):"];
+    for (const key of Object.keys(cfg)) {
+      detail.push(`  ${key}: source=${configValueSource(key, key in raw)}`);
+    }
+    reporter.success(detail.join("\n"));
   }
+  reporter.finish(cfg);
 }
 
-function cmdConfigValidate(cwd: string): void {
+function cmdConfigValidate(cwd: string, format: OutputFormat, noColor: boolean): void {
+  const reporter = makeReporter("config validate", format, noColor);
   const path = join(sddxDir(cwd), "config.json");
   if (!existsSync(path)) {
-    console.log("config validate: no .sddx/config.json — using built-in defaults");
+    reporter.success("config validate: no .sddx/config.json — using built-in defaults");
+    reporter.finish({ hasConfig: false, warnings: [] });
     return;
   }
   let parsed: unknown;
@@ -618,115 +731,154 @@ function cmdConfigValidate(cwd: string): void {
   }
   const warnings = validateConfigObject(parsed as Record<string, unknown>);
   if (warnings.length === 0) {
-    console.log("config validate: .sddx/config.json OK — no issues found");
-    return;
+    reporter.success("config validate: .sddx/config.json OK — no issues found");
+  } else {
+    for (const w of warnings) reporter.warn(`warning: ${w}`);
+    reporter.success(`config validate: ${warnings.length} warning(s)`);
   }
-  for (const w of warnings) console.log(`warning: ${w}`);
-  console.log(`config validate: ${warnings.length} warning(s)`);
+  reporter.finish({ hasConfig: true, warnings });
 }
 
 function main(argv: string[]): void {
   const cwd = process.cwd();
-  const [cmd, ...rest] = argv;
+  const { format, noColor, rest: cleaned } = parseOutputFlag(argv);
+  // set before any dispatch so fail()/failWith() are format-aware even when
+  // called from validation code that runs ahead of a command's own Reporter
+  currentFormat = format;
+  currentNoColor = noColor;
+  const [cmd, ...rest] = cleaned;
   if (cmd === "--version" || cmd === "-v") {
-    console.log(packageVersion());
+    printLine(packageVersion());
     return;
   }
   if (cmd === "--help" || cmd === "-h") {
-    console.log(USAGE);
+    printLine(USAGE);
     return;
   }
   try {
     if (cmd === "task" && rest[0] === "create") {
-      cmdTaskCreate(cwd, rest.slice(1));
+      cmdTaskCreate(cwd, rest.slice(1), format, noColor);
       return;
     }
     if (cmd === "task" && rest[0] === "phase") {
-      cmdTaskPhase(cwd, rest.slice(1));
+      cmdTaskPhase(cwd, rest.slice(1), format, noColor);
       return;
     }
     if (cmd === "task" && rest[0] === "allow") {
+      currentCommand = "task allow";
       const [id, path] = rest.slice(1);
       if (!id || !path) fail(USAGE, 2);
       const task = readTask(cwd, id);
       allowPath(task, path);
       writeTask(cwd, task);
-      console.log(`${id} allow=[${task.allow.join(", ")}]`);
+      const reporter = makeReporter("task allow", format, noColor);
+      reporter.success(`${id} allow=[${task.allow.join(", ")}]`);
+      reporter.finish({ id, allow: task.allow });
       return;
     }
     if (cmd === "task" && rest[0] === "show") {
+      currentCommand = "task show";
       if (!rest[1]) fail(USAGE, 2);
-      console.log(JSON.stringify(readTask(cwd, rest[1]), null, 2));
+      const task = readTask(cwd, rest[1]);
+      const reporter = makeReporter("task show", format, noColor);
+      // printed raw (not via reporter.success) so terminal mode never wraps the
+      // JSON in a marker/ANSI color — a `✓ ` prefix or escape codes would make
+      // this invalid JSON for anyone piping/copying it, even on a TTY
+      if (format === "terminal") printLine(JSON.stringify(task, null, 2));
+      else reporter.success(`task ${rest[1]}`);
+      reporter.finish(task);
       return;
     }
     if (cmd === "task" && rest[0] === "materialize") {
+      currentCommand = "task materialize";
       if (!rest[1]) fail(USAGE, 2);
       const { path, baseSha, mode } = materializeDependent(cwd, rest[1]);
       const where = path ? `worktree=${relative(cwd, path)}` : `branch=sddx/${rest[1]}`;
-      console.log(`materialized ${rest[1]} ${mode} ${where} base=${baseSha}`);
+      const reporter = makeReporter("task materialize", format, noColor);
+      reporter.success(`materialized ${rest[1]} ${mode} ${where} base=${baseSha}`);
+      reporter.finish({ id: rest[1], mode, baseSha, path: path ? relative(cwd, path) : null });
       return;
     }
     if (cmd === "red-check") {
-      cmdRedCheck(cwd, rest);
+      cmdRedCheck(cwd, rest, format, noColor);
       return;
     }
     if (cmd === "verify") {
-      cmdVerify(cwd, rest);
+      cmdVerify(cwd, rest, format, noColor);
       return;
     }
     if (cmd === "board") {
-      const res = writeBoard(cwd);
-      console.log(`${res.path}${res.changed ? "" : " (unchanged)"}`);
+      const res = computeBoard(cwd);
+      const reporter = makeReporter("board", format, noColor);
+      reporter.success(`${res.path}${res.changed ? "" : " (unchanged)"}`);
+      reporter.finish(res.data);
       return;
     }
     if (cmd === "audit") {
+      currentCommand = "audit";
       const unknown = rest.filter((a) => a !== "--signatures" && a !== "--ci");
       if (unknown.length > 0) fail(USAGE, 2);
-      const res = auditReceipts(cwd, {
-        signatures: rest.includes("--signatures"),
-        ci: rest.includes("--ci"),
-      });
-      if (rest.includes("--signatures")) for (const n of res.notes) console.log(n);
-      for (const f of res.findings) console.error(f);
-      if (res.findings.length > 0) fail(`audit: ${res.findings.length} finding(s)`);
-      console.log(`audit: ${res.receipts} receipt(s) verified, chain intact`);
+      const withSignatures = rest.includes("--signatures");
+      const reporter = makeReporter("audit", format, noColor);
+      reporter.progress(
+        `auditing receipts${withSignatures ? " (with signature verification)" : ""}...`,
+      );
+      const res = auditReceipts(cwd, { signatures: withSignatures, ci: rest.includes("--ci") });
+      if (withSignatures) for (const n of res.notes) reporter.success(n);
+      for (const f of res.findings) reporter.error(f);
+      if (res.findings.length > 0) {
+        reporter.error(`audit: ${res.findings.length} finding(s)`);
+        reporter.finish(
+          { receipts: res.receipts, findings: res.findings, notes: res.notes },
+          { status: "error" },
+        );
+        process.exit(1);
+      }
+      reporter.success(`audit: ${res.receipts} receipt(s) verified, chain intact`);
+      reporter.finish({ receipts: res.receipts, findings: [], notes: res.notes });
       return;
     }
     if (cmd === "goal" && rest[0] === "create") {
-      cmdGoalCreate(cwd, rest.slice(1));
+      cmdGoalCreate(cwd, rest.slice(1), format, noColor);
       return;
     }
     if (cmd === "goal" && rest[0] === "show") {
+      currentCommand = "goal show";
       if (!rest[1]) fail(USAGE, 2);
-      console.log(JSON.stringify(readGoal(cwd, rest[1]), null, 2));
+      const goal = readGoal(cwd, rest[1]);
+      const reporter = makeReporter("goal show", format, noColor);
+      // printed raw — see the matching comment on `task show` above
+      if (format === "terminal") printLine(JSON.stringify(goal, null, 2));
+      else reporter.success(`goal ${rest[1]}`);
+      reporter.finish(goal);
       return;
     }
     if (cmd === "graph" && rest[0] === "create") {
-      cmdGraphCreate(cwd, rest.slice(1));
+      cmdGraphCreate(cwd, rest.slice(1), format, noColor);
       return;
     }
     if (cmd === "pr" && rest[0] === "create") {
-      cmdPrCreate(cwd, rest.slice(1));
+      cmdPrCreate(cwd, rest.slice(1), format, noColor);
       return;
     }
     if (cmd === "cleanup") {
-      cmdCleanup(cwd, rest);
+      cmdCleanup(cwd, rest, format, noColor);
       return;
     }
     if (cmd === "sweep") {
-      cmdSweep(cwd);
+      cmdSweep(cwd, format, noColor);
       return;
     }
     if (cmd === "next-actions") {
-      cmdNextActions(cwd, rest);
+      cmdNextActions(cwd, rest, format, noColor);
       return;
     }
     if (cmd === "config" && rest[0] === "show") {
-      cmdConfigShow(cwd, rest.slice(1));
+      cmdConfigShow(cwd, rest.slice(1), format, noColor);
       return;
     }
     if (cmd === "config" && rest[0] === "validate") {
-      cmdConfigValidate(cwd);
+      cmdConfigValidate(cwd, format, noColor);
       return;
     }
     fail(USAGE, 2);

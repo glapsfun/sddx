@@ -4,6 +4,17 @@ All notable changes to sddx are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sddx adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0](https://github.com/glapsfun/sddx/compare/v1.1.0...v2.0.0) (2026-07-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* `sddx config show --json` now emits the same versioned envelope as `--output json` (the resolved config moves under a `data` key instead of being the whole payload). `--json` still works as a deprecated alias with a stderr notice; prefer `--output json` going forward.
+
+### Added
+
+* add CLI output framework with --output json/markdown/all support ([4ecd168](https://github.com/glapsfun/sddx/commit/4ecd1680ff4aef767350a703b1abd07a7d6f82fe))
+
 ## [1.1.0](https://github.com/glapsfun/sddx/compare/v1.0.0...v1.1.0) (2026-07-22)
 
 

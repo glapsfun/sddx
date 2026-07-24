@@ -85,6 +85,7 @@ the same commands also run from a checkout as `bin/sddx-run dist/cli.mjs`.
 | [Configure retry and skip/block](docs/how-to/configure-retry-and-skip.md) | Bounded automatic retry, skip vs block on an abandoned parent |
 | [Use branch mode](docs/how-to/use-branch-mode.md)         | The submodule/worktree-unavailable fallback, and forcing it explicitly |
 | [Choose an oracle type](docs/how-to/choose-an-oracle-type.md) | Why command/test-suite/browser are identical, and manual's real limit |
+| [Ship a goal as a PR](docs/how-to/ship-a-goal-as-a-pr.md) | All-or-nothing gating, host resolution, what `pr create` actually does |
 | [Hooks & the TDD gate](docs/reference/hooks.md)                    | The five hooks, gate classification, default globs, the escape hatch  |
 | [CLI reference](docs/reference/cli.md)                             | Every `sddx` command, flag, and exit code                             |
 | [Config reference](docs/reference/config.md)              | Every `userConfig` key, its env var, default, and precedence          |

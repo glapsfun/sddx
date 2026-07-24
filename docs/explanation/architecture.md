@@ -1,9 +1,11 @@
 # Architecture
 
 Contributor-facing map of the codebase: where things live, how sources become
-the shipped bundles, where state goes, and the principles that decide design
-arguments. Reader-facing behavior is documented in [../tutorials/02-your-first-parallel-run.md](../tutorials/02-your-first-parallel-run.md),
-[../reference/hooks.md](../reference/hooks.md), and [../reference/receipts-schema.md](../reference/receipts-schema.md).
+the shipped bundles, and where state goes. Reader-facing behavior is
+documented in the tutorials, how-to guides, and
+[../reference/hooks.md](../reference/hooks.md); the reasoning behind each
+design choice is in [design-principles.md](design-principles.md) and
+[why-sddx.md](why-sddx.md).
 
 ## Layout
 
@@ -82,17 +84,6 @@ Two invariants hold across all of `.sddx/`:
 
 ## Design principles
 
-The tie-breakers for any design argument, in order of how often they settle
-one:
-
-1. **Process over intelligence.** Trust deterministic gates — hooks, schemas,
-   exit codes — over model judgment.
-2. **No oracle, no goal.** A spec without an observable success signal is
-   rejected at plan time, mechanically.
-3. **State is files in git.** If it isn't committed, it didn't happen.
-4. **Hard rules, audited exceptions.** The only gate escape is per-file,
-   written down, and surfaced in the receipt and on the board.
-5. **Pay for what you use.** Subagents and worktrees only when the task
-   warrants them; `--solo` exists for a reason.
-6. **Zero trust in "done".** Completion is a verifier executing the oracle and
-   writing a chained receipt — never a model claim.
+The tie-breakers for any design argument are covered in
+[design-principles.md](design-principles.md) — this page stays focused on
+where they land in the codebase.

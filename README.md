@@ -10,13 +10,11 @@ Loop-based Spec-Driven Development for Claude Code: dense specs with mandatory
 oracles, hook-enforced TDD, parallel git worktrees, and hash-chained receipts.
 Process over intelligence, proof over promises.
 
-| Problem with agentic dev frameworks | sddx mechanism                                                                             |
-| ----------------------- | ------------------------------------------------------------------------------------------ |
-| Token bloat             | Minimal skill surface; lazy-loaded references; measured token budget                       |
-| Prompt-level discipline | **Hooks hard-block** implementation writes before a failing test exists                    |
-| Unverifiable completion | Every goal requires an **oracle** — an observable success signal; the verifier executes it |
-| Transient state         | Per-task JSON state + receipts committed **in the repo**; survives restarts and compaction |
-| Compounding tasks       | **Worktree-per-task** isolation, forked from `origin/HEAD`, parallel by default            |
+Hooks hard-block implementation writes before a failing test exists, every
+goal requires an executable oracle, and every finished task leaves a
+hash-chained receipt in the repo. See
+[why sddx exists](docs/explanation/why-sddx.md) for the full problem/mechanism
+breakdown.
 
 ## Install
 
@@ -88,6 +86,8 @@ the same commands also run from a checkout as `bin/sddx-run dist/cli.mjs`.
 | [Config reference](docs/reference/config.md)              | Every `userConfig` key, its env var, default, and precedence          |
 | [Receipts & audit](docs/reference/receipts-schema.md)           | Receipt schema, the hash chain, audit findings and remediation        |
 | [Architecture](docs/explanation/architecture.md)                     | Codebase map, build pipeline, state model, design principles          |
+| [Design principles](docs/explanation/design-principles.md) | The tie-breakers behind every design choice, plus the product goals   |
+| [How it compares](docs/explanation/how-it-compares.md)    | What sddx takes from Superpowers, Blueprint, GoalBuddy, gsd-core, BMAD |
 | [Troubleshooting](docs/how-to/troubleshoot-common-problems.md)               | Gate blocks, stuck tasks, orphan worktrees, audit failures            |
 | [Releasing](docs/RELEASING.md)                           | The release checklist                                                 |
 | [Contributing](CONTRIBUTING.md)                          | Dev setup, quality gates, PR expectations                             |

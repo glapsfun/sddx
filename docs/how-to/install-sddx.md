@@ -12,7 +12,7 @@ to verify the install, and how to remove it.
   and falls back to Node.js ≥ 18 — one of the two must be on `PATH`, which is
   already true on any machine running Claude Code.
 - **Bun is only needed for development** of sddx itself (version pinned in
-  `.bun-version`). See [CONTRIBUTING.md](../CONTRIBUTING.md).
+  `.bun-version`). See [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
 ## Marketplace install
 
@@ -112,4 +112,4 @@ you no longer want it.
 sddx makes **zero network calls**. Everything is local files (`.sddx/` under
 version control) and local git. No telemetry, no phoning home, no remote
 fetches — the bundles ship dependency-free and never import a network API. See
-[SECURITY.md](../SECURITY.md) for the security policy.
+[SECURITY.md](../../SECURITY.md) for the security policy.

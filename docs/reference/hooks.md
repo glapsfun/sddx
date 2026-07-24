@@ -62,7 +62,7 @@ tests/**   test/**   __tests__/**   spec/**
 ```
 
 Both lists extend via the plugin settings `exempt_globs` and `test_globs`
-(space-separated; see [installation.md](installation.md)). Paths are
+(space-separated; see [../how-to/install-sddx.md](../how-to/install-sddx.md)). Paths are
 normalized to forward slashes before matching, so the gate classifies
 identically on Windows.
 
@@ -102,7 +102,7 @@ This appends the exact path to the task file's allow list. It is visible on
 the board, and at verification the whole list is copied into the receipt
 (`allow` field, receipt v2) — so every exemption a task ever used is part of
 its tamper-evident record. See
-[receipts-and-audit.md](receipts-and-audit.md).
+[receipts-schema.md](receipts-schema.md).
 
 There is no global off-switch and no soft mode. Use `allow` for files that
 genuinely cannot be test-driven (generated code, vendored assets), not to
@@ -119,6 +119,6 @@ Phases move on observed exit codes, never on claims:
 - The **stop gate** refuses to conclude a session or subagent while its task
   lacks a verified receipt — "done" requires the verifier to have executed the
   oracle and written the chained receipt
-  ([receipts-and-audit.md](receipts-and-audit.md)).
+  ([receipts-schema.md](receipts-schema.md)).
 - A broken or unreadable task state file **blocks writes** rather than
   silently disabling the gate.

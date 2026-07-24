@@ -154,7 +154,7 @@ prints `verdict=pass receipt=<path> commit=<sha> duration_ms=<n>`. On failure:
 prints `verdict=fail oracle_exit=<code> duration_ms=<n> iterations=<n>` and
 exits 1 — **no receipt is written for a failed verification.**
 `--model`/`--harness` are recorded in the receipt for provenance
-([receipts-and-audit.md](receipts-and-audit.md)).
+([receipts-schema.md](receipts-schema.md)).
 
 ## sddx board
 
@@ -175,7 +175,7 @@ sddx audit [--signatures] [--ci]
 Re-walks and re-hashes the receipt chain and checks commit bindings;
 `--signatures` additionally verifies task-commit signatures. `--ci` also
 fails when a task marked `DONE` has no receipt (tamper-only CI gate — see
-[receipts-and-audit.md](receipts-and-audit.md)). Prints one line per finding
+[receipts-schema.md](receipts-schema.md)). Prints one line per finding
 to stderr and exits 1 on any finding — CI-friendly. Clean run:
 `audit: <n> receipt(s) verified, chain intact`.
 
@@ -209,7 +209,7 @@ sddx pr create --goal <goal-id> [--title <title>]
 
 Opens **one PR per goal**: refuses unless every task in the goal is `DONE`
 with a passing receipt (all-or-nothing, re-checked fresh at invocation time —
-see [receipts-and-audit.md](receipts-and-audit.md)), then cherry-picks each
+see [receipts-schema.md](receipts-schema.md)), then cherry-picks each
 task's atomic commit onto a fresh `sddx/goal-<goal-id>` branch (task-creation
 order), pushes it, and opens the PR via `gh` or `glab` — resolved from
 `userConfig.pr_host` or detected from the `origin` remote. The PR body is
@@ -299,7 +299,7 @@ sddx config show [--output <terminal|json|markdown|all>]
 
 Prints every `userConfig` key fully resolved (environment variable, then
 `.sddx/config.json`, then built-in default — see
-[installation.md](installation.md) for the full key table). Read-only: never
+[../how-to/install-sddx.md](../how-to/install-sddx.md) for the full key table). Read-only: never
 writes `.sddx/config.json` or any other file. `agent_model` is printed as
 parsed `role=model` pairs (malformed segments are silently dropped here —
 run `sddx config validate` to see why). `pr_host` prints

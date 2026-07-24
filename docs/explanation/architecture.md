@@ -2,8 +2,8 @@
 
 Contributor-facing map of the codebase: where things live, how sources become
 the shipped bundles, where state goes, and the principles that decide design
-arguments. Reader-facing behavior is documented in [usage.md](usage.md),
-[hooks.md](hooks.md), and [receipts-and-audit.md](receipts-and-audit.md).
+arguments. Reader-facing behavior is documented in [../tutorials/02-your-first-parallel-run.md](../tutorials/02-your-first-parallel-run.md),
+[../reference/hooks.md](../reference/hooks.md), and [../reference/receipts-schema.md](../reference/receipts-schema.md).
 
 ## Layout
 
@@ -71,7 +71,7 @@ few things intentionally live outside it because they aren't sddx state:
   forked from `origin/HEAD`, not inside `.sddx/` — each is a real git worktree
   checkout, and nesting one inside `.sddx/` would break the per-task isolation
   `.sddx/` exists to keep conflict-free. The sweep and cleanup rules are
-  documented in [usage.md](usage.md).
+  documented in [../tutorials/02-your-first-parallel-run.md](../tutorials/02-your-first-parallel-run.md).
 - **The sweep lock and `.git/info/exclude`'s `.sddx-worktrees/` entry** live
   under `.git/` — they're git-internal bookkeeping, not sddx state.
 

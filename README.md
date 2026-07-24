@@ -40,7 +40,7 @@ Both paths install the same `sddx` command (the package is scoped as
 wraps it with Claude Code skills and hooks; the npm package is the bare CLI.
 
 Local development, skills-only mode, prerequisites, and verifying the install:
-see [docs/installation.md](docs/installation.md).
+see [docs/how-to/install-sddx.md](docs/how-to/install-sddx.md).
 
 ## Quickstart (first verified task in ~5 minutes)
 
@@ -80,14 +80,14 @@ the same commands also run from a checkout as `bin/sddx-run dist/cli.mjs`.
 
 | Page                                                     | What it covers                                                        |
 | -------------------------------------------------------- | --------------------------------------------------------------------- |
-| [Installation](docs/installation.md)                     | Every install path, verification, uninstall, privacy                  |
+| [Installation](docs/how-to/install-sddx.md)                     | Every install path, verification, uninstall, privacy                  |
 | [Usage](docs/usage.md)                                   | The task loop, `/sddx:run` and `/sddx:quick`, worktrees, the board    |
 | [Spec reference](docs/spec-reference.md)                 | Every spec field, good/bad criteria, the four oracle types            |
-| [Hooks & the TDD gate](docs/hooks.md)                    | The five hooks, gate classification, default globs, the escape hatch  |
-| [CLI reference](docs/cli.md)                             | Every `sddx` command, flag, and exit code                             |
+| [Hooks & the TDD gate](docs/reference/hooks.md)                    | The five hooks, gate classification, default globs, the escape hatch  |
+| [CLI reference](docs/reference/cli.md)                             | Every `sddx` command, flag, and exit code                             |
 | [Receipts & audit](docs/receipts-and-audit.md)           | Receipt schema, the hash chain, audit findings and remediation        |
-| [Architecture](docs/architecture.md)                     | Codebase map, build pipeline, state model, design principles          |
-| [Troubleshooting](docs/troubleshooting.md)               | Gate blocks, stuck tasks, orphan worktrees, audit failures            |
+| [Architecture](docs/explanation/architecture.md)                     | Codebase map, build pipeline, state model, design principles          |
+| [Troubleshooting](docs/how-to/troubleshoot-common-problems.md)               | Gate blocks, stuck tasks, orphan worktrees, audit failures            |
 | [Releasing](docs/RELEASING.md)                           | The release checklist                                                 |
 | [Contributing](CONTRIBUTING.md)                          | Dev setup, quality gates, PR expectations                             |
 | [Changelog](CHANGELOG.md)                                | Release history                                                       |

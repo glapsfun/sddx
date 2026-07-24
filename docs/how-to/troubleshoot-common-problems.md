@@ -19,7 +19,7 @@ as implementation. This is the TDD gate doing its one job.
 **Fix:** write the failing test first, run it so the failure is recorded, and
 the gate lifts at GREEN. For a file that genuinely cannot be test-driven
 (generated code, vendored assets): `sddx task allow <id> <path>` — the
-exemption is audited in the receipt. Details: [hooks.md](hooks.md).
+exemption is audited in the receipt. Details: [../reference/hooks.md](../reference/hooks.md).
 
 ## Task stuck in RED
 
@@ -31,7 +31,7 @@ recognize) records nothing.
 **Fix:** run the suite via a plain Bash command (e.g. `bun test tests/…`) so
 the exit code is observed. By hand:
 `sddx task phase <id> GREEN --test-exit 0` — but the transition is rejected
-unless the evidence is real ([cli.md](cli.md#sddx-task-phase)).
+unless the evidence is real ([../reference/cli.md](../reference/cli.md#sddx-task-phase)).
 
 ## Orphan worktrees under `.sddx-worktrees/`
 
@@ -49,7 +49,7 @@ with a printed reason).
 or a receipt was never committed.
 
 **Fix:** every finding and its remediation is listed in
-[receipts-and-audit.md](receipts-and-audit.md#findings-and-remediation). The
+[../reference/receipts-schema.md](../reference/receipts-schema.md#findings-and-remediation). The
 short version: restore the receipt's committed bytes from git history; if the
 proof is truly gone, re-run `sddx verify` for that task.
 
@@ -62,10 +62,10 @@ proof is truly gone, re-run `sddx verify` for that task.
 - the plugin isn't actually enabled (check `claude plugin list`);
 - you're on a **skills-only install** — copied `skills/` directories load the
   workflows, but hooks (the TDD gate, recorder, stop gate) only ship with the
-  full plugin. See [installation.md](installation.md#skills-only-mode).
+  full plugin. See [install-sddx.md](install-sddx.md#skills-only-mode).
 
 **Fix:** run inside a git repo with the full plugin installed; verify per
-[installation.md](installation.md#verifying-the-install).
+[install-sddx.md](install-sddx.md#verifying-the-install).
 
 ## Worktree mode downgraded to branch mode
 

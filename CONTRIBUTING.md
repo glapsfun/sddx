@@ -2,7 +2,7 @@
 
 Thanks for helping build sddx. This page is the complete dev setup and the
 gates your change has to clear. For a map of the codebase, start with
-[docs/architecture.md](docs/architecture.md).
+[docs/explanation/architecture.md](docs/explanation/architecture.md).
 
 ## Prerequisites
 

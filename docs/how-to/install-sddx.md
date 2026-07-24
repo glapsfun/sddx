@@ -38,7 +38,7 @@ hand-edited config files and no environment variables:
 | `prefer_solo`             | `false` | **Advisory** hint `/sddx:run` reads to steer a single trivial task toward `--solo`/`/sddx:quick` instead of the full worktree flow |
 | `verbose`                 | `false` | When true, `sddx config show` also prints which source (env var, `.sddx/config.json`, or built-in default) resolved each key |
 
-See [cli.md](cli.md#sddx-config-show) for `sddx config show`/`sddx config validate`, which read and check this table's values.
+See [../reference/cli.md](../reference/cli.md#sddx-config-show) for `sddx config show`/`sddx config validate`, which read and check this table's values.
 
 ## Standalone CLI (npm / npx / bun)
 
@@ -77,7 +77,7 @@ Copy the `skills/` subdirectories into your project's `.claude/skills/`. The
 skills auto-load, but **hook enforcement — the TDD gate, the test recorder, the
 stop gate — only ships with the full plugin.** Skills-only mode gives you the
 workflows without the guarantees; see
-[troubleshooting](troubleshooting.md#hooks-arent-firing) if you expected the
+[troubleshooting](troubleshoot-common-problems.md#hooks-arent-firing) if you expected the
 gate and don't have it.
 
 ## Verifying the install

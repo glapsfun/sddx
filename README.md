@@ -40,65 +40,63 @@ wraps it with Claude Code skills and hooks; the npm package is the bare CLI.
 Local development, skills-only mode, prerequisites, and verifying the install:
 see [docs/how-to/install-sddx.md](docs/how-to/install-sddx.md).
 
-## Quickstart (first verified task in ~5 minutes)
+## Quickstart
 
 ```sh
 mkdir demo && cd demo && git init
-git commit --allow-empty -m init   # sddx needs a resolvable HEAD to base tasks on
-cat > spec.yaml <<'EOF'
-task: health endpoint returns ok
-context: []
-success_criteria:
-  - "bun test tests/health.test.ts exits 0"
-oracle:
-  type: command
-  run: "bun test tests/health.test.ts"
-  expect: exit 0
-stop_rules:
-  - max_iterations: 5
-out_of_scope: []
-EOF
-sddx task create --spec spec.yaml --workspace none   # registers the task (phase PLAN)
-# 1. write the failing test first — the TDD gate blocks implementation paths
-#    until a failing run is observed
-# 2. run: bun test tests/health.test.ts   → recorder moves the task to RED
-# 3. write the implementation, re-run the tests → GREEN
-sddx task phase <task-id> VERIFY
-sddx verify <task-id>        # runs the oracle, writes the receipt, commits atomically
-sddx board                   # renders .sddx/BOARD.md
-sddx audit                   # verifies the receipt hash chain
+git commit --allow-empty -m init
 ```
 
-Inside Claude Code the same loop is driven by `/sddx:quick` (single task) or
-`/sddx:run` (parallel tasks in worktrees). Outside Claude Code, `sddx` above is
-the published npm package (`npx @glapsfun/sddx ...` works with no install);
-the same commands also run from a checkout as `bin/sddx-run dist/cli.mjs`.
+Then follow [Getting started](docs/tutorials/01-getting-started.md) — the
+same loop `/sddx:quick`/`--solo` drive inside Claude Code, one command at a
+time, ending in a verified receipt. Every command there (and in every guide
+below) is also a copy-paste-able scaffold under
+[examples/](examples/README.md).
 
 ## Documentation
 
-| Page                                                     | What it covers                                                        |
-| -------------------------------------------------------- | --------------------------------------------------------------------- |
-| [Installation](docs/how-to/install-sddx.md)                     | Every install path, verification, uninstall, privacy                  |
-| [Usage](docs/usage.md)                                   | The task loop, `/sddx:run` and `/sddx:quick`, worktrees, the board    |
-| [Spec reference](docs/reference/spec-reference.md)                 | Every spec field, good/bad criteria, the four oracle types            |
-| [Model DAG dependencies](docs/how-to/model-dag-dependencies.md) | Fan-out/fan-in, the overlap ⟹ ordered gate, materialize            |
-| [Configure retry and skip/block](docs/how-to/configure-retry-and-skip.md) | Bounded automatic retry, skip vs block on an abandoned parent |
-| [Use branch mode](docs/how-to/use-branch-mode.md)         | The submodule/worktree-unavailable fallback, and forcing it explicitly |
-| [Choose an oracle type](docs/how-to/choose-an-oracle-type.md) | Why command/test-suite/browser are identical, and manual's real limit |
-| [Ship a goal as a PR](docs/how-to/ship-a-goal-as-a-pr.md) | All-or-nothing gating, host resolution, what `pr create` actually does |
-| [Tune config](docs/how-to/tune-config.md)                 | Where overrides live, precedence, `config validate`'s warnings         |
-| [Hooks & the TDD gate](docs/reference/hooks.md)                    | The five hooks, gate classification, default globs, the escape hatch  |
-| [CLI reference](docs/reference/cli.md)                             | Every `sddx` command, flag, and exit code                             |
-| [Config reference](docs/reference/config.md)              | Every `userConfig` key, its env var, default, and precedence          |
-| [Receipts & audit](docs/reference/receipts-schema.md)           | Receipt schema, the hash chain, audit findings and remediation        |
-| [Architecture](docs/explanation/architecture.md)                     | Codebase map, build pipeline, state model, design principles          |
-| [Design principles](docs/explanation/design-principles.md) | The tie-breakers behind every design choice, plus the product goals   |
-| [How it compares](docs/explanation/how-it-compares.md)    | What sddx takes from Superpowers, Blueprint, GoalBuddy, gsd-core, BMAD |
-| [Troubleshooting](docs/how-to/troubleshoot-common-problems.md)               | Gate blocks, stuck tasks, orphan worktrees, audit failures            |
-| [Releasing](docs/RELEASING.md)                           | The release checklist                                                 |
-| [Contributing](CONTRIBUTING.md)                          | Dev setup, quality gates, PR expectations                             |
-| [Changelog](CHANGELOG.md)                                | Release history                                                       |
-| [Security](SECURITY.md)                                  | Zero-network design and vulnerability reporting                       |
+**New to sddx?**
+
+- [Getting started](docs/tutorials/01-getting-started.md) — your first verified task, by hand from the CLI
+- [Your first parallel run](docs/tutorials/02-your-first-parallel-run.md) — two tasks, two worktrees
+
+**How-to guides**
+
+- [Install sddx](docs/how-to/install-sddx.md)
+- [Model DAG dependencies](docs/how-to/model-dag-dependencies.md)
+- [Configure retry and skip/block](docs/how-to/configure-retry-and-skip.md)
+- [Use branch mode](docs/how-to/use-branch-mode.md)
+- [Choose an oracle type](docs/how-to/choose-an-oracle-type.md)
+- [Verify and audit receipts](docs/how-to/verify-and-audit-receipts.md)
+- [Ship a goal as a PR](docs/how-to/ship-a-goal-as-a-pr.md)
+- [Tune config](docs/how-to/tune-config.md)
+- [Troubleshooting](docs/how-to/troubleshoot-common-problems.md)
+
+**Reference**
+
+- [Spec reference](docs/reference/spec-reference.md)
+- [CLI reference](docs/reference/cli.md)
+- [Hooks & the TDD gate](docs/reference/hooks.md)
+- [Receipts schema](docs/reference/receipts-schema.md)
+- [Config reference](docs/reference/config.md)
+
+**Understand the design**
+
+- [Why sddx](docs/explanation/why-sddx.md)
+- [Design principles](docs/explanation/design-principles.md)
+- [How it compares](docs/explanation/how-it-compares.md)
+- [Architecture](docs/explanation/architecture.md)
+
+**Runnable examples**
+
+- [examples/](examples/README.md) — one scaffold per feature above, replayed in CI
+
+**Project**
+
+- [Releasing](docs/RELEASING.md)
+- [Contributing](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md)
+- [Security](SECURITY.md)
 
 ## Development
 

@@ -8,3 +8,6 @@ openspec
 
 # deps
 node_modules/
+
+# sddx examples (local runs only — CI uses its own scratch dir)
+examples/*/.sandbox/

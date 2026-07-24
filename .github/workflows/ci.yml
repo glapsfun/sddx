@@ -69,5 +69,5 @@ jobs:
       # Offline: only intra-repo links are checked, keeping CI network-independent.
       - uses: lycheeverse/lychee-action@v2
         with:
-          args: --offline --no-progress README.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md CHANGELOG.md 'docs/**/*.md'
+          args: --offline --no-progress README.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md CHANGELOG.md 'docs/**/*.md' 'examples/**/*.md'
           fail: true

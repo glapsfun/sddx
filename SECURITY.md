@@ -15,7 +15,7 @@ sddx is built to have a minimal attack surface:
   repository, plus local git operations.
 - **Tamper-evident records.** Receipts are hash-chained; `sddx audit` detects
   any edited or deleted receipt. See
-  [docs/receipts-and-audit.md](docs/receipts-and-audit.md).
+  [docs/reference/receipts-schema.md](docs/reference/receipts-schema.md).
 
 ## Reporting a vulnerability
 

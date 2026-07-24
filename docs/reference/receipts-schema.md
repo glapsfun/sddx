@@ -1,10 +1,4 @@
-# Receipts and audit
-
-Completion in sddx is never a claim. It is a verifier executing the oracle and
-writing an immutable, hash-chained receipt — and `sddx audit` proving, at any
-later date, that nobody touched it.
-
-## The receipt
+# Receipt schema
 
 One JSON file per task at `.sddx/receipts/<task-id>.json`, written exactly
 once by the verifier — and only on a passing oracle. A failed verification
@@ -35,15 +29,16 @@ The `allow` field closes the loop on the gate's only escape hatch
 ([hooks.md](hooks.md)): every exemption a task used is part of its permanent
 record.
 
-### Receipt v3 (sddx ≥ 0.2)
+## Receipt v3 (sddx ≥ 0.2)
 
 v3 replaces the single run record (`exit_code`, `duration_ms`,
 `stdout_sha256`, `stderr_sha256`) with `runs: []` — one entry per oracle
 execution, each carrying those same four fields; a pass requires every entry
 to exit 0. It adds `env` (`os`, `arch`, `runtime`, `runtime_version`,
 `dirty_tree` — whether the oracle ran against uncommitted changes) and
-optional `signature`/`signer` (see Receipt signing). `sddx audit` accepts
-v1–v3; existing chains stay valid.
+optional `signature`/`signer` (see
+[verify-and-audit-receipts.md](../how-to/verify-and-audit-receipts.md#receipt-signing)).
+`sddx audit` accepts v1–v3; existing chains stay valid.
 
 ## The hash chain
 
@@ -72,12 +67,13 @@ The linear chain is just the sequential special case.
 4. **Signatures** (`--signatures`) — the commit that introduced each receipt
    carries a valid signature, when you have commit signing configured.
 
-Exit 1 on any finding, 0 on a clean chain — safe to wire into CI.
+Exit 1 on any finding, 0 on a clean chain — safe to wire into CI (see
+[verify-and-audit-receipts.md](../how-to/verify-and-audit-receipts.md#wire-audit-into-ci)).
 
 ## Findings and remediation
 
 | Finding                                                             | Meaning                                                       | What to do                                                                     |
-| ------------------------------------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| --------------------------------------------------------------------| --------------------------------------------------------------| --------------------------------------------------------------------------------|
 | `chain: <file>: prev hash matches no receipt — chain broken (tampered or deleted)` | A parent receipt was edited or removed          | Restore the original bytes from git history (`git checkout <sha> -- <file>`)   |
 | `chain: <file>: genesis-linked receipt must have seq 1, got <n>`    | The chain root was rewritten                                  | Restore from history; a legitimate root always has seq 1                       |
 | `chain: <file>: seq <n> must exceed parent seq <m>`                 | Sequence numbers were manipulated                             | Restore from history                                                           |
@@ -90,48 +86,3 @@ Exit 1 on any finding, 0 on a clean chain — safe to wire into CI.
 
 If a finding survives restoration attempts, treat the receipt as untrusted and
 re-verify the task: the code may be fine, but its proof is gone.
-
-## CI receipt gate
-
-`sddx audit --ci` exits non-zero **only on tamper evidence**: a broken
-receipt hash chain; edited, deleted, uncommitted, or schema-invalid receipts;
-or a task marked `DONE` without a receipt. A repo or PR with no sddx activity
-passes clean — safe to add to any repository; sddx stays opt-in per task.
-
-Zero-install workflow (the committed `dist/` bundle needs no npm install):
-
-```yaml
-name: sddx-audit
-on: pull_request
-jobs:
-  audit:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # audit binds receipts to their introducing commits
-      - uses: actions/checkout@v4
-        with:
-          repository: glapsfun/sddx
-          ref: v0.2.0
-          path: .sddx-tool
-      - run: node .sddx-tool/dist/cli.mjs audit --ci
-```
-
-## Commit signing
-
-When you have git commit signing (SSH or GPG) configured, sddx's atomic task
-commits are signed like any other commit, and `sddx audit --signatures`
-verifies them. Signing adds **identity** on top; chain **integrity** is
-independent of it — an unsigned repository still gets full tamper-evidence
-from the hash tree.
-
-## Receipt signing
-
-When the repo has SSH commit signing configured (`gpg.format ssh` +
-`user.signingkey` as a key path), `sddx verify` also signs each receipt:
-`signature` is an SSH signature (namespace `sddx-receipt`) over the sha256 of
-the receipt's unsigned bytes; `signer` is the git `user.email`. `sddx audit`
-verifies embedded signatures against `gpg.ssh.allowedSignersFile`: invalid →
-audit fails; unsigned or unverifiable → informational only (`--signatures`
-prints the notes). Identity sits on top; chain integrity never depends on it.

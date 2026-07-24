@@ -85,6 +85,7 @@ the same commands also run from a checkout as `bin/sddx-run dist/cli.mjs`.
 | [Spec reference](docs/reference/spec-reference.md)                 | Every spec field, good/bad criteria, the four oracle types            |
 | [Hooks & the TDD gate](docs/reference/hooks.md)                    | The five hooks, gate classification, default globs, the escape hatch  |
 | [CLI reference](docs/reference/cli.md)                             | Every `sddx` command, flag, and exit code                             |
+| [Config reference](docs/reference/config.md)              | Every `userConfig` key, its env var, default, and precedence          |
 | [Receipts & audit](docs/reference/receipts-schema.md)           | Receipt schema, the hash chain, audit findings and remediation        |
 | [Architecture](docs/explanation/architecture.md)                     | Codebase map, build pipeline, state model, design principles          |
 | [Troubleshooting](docs/how-to/troubleshoot-common-problems.md)               | Gate blocks, stuck tasks, orphan worktrees, audit failures            |

@@ -18,7 +18,12 @@ oracle:
 stop_rules:
   - max_iterations: 5
 out_of_scope: []
+scope:
+  - "src/health/**"
 ```
+
+(`on_dependency_failure` and `retry` are omitted from this example since both
+default sensibly when absent — each gets its own worked example below.)
 
 ## task
 
@@ -63,7 +68,8 @@ Fields: `type`, `run`, `expect`, `runs`. `expect` defaults to `exit 0` when
 omitted. `run` is required for every type except `manual`
 (`oracle.run: command required for non-manual oracles`).
 
-- `runs` (optional, integer ≥ 1, default 1): verify executes the oracle this
+- `runs` (optional, integer ≥ 1, default 1, `oracle.runs: must be an integer
+  >= 1` otherwise): verify executes the oracle this
   many times sequentially; **every** run must exit as expected. Repo default:
   userConfig `oracle_runs_default`. Receipt v3 records each run.
 
@@ -128,3 +134,68 @@ out_of_scope:
   - "auth, rate limiting"
   - "refactoring unrelated modules"
 ```
+
+## scope
+
+Optional list of write globs — the task's lane. When two tasks in the same
+`graph.yaml` run aren't ordered by `depends_on`, their `scope` lists must be
+disjoint; `graph create`/`goal create` refuse a schedule that violates this
+("overlap ⟹ ordered" — see
+[model-dag-dependencies.md](../how-to/model-dag-dependencies.md)). When
+present, must be a non-empty list of non-empty globs — a bare string or an
+empty list is rejected (`scope: when present, must be a non-empty list of
+non-empty globs`), not silently coerced into one.
+
+```yaml
+scope:
+  - "src/health/**"
+```
+
+Omitting `scope` entirely means the task carries no scope-conflict
+information — safe for a single unscoped task, but it can never safely run
+concurrently (unordered) with another task in the same graph.
+
+## on_dependency_failure
+
+Optional. One of `skip` (default) or `block` — what this task does if a
+named parent (`depends_on` in `graph.yaml`) never reaches `DONE` (goes
+`ABANDONED` instead). Carries no cross-task reference, unlike `depends_on`
+itself, which stays out of the spec entirely and is authored in
+`graph.yaml` (`on_dependency_failure: must be one of skip | block`
+otherwise).
+
+```yaml
+on_dependency_failure: block # default is skip
+```
+
+- `skip` — this task (and, transitively, anything that depends on it) is
+  reported as **Skipped** on the board once its parent is abandoned; the rest
+  of the goal keeps running.
+- `block` — this task stays **Blocked** and escalates instead.
+
+See [configure-retry-and-skip.md](../how-to/configure-retry-and-skip.md) for
+a full walkthrough.
+
+## retry
+
+Optional mapping (`retry: must be a mapping with optional
+max_attempts/workspace` otherwise) — bounds automatic re-attempts before a
+task that would otherwise go `ABANDONED` is retried instead.
+
+```yaml
+retry:
+  max_attempts: 2 # integer >= 1; default 1 (today's single-attempt behavior)
+  workspace: fresh # fresh (default) | reuse
+```
+
+- `max_attempts` (`retry.max_attempts: must be an integer >= 1` otherwise) —
+  total attempts including the first; when a task is abandoned with attempts
+  remaining it resets to `PLAN` instead (`attempt_count` increments) rather
+  than terminating.
+- `workspace` (`retry.workspace: must be one of fresh | reuse` otherwise) —
+  `fresh` discards and re-forks the worktree/branch from the same base SHA
+  before the next attempt; `reuse` leaves the existing workspace as-is.
+
+Retry never reopens an already-`DONE` task — a receipt is immutable once
+written. See
+[configure-retry-and-skip.md](../how-to/configure-retry-and-skip.md).

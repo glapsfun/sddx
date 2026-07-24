@@ -82,6 +82,7 @@ the same commands also run from a checkout as `bin/sddx-run dist/cli.mjs`.
 | [Usage](docs/usage.md)                                   | The task loop, `/sddx:run` and `/sddx:quick`, worktrees, the board    |
 | [Spec reference](docs/reference/spec-reference.md)                 | Every spec field, good/bad criteria, the four oracle types            |
 | [Model DAG dependencies](docs/how-to/model-dag-dependencies.md) | Fan-out/fan-in, the overlap ⟹ ordered gate, materialize            |
+| [Configure retry and skip/block](docs/how-to/configure-retry-and-skip.md) | Bounded automatic retry, skip vs block on an abandoned parent |
 | [Hooks & the TDD gate](docs/reference/hooks.md)                    | The five hooks, gate classification, default globs, the escape hatch  |
 | [CLI reference](docs/reference/cli.md)                             | Every `sddx` command, flag, and exit code                             |
 | [Config reference](docs/reference/config.md)              | Every `userConfig` key, its env var, default, and precedence          |

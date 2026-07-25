@@ -3,8 +3,8 @@ var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, 
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
 // src/hooks.ts
-import { existsSync as existsSync8, readdirSync as readdirSync5, readFileSync as readFileSync7 } from "node:fs";
-import { join as join8 } from "node:path";
+import { existsSync as existsSync9, readdirSync as readdirSync6, readFileSync as readFileSync8 } from "node:fs";
+import { join as join9 } from "node:path";
 
 // src/board.ts
 import { existsSync as existsSync4, mkdirSync as mkdirSync3, readdirSync as readdirSync2, readFileSync as readFileSync4, writeFileSync as writeFileSync3 } from "node:fs";
@@ -417,10 +417,6 @@ function abandonOrRetry(t) {
   t.history.push({ phase: "ABANDONED", at });
   return { retried: false, attempt_count: attempts, max_attempts: policy.max_attempts };
 }
-function markShipped(t, goalId, prUrl) {
-  t.shipped = { goal_id: goalId, pr_url: prUrl, at: new Date().toISOString() };
-  return t;
-}
 function readTaskFrom(dir, id) {
   try {
     return JSON.parse(readFileSync2(taskPath(dir, id), "utf8"));
@@ -478,6 +474,9 @@ var currentBranch = (cwd) => git(cwd, "rev-parse", "--abbrev-ref", "HEAD");
 var createBranch = (cwd, name) => {
   git(cwd, "switch", "-c", name);
 };
+var createBranchAt = (cwd, name, sha) => {
+  git(cwd, "branch", name, sha);
+};
 function branchExists(cwd, name) {
   const r = spawnSync2("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${name}`], {
     cwd
@@ -525,7 +524,7 @@ var push = (cwd, branch) => {
   git(cwd, "push", "-u", "origin", branch);
 };
 var stageAll = (cwd) => {
-  git(cwd, "add", "-A");
+  git(cwd, "add", "-A", "--", ".", ":!.sddx/goals");
 };
 var stagePath = (cwd, path) => {
   git(cwd, "add", "--", path);
@@ -1290,23 +1289,106 @@ import { spawnSync as spawnSync4 } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
-  existsSync as existsSync6,
-  mkdirSync as mkdirSync4,
-  readdirSync as readdirSync4,
-  readFileSync as readFileSync6,
-  writeFileSync as writeFileSync4
+  existsSync as existsSync7,
+  mkdirSync as mkdirSync5,
+  readdirSync as readdirSync5,
+  readFileSync as readFileSync7,
+  writeFileSync as writeFileSync5
 } from "node:fs";
+import { join as join7 } from "node:path";
+
+// src/lib/goal.ts
+import { existsSync as existsSync6, mkdirSync as mkdirSync4, readdirSync as readdirSync4, readFileSync as readFileSync6, writeFileSync as writeFileSync4 } from "node:fs";
 import { join as join6 } from "node:path";
+var goalsDir = (cwd) => join6(sddxDir(cwd), "goals");
+var goalPath = (cwd, id) => join6(goalsDir(cwd), `${id}.json`);
+var goalId = (sentence, date = new Date) => taskId(sentence, date);
+var runBranchName = (id) => `sddx/run-${id}`;
+function createGoal(cwd, goalSentence, taskIds, opts) {
+  if (taskIds.length === 0) {
+    throw new Error("a goal requires at least one task id");
+  }
+  const now = new Date().toISOString();
+  const id = opts.id ?? goalId(goalSentence);
+  const path = goalPath(cwd, id);
+  if (existsSync6(path))
+    throw new Error(`goal ${id} already exists at ${path}`);
+  for (const tid of taskIds) {
+    if (!resolveTaskState(cwd, tid)) {
+      throw new Error(`task ${tid} does not exist — cannot register it in a goal`);
+    }
+  }
+  const g = {
+    id,
+    goal: goalSentence,
+    task_ids: taskIds,
+    ...opts.deps && Object.keys(opts.deps).length > 0 ? { deps: opts.deps } : {},
+    run_branch: opts.runBranch,
+    base_sha: opts.baseSha,
+    merges: [],
+    created_at: now,
+    updated_at: now
+  };
+  mkdirSync4(goalsDir(cwd), { recursive: true });
+  writeFileSync4(path, `${JSON.stringify(g, null, 2)}
+`);
+  return g;
+}
+function readGoal(cwd, id) {
+  const path = goalPath(cwd, id);
+  if (!existsSync6(path))
+    throw new Error(`no such goal: ${id} (${path})`);
+  const g = JSON.parse(readFileSync6(path, "utf8"));
+  if (typeof g.run_branch !== "string" || typeof g.base_sha !== "string" || !g.merges) {
+    throw new Error(`goal ${id} (${path}) is missing run_branch/base_sha/merges — written by an ` + "incompatible sddx version; recreate it with the current graph/goal create");
+  }
+  return g;
+}
+function writeGoal(cwd, g) {
+  g.updated_at = new Date().toISOString();
+  writeFileSync4(goalPath(cwd, g.id), `${JSON.stringify(g, null, 2)}
+`);
+}
+function findGoalForTask(cwd, id) {
+  const dir = goalsDir(cwd);
+  if (!existsSync6(dir))
+    return null;
+  for (const f of readdirSync4(dir)) {
+    if (!f.endsWith(".json"))
+      continue;
+    let g;
+    try {
+      g = JSON.parse(readFileSync6(join6(dir, f), "utf8"));
+    } catch {
+      continue;
+    }
+    if (g.task_ids.includes(id))
+      return g;
+  }
+  return null;
+}
+function currentlyMergedTaskIds(g) {
+  const latestByTask = new Map;
+  for (const entry of g.merges)
+    latestByTask.set(entry.task_id, entry);
+  return [...latestByTask.values()].filter((e) => e.result === "merged").map((e) => e.task_id);
+}
+function goalCounts(g) {
+  const merged = currentlyMergedTaskIds(g).length;
+  return { merged, outstanding: g.task_ids.length - merged, total: g.task_ids.length };
+}
+
+// src/lib/receipt.ts
 var sha256 = (data) => createHash("sha256").update(data).digest("hex");
-var receiptsDir = (cwd) => join6(cwd, ".sddx", "receipts");
-var receiptPath = (cwd, taskId2) => join6(receiptsDir(cwd), `${taskId2}.json`);
+var receiptsDir = (cwd) => join7(cwd, ".sddx", "receipts");
+var receiptPath = (cwd, taskId2) => join7(receiptsDir(cwd), `${taskId2}.json`);
 function listReceipts(cwd) {
   const dir = receiptsDir(cwd);
-  if (!existsSync6(dir))
+  if (!existsSync7(dir))
     return [];
-  return readdirSync4(dir).filter((f) => f.endsWith(".json")).map((f) => ({
-    file: join6(dir, f),
-    receipt: JSON.parse(readFileSync6(join6(dir, f), "utf8"))
+  return readdirSync5(dir).filter((f) => f.endsWith(".json")).map((f) => ({
+    file: join7(dir, f),
+    receipt: JSON.parse(readFileSync7(join7(dir, f), "utf8"))
   })).sort((a, b) => a.receipt.seq - b.receipt.seq);
 }
 function chainHead(cwd) {
@@ -1314,7 +1396,7 @@ function chainHead(cwd) {
   const last = receipts.at(-1);
   if (!last)
     return { seq: 0, prevHash: "genesis" };
-  return { seq: last.receipt.seq, prevHash: sha256(readFileSync6(last.file)) };
+  return { seq: last.receipt.seq, prevHash: sha256(readFileSync7(last.file)) };
 }
 function writeReceipt(cwd, r) {
   const schemaErrors = validateReceipt(r);
@@ -1322,11 +1404,11 @@ function writeReceipt(cwd, r) {
     throw new Error(`refusing to write invalid receipt: ${schemaErrors.join("; ")}`);
   }
   const path = receiptPath(cwd, r.task_id);
-  if (existsSync6(path)) {
+  if (existsSync7(path)) {
     throw new Error(`receipt for ${r.task_id} already exists — receipts are immutable`);
   }
-  mkdirSync4(receiptsDir(cwd), { recursive: true });
-  writeFileSync4(path, `${JSON.stringify(r, null, 2)}
+  mkdirSync5(receiptsDir(cwd), { recursive: true });
+  writeFileSync5(path, `${JSON.stringify(r, null, 2)}
 `);
   chmodSync(path, 292);
   return path;
@@ -1382,35 +1464,40 @@ function validateReceipt(raw) {
   need("verified_at", typeof r.verified_at === "string" && !Number.isNaN(Date.parse(r.verified_at)));
   return errors;
 }
-function readReceiptFrom(dir, id) {
+function readReceiptRawFrom(dir, id) {
   try {
-    return JSON.parse(readFileSync6(receiptPath(dir, id), "utf8"));
+    return readFileSync7(receiptPath(dir, id));
   } catch {
     return null;
   }
 }
-function readReceiptFromBranch(cwd, id) {
-  const r = spawnSync4("git", ["show", `sddx/${id}:.sddx/receipts/${id}.json`], {
-    cwd,
-    encoding: "utf8"
-  });
-  if (r.status !== 0)
-    return null;
-  try {
-    return JSON.parse(r.stdout);
-  } catch {
-    return null;
-  }
+function readReceiptRawFromRef(cwd, ref, id) {
+  const r = spawnSync4("git", ["show", `${ref}:.sddx/receipts/${id}.json`], { cwd });
+  return r.status === 0 ? r.stdout : null;
+}
+function resolveReceiptRaw(cwd, id) {
+  const direct = readReceiptRawFrom(join7(cwd, ".sddx-worktrees", id), id) ?? readReceiptRawFrom(cwd, id) ?? readReceiptRawFromRef(cwd, `sddx/${id}`, id);
+  if (direct)
+    return direct;
+  const goal = findGoalForTask(cwd, id);
+  return goal ? readReceiptRawFromRef(cwd, goal.run_branch, id) : null;
 }
 function resolveReceipt(cwd, id) {
-  return readReceiptFrom(join6(cwd, ".sddx-worktrees", id), id) ?? readReceiptFrom(cwd, id) ?? readReceiptFromBranch(cwd, id);
+  const raw = resolveReceiptRaw(cwd, id);
+  if (!raw)
+    return null;
+  try {
+    return JSON.parse(raw.toString("utf8"));
+  } catch {
+    return null;
+  }
 }
 function verifyChain(cwd) {
   const errors = [];
   const receipts = listReceipts(cwd);
   const seqByHash = new Map;
   for (const { file, receipt } of receipts) {
-    seqByHash.set(sha256(readFileSync6(file)), receipt.seq);
+    seqByHash.set(sha256(readFileSync7(file)), receipt.seq);
   }
   for (const { file, receipt } of receipts) {
     for (const e of validateReceipt(receipt))
@@ -1495,8 +1582,8 @@ function recordTestRun(cwd, command, exitCode, output = "") {
 }
 
 // src/lib/stopgate.ts
-import { existsSync as existsSync7 } from "node:fs";
-import { join as join7 } from "node:path";
+import { existsSync as existsSync8 } from "node:fs";
+import { join as join8 } from "node:path";
 var NEXT_STEP = {
   PLAN: "write a failing test and run it to enter RED",
   RED: "run sddx red-check <id>, then make the failing test pass (run the test runner to enter GREEN)",
@@ -1526,8 +1613,8 @@ function stopGate(event) {
   }
   const { task } = res;
   if (isTerminal(task.phase)) {
-    const receipt = join7(res.root, ".sddx", "receipts", `${task.id}.json`);
-    if (task.phase === "DONE" && !existsSync7(receipt)) {
+    const receipt = join8(res.root, ".sddx", "receipts", `${task.id}.json`);
+    if (task.phase === "DONE" && !existsSync8(receipt)) {
       return {
         block: true,
         reason: `sddx: task ${task.id} is DONE but .sddx/receipts/${task.id}.json is missing — completion is unproven. Restore the receipt or abandon the task.`
@@ -1614,7 +1701,7 @@ function tddGate(input, env = process.env) {
 // src/hooks.ts
 function readEvent() {
   try {
-    const raw = readFileSync7(0, "utf8");
+    const raw = readFileSync8(0, "utf8");
     const parsed = raw.trim() === "" ? {} : JSON.parse(raw);
     return typeof parsed === "object" && parsed !== null ? parsed : {};
   } catch {
@@ -1694,7 +1781,7 @@ function cmdStopGate(event) {
 function cmdSessionStart(event) {
   const cwd = event.cwd ?? process.cwd();
   const lines = [];
-  if (existsSync8(join8(cwd, ".sddx"))) {
+  if (existsSync9(join9(cwd, ".sddx"))) {
     try {
       const res = sweep(cwd);
       if (res.removed.length > 0)
@@ -1707,11 +1794,11 @@ function cmdSessionStart(event) {
         lines.push(`sddx: board refresh failed: ${e.message}`);
       }
     }
-    const tasksDir = join8(cwd, ".sddx", "tasks");
-    if (existsSync8(tasksDir)) {
-      for (const file of readdirSync5(tasksDir).filter((f) => f.endsWith(".json"))) {
+    const tasksDir = join9(cwd, ".sddx", "tasks");
+    if (existsSync9(tasksDir)) {
+      for (const file of readdirSync6(tasksDir).filter((f) => f.endsWith(".json"))) {
         try {
-          const t = JSON.parse(readFileSync7(join8(tasksDir, file), "utf8"));
+          const t = JSON.parse(readFileSync8(join9(tasksDir, file), "utf8"));
           if (!isTerminal(t.phase))
             lines.push(`sddx task ${t.id}: phase ${t.phase} — ${t.task}`);
         } catch {

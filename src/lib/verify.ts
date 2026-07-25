@@ -3,6 +3,7 @@ import { captureEnv } from "./envinfo";
 import { commit, stageAll, writeTree } from "./git";
 import { runOracle } from "./oracle";
 import { chainHead, type OracleRun, type Receipt, sha256, writeReceipt } from "./receipt";
+import { type IntegrationOutcome, integrateTaskIntoRunBranch } from "./runbranch";
 import { signPayload } from "./sign";
 import { readTask, transition, writeTask } from "./task";
 
@@ -20,6 +21,10 @@ export interface VerifyResult {
   durationMs: number;
   receiptPath?: string;
   commitSha?: string;
+  /** Set only on a pass — the outcome of merging this task's commit into its
+   * goal's run branch (see `run-branch-integration`), or `{result: "none"}`
+   * for a task with no goal. */
+  integration?: IntegrationOutcome;
 }
 
 export function verifyTask(
@@ -112,5 +117,11 @@ export function verifyTask(
 
   stageAll(cwd);
   const commitSha = commit(cwd, `sddx(${id}): ${task.task}`);
-  return { verdict: "pass", exitCode, durationMs, receiptPath, commitSha };
+
+  // Automatic — never asked for, per `run-branch-integration`: merging into
+  // the *original target branch* remains a user decision (unchanged), but
+  // merging a verified task into its own goal's disposable run branch is not.
+  const integration = integrateTaskIntoRunBranch(cwd, id);
+
+  return { verdict: "pass", exitCode, durationMs, receiptPath, commitSha, integration };
 }

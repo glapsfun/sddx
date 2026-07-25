@@ -1,7 +1,19 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { resolveReceipt } from "./receipt";
 import { dependsOnList, resolveTaskState, sddxDir, taskId } from "./task";
+
+export type MergeResult = "merged" | "conflict" | "reverted";
+
+export interface MergeEntry {
+  task_id: string;
+  /** The merge (or revert) commit sha on the run branch. Absent for a conflict
+   * entry — nothing landed on the run branch when a merge conflicts. */
+  commit_sha?: string;
+  merged_at?: string;
+  result: MergeResult;
+  /** Set only on a `reverted` entry: the original `merged` entry's commit_sha. */
+  reverts?: string;
+}
 
 export interface Goal {
   id: string;
@@ -11,9 +23,17 @@ export interface Goal {
    * legacy single-string value (the pre-DAG shape) is still readable via
    * `depsList()`. Absent/empty for a goal of all-root tasks. Set by `graph create`. */
   deps?: Record<string, string | string[]>;
+  /** The live integration branch this goal's verified tasks merge into (see
+   * `run-branch-integration`). Named `sddx/run-<id>`, created before any task
+   * worktree, at `base_sha`. */
+  run_branch: string;
+  base_sha: string;
+  /** One entry per integration attempt, in the order they happened. A task can
+   * appear more than once (e.g. `merged` then later `reverted`). */
+  merges: MergeEntry[];
   created_at: string;
   updated_at: string;
-  /** Set once by `sddx pr create` after a successful PR open. */
+  /** Set once by `sddx pr create` after a successful PR/MR open from the run branch. */
   shipped?: { pr_url: string; at: string };
 }
 
@@ -31,21 +51,34 @@ export const goalsDir = (cwd: string): string => join(sddxDir(cwd), "goals");
 export const goalPath = (cwd: string, id: string): string => join(goalsDir(cwd), `${id}.json`);
 
 /** Same UTC-date-plus-slug derivation as `taskId` — collisions with a task id are
- * harmless since goals and tasks live in separate directories and the goal
- * branch carries a `goal-` prefix that keeps branch names distinct. */
+ * harmless since goals and tasks live in separate directories and the run
+ * branch carries a `run-` prefix that keeps branch names distinct. */
 export const goalId = (sentence: string, date = new Date()): string => taskId(sentence, date);
+
+/** `sddx/run-<goalId>` — the goal's live integration branch name. */
+export const runBranchName = (id: string): string => `sddx/run-${id}`;
+
+export interface CreateGoalOptions {
+  deps?: Record<string, string[]>;
+  /** Precomputed goal id, so callers that already derived it (to name the run
+   * branch before any task exists) don't risk a second, possibly different,
+   * derivation if this happens to run across a UTC day boundary. */
+  id?: string;
+  runBranch: string;
+  baseSha: string;
+}
 
 export function createGoal(
   cwd: string,
   goalSentence: string,
   taskIds: string[],
-  deps?: Record<string, string[]>,
+  opts: CreateGoalOptions,
 ): Goal {
   if (taskIds.length === 0) {
     throw new Error("a goal requires at least one task id");
   }
   const now = new Date().toISOString();
-  const id = goalId(goalSentence);
+  const id = opts.id ?? goalId(goalSentence);
   const path = goalPath(cwd, id);
   if (existsSync(path)) throw new Error(`goal ${id} already exists at ${path}`);
   for (const tid of taskIds) {
@@ -57,7 +90,10 @@ export function createGoal(
     id,
     goal: goalSentence,
     task_ids: taskIds,
-    ...(deps && Object.keys(deps).length > 0 ? { deps } : {}),
+    ...(opts.deps && Object.keys(opts.deps).length > 0 ? { deps: opts.deps } : {}),
+    run_branch: opts.runBranch,
+    base_sha: opts.baseSha,
+    merges: [],
     created_at: now,
     updated_at: now,
   };
@@ -69,7 +105,14 @@ export function createGoal(
 export function readGoal(cwd: string, id: string): Goal {
   const path = goalPath(cwd, id);
   if (!existsSync(path)) throw new Error(`no such goal: ${id} (${path})`);
-  return JSON.parse(readFileSync(path, "utf8")) as Goal;
+  const g = JSON.parse(readFileSync(path, "utf8")) as Goal;
+  if (typeof g.run_branch !== "string" || typeof g.base_sha !== "string" || !g.merges) {
+    throw new Error(
+      `goal ${id} (${path}) is missing run_branch/base_sha/merges — written by an ` +
+        "incompatible sddx version; recreate it with the current graph/goal create",
+    );
+  }
+  return g;
 }
 
 export function writeGoal(cwd: string, g: Goal): void {
@@ -77,37 +120,44 @@ export function writeGoal(cwd: string, g: Goal): void {
   writeFileSync(goalPath(cwd, g.id), `${JSON.stringify(g, null, 2)}\n`);
 }
 
-export interface GoalCompleteness {
-  complete: boolean;
-  blocking: Array<{ task_id: string; reason: string }>;
+/** Scans every goal file in `cwd` for one whose `task_ids` includes `taskId` —
+ * the reverse lookup a task needs at verify time to find its own goal (goals
+ * are cross-task and always live in the main checkout, never inside a task's
+ * own worktree, so this always reads from the main repo root). */
+export function findGoalForTask(cwd: string, id: string): Goal | null {
+  const dir = goalsDir(cwd);
+  if (!existsSync(dir)) return null;
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".json")) continue;
+    let g: Goal;
+    try {
+      g = JSON.parse(readFileSync(join(dir, f), "utf8")) as Goal;
+    } catch {
+      continue;
+    }
+    if (g.task_ids.includes(id)) return g;
+  }
+  return null;
 }
 
-/**
- * Re-reads every task fresh at call time — never trusts a goal-time snapshot.
- * All-or-nothing: any task missing, incomplete, or without a passing receipt
- * blocks the whole goal.
- */
-export function checkGoalComplete(cwd: string, id: string): GoalCompleteness {
-  const g = readGoal(cwd, id);
-  const blocking: Array<{ task_id: string; reason: string }> = [];
-  for (const tid of g.task_ids) {
-    const task = resolveTaskState(cwd, tid);
-    if (!task) {
-      blocking.push({ task_id: tid, reason: "task state not found" });
-      continue;
-    }
-    if (task.phase !== "DONE") {
-      blocking.push({ task_id: tid, reason: `phase ${task.phase}` });
-      continue;
-    }
-    const receipt = resolveReceipt(cwd, tid);
-    if (!receipt) {
-      blocking.push({ task_id: tid, reason: "no receipt" });
-      continue;
-    }
-    if (receipt.verdict !== "pass") {
-      blocking.push({ task_id: tid, reason: `receipt verdict ${receipt.verdict}` });
-    }
-  }
-  return { complete: blocking.length === 0, blocking };
+/** A task counts as currently merged if its most recent `merges` entry (in
+ * array order) has `result: "merged"` — a later `reverted` entry supersedes it. */
+export function currentlyMergedTaskIds(g: Goal): string[] {
+  const latestByTask = new Map<string, MergeEntry>();
+  for (const entry of g.merges) latestByTask.set(entry.task_id, entry);
+  return [...latestByTask.values()].filter((e) => e.result === "merged").map((e) => e.task_id);
+}
+
+export interface GoalCounts {
+  merged: number;
+  outstanding: number;
+  total: number;
+}
+
+/** Read-only reporting helper — no gate, no pass/fail. `outstanding` is every
+ * task not currently merged (still in flight, failed, or conflicted), re-read
+ * fresh from `g.merges` rather than any cached snapshot. */
+export function goalCounts(g: Goal): GoalCounts {
+  const merged = currentlyMergedTaskIds(g).length;
+  return { merged, outstanding: g.task_ids.length - merged, total: g.task_ids.length };
 }

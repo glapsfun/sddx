@@ -1,8 +1,17 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checkGoalComplete, createGoal, goalId, readGoal, writeGoal } from "../src/lib/goal";
+import {
+  createGoal,
+  currentlyMergedTaskIds,
+  findGoalForTask,
+  goalCounts,
+  goalId,
+  readGoal,
+  runBranchName,
+  writeGoal,
+} from "../src/lib/goal";
 import type { Receipt } from "../src/lib/receipt";
 import { receiptPath } from "../src/lib/receipt";
 import { parseSpec } from "../src/lib/spec";
@@ -14,11 +23,11 @@ function specFor(sentence: string) {
   ).spec!;
 }
 
-const spec = specFor("Add a Health endpoint");
-
 function tmpCwd(): string {
   return mkdtempSync(join(tmpdir(), "sddx-goal-"));
 }
+
+const RUN_OPTS = { runBranch: "sddx/run-x", baseSha: "0".repeat(40) };
 
 function doneTaskWithReceipt(cwd: string, sentence: string): string {
   let t = createTask(cwd, specFor(sentence), "s", { mode: "none", branch: null, base_sha: "a" });
@@ -64,31 +73,63 @@ describe("goalId", () => {
   });
 });
 
+describe("runBranchName", () => {
+  test("prefixes the goal id with sddx/run-", () => {
+    expect(runBranchName("20260719-ship-it")).toBe("sddx/run-20260719-ship-it");
+  });
+});
+
 describe("createGoal / readGoal / writeGoal", () => {
-  test("persists task ids and round-trips", () => {
+  test("persists task ids, run branch, and base sha, and round-trips", () => {
     const cwd = tmpCwd();
     const id1 = doneTaskWithReceipt(cwd, "Task one");
     const id2 = doneTaskWithReceipt(cwd, "Task two");
-    const g = createGoal(cwd, "Ship both tasks", [id1, id2]);
-    expect(readGoal(cwd, g.id).task_ids).toEqual([id1, id2]);
+    const g = createGoal(cwd, "Ship both tasks", [id1, id2], RUN_OPTS);
+    const back = readGoal(cwd, g.id);
+    expect(back.task_ids).toEqual([id1, id2]);
+    expect(back.run_branch).toBe(RUN_OPTS.runBranch);
+    expect(back.base_sha).toBe(RUN_OPTS.baseSha);
+    expect(back.merges).toEqual([]);
+  });
+
+  test("refuses to read a goal file from an incompatible (pre-run-branch) schema", () => {
+    const cwd = tmpCwd();
+    const id = doneTaskWithReceipt(cwd, "Legacy schema task");
+    const g = createGoal(cwd, "Legacy schema goal", [id], RUN_OPTS);
+    const path = join(cwd, ".sddx", "goals", `${g.id}.json`);
+    const legacy = { id: g.id, goal: g.goal, task_ids: g.task_ids, created_at: g.created_at };
+    writeFileSync(path, `${JSON.stringify(legacy, null, 2)}\n`);
+    expect(() => readGoal(cwd, g.id)).toThrow(/incompatible sddx version/);
   });
 
   test("refuses when a listed task doesn't exist", () => {
     const cwd = tmpCwd();
-    expect(() => createGoal(cwd, "Ship a ghost task", ["no-such-task"])).toThrow(/does not exist/);
+    expect(() => createGoal(cwd, "Ship a ghost task", ["no-such-task"], RUN_OPTS)).toThrow(
+      /does not exist/,
+    );
   });
 
   test("refuses a duplicate goal id", () => {
     const cwd = tmpCwd();
     const id = doneTaskWithReceipt(cwd, "Same goal sentence twice");
-    createGoal(cwd, "Same goal sentence twice", [id]);
-    expect(() => createGoal(cwd, "Same goal sentence twice", [id])).toThrow(/already exists/);
+    createGoal(cwd, "Same goal sentence twice", [id], RUN_OPTS);
+    expect(() => createGoal(cwd, "Same goal sentence twice", [id], RUN_OPTS)).toThrow(
+      /already exists/,
+    );
+  });
+
+  test("accepts a precomputed id instead of re-deriving it", () => {
+    const cwd = tmpCwd();
+    const id = doneTaskWithReceipt(cwd, "Precomputed id goal");
+    const g = createGoal(cwd, "Precomputed id goal", [id], { ...RUN_OPTS, id: "custom-id" });
+    expect(g.id).toBe("custom-id");
+    expect(readGoal(cwd, "custom-id").id).toBe("custom-id");
   });
 
   test("writeGoal bumps updated_at and persists a shipped marker", () => {
     const cwd = tmpCwd();
     const id = doneTaskWithReceipt(cwd, "Ship marker roundtrip");
-    const g = createGoal(cwd, "Ship marker roundtrip", [id]);
+    const g = createGoal(cwd, "Ship marker roundtrip", [id], RUN_OPTS);
     g.shipped = { pr_url: "https://github.com/org/repo/pull/9", at: new Date().toISOString() };
     writeGoal(cwd, g);
     const back = readGoal(cwd, g.id);
@@ -96,64 +137,63 @@ describe("createGoal / readGoal / writeGoal", () => {
   });
 });
 
-describe("checkGoalComplete", () => {
-  test("complete when every task is DONE with a passing receipt", () => {
+describe("findGoalForTask", () => {
+  test("finds the goal listing a task", () => {
     const cwd = tmpCwd();
-    const id1 = doneTaskWithReceipt(cwd, "Complete task one");
-    const id2 = doneTaskWithReceipt(cwd, "Complete task two");
-    const g = createGoal(cwd, "Complete goal", [id1, id2]);
-    const res = checkGoalComplete(cwd, g.id);
-    expect(res.complete).toBe(true);
-    expect(res.blocking).toEqual([]);
+    const id = doneTaskWithReceipt(cwd, "Findable task");
+    const g = createGoal(cwd, "Findable goal", [id], RUN_OPTS);
+    expect(findGoalForTask(cwd, id)?.id).toBe(g.id);
   });
 
-  test("blocks on a task that isn't DONE yet, naming its phase", () => {
+  test("returns null for a task in no goal", () => {
     const cwd = tmpCwd();
-    const done = doneTaskWithReceipt(cwd, "Finished task");
-    const pending = createTask(cwd, spec, "s", { mode: "none", branch: null, base_sha: "a" });
-    const g = createGoal(cwd, "Mixed goal", [done, pending.id]);
-    const res = checkGoalComplete(cwd, g.id);
-    expect(res.complete).toBe(false);
-    expect(res.blocking).toEqual([{ task_id: pending.id, reason: "phase PLAN" }]);
+    const id = doneTaskWithReceipt(cwd, "Solo task, no goal");
+    expect(findGoalForTask(cwd, id)).toBeNull();
   });
 
-  test("blocks on a DONE task with no receipt", () => {
+  test("returns null when no goals directory exists yet", () => {
     const cwd = tmpCwd();
-    let t = createTask(cwd, spec, "s", { mode: "none", branch: null, base_sha: "a" });
-    t = transition(t, "RED", { testExit: 1 });
-    t = transition(t, "GREEN", { testExit: 0 });
-    t = transition(t, "VERIFY");
-    t = transition(t, "DONE", { internal: true });
-    writeTask(cwd, t);
-    const g = createGoal(cwd, "Receiptless goal", [t.id]);
-    const res = checkGoalComplete(cwd, g.id);
-    expect(res.complete).toBe(false);
-    expect(res.blocking).toEqual([{ task_id: t.id, reason: "no receipt" }]);
+    expect(findGoalForTask(cwd, "anything")).toBeNull();
+  });
+});
+
+describe("currentlyMergedTaskIds / goalCounts", () => {
+  test("counts a merged task once, and excludes an unmerged one", () => {
+    const cwd = tmpCwd();
+    const id1 = doneTaskWithReceipt(cwd, "Merged task");
+    const id2 = doneTaskWithReceipt(cwd, "Unmerged task");
+    const g = createGoal(cwd, "Partial goal", [id1, id2], RUN_OPTS);
+    g.merges.push({ task_id: id1, commit_sha: "a".repeat(40), merged_at: "now", result: "merged" });
+    writeGoal(cwd, g);
+    const back = readGoal(cwd, g.id);
+    expect(currentlyMergedTaskIds(back)).toEqual([id1]);
+    expect(goalCounts(back)).toEqual({ merged: 1, outstanding: 1, total: 2 });
   });
 
-  test("blocks and names a task deleted after the goal was created", () => {
+  test("a later revert removes a task from the merged count", () => {
     const cwd = tmpCwd();
-    const id = doneTaskWithReceipt(cwd, "Task to be deleted");
-    const g = createGoal(cwd, "Drifted goal", [id]);
-    // simulate the task file vanishing (manual cleanup outside sddx)
-    rmSync(join(cwd, ".sddx", "tasks", `${id}.json`));
-    const res = checkGoalComplete(cwd, g.id);
-    expect(res.complete).toBe(false);
-    expect(res.blocking).toEqual([{ task_id: id, reason: "task state not found" }]);
+    const id = doneTaskWithReceipt(cwd, "Reverted task");
+    const g = createGoal(cwd, "Reverted goal", [id], RUN_OPTS);
+    g.merges.push({ task_id: id, commit_sha: "a".repeat(40), merged_at: "t1", result: "merged" });
+    g.merges.push({
+      task_id: id,
+      commit_sha: "b".repeat(40),
+      merged_at: "t2",
+      result: "reverted",
+      reverts: "a".repeat(40),
+    });
+    writeGoal(cwd, g);
+    const back = readGoal(cwd, g.id);
+    expect(currentlyMergedTaskIds(back)).toEqual([]);
+    expect(goalCounts(back)).toEqual({ merged: 0, outstanding: 1, total: 1 });
   });
 
-  test("re-reads fresh at call time, not from a goal-time snapshot", () => {
+  test("a conflict entry never counts as merged", () => {
     const cwd = tmpCwd();
-    const id = doneTaskWithReceipt(cwd, "Freshly re-read task");
-    const g = createGoal(cwd, "Fresh read goal", [id]);
-    expect(checkGoalComplete(cwd, g.id).complete).toBe(true);
-    // task gets abandoned after goal creation — the gate must reflect that
-    const path = join(cwd, ".sddx", "tasks", `${id}.json`);
-    const t = JSON.parse(readFileSync(path, "utf8"));
-    t.phase = "ABANDONED";
-    writeFileSync(path, `${JSON.stringify(t, null, 2)}\n`);
-    const res = checkGoalComplete(cwd, g.id);
-    expect(res.complete).toBe(false);
-    expect(res.blocking).toEqual([{ task_id: id, reason: "phase ABANDONED" }]);
+    const id = doneTaskWithReceipt(cwd, "Conflicted task");
+    const g = createGoal(cwd, "Conflicted goal", [id], RUN_OPTS);
+    g.merges.push({ task_id: id, result: "conflict" });
+    writeGoal(cwd, g);
+    expect(goalCounts(readGoal(cwd, g.id))).toEqual({ merged: 0, outstanding: 1, total: 1 });
   });
 });

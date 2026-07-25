@@ -25,6 +25,9 @@ phases, the same spec, the same oracle. Only the isolation mechanism
 changes: branch mode works sequentially on `sddx/<id>` in the main checkout
 instead of a separate directory, so two branch-mode tasks in the same repo
 do compound if worked on out of order — finish one before starting the next.
+Run-branch integration (see [ship-a-goal-as-a-pr.md](ship-a-goal-as-a-pr.md))
+works the same way too — `sddx verify` still merges a passing branch-mode
+task into its goal's run branch automatically.
 
 ## Dependent materialization in branch mode
 

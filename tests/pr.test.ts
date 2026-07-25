@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { headSha } from "../src/lib/git";
-import { createGoal, readGoal } from "../src/lib/goal";
+import { join, relative } from "node:path";
+import { createBranchAt } from "../src/lib/git";
+import { createGoal, goalId, readGoal, runBranchName } from "../src/lib/goal";
 import { createGoalPr } from "../src/lib/pr";
-import { goalBranchName } from "../src/lib/prbranch";
 import { parseSpec } from "../src/lib/spec";
-import { createTask, taskId, transition, writeTask } from "../src/lib/task";
+import { createTask, readTask, taskId, transition, writeTask } from "../src/lib/task";
 import { verifyTask } from "../src/lib/verify";
+import { createWorktree, resolveBaseRef } from "../src/lib/worktree";
 import { fixtureClone } from "./fixtures";
 
 const g = (cwd: string, ...args: string[]) => {
@@ -18,36 +18,49 @@ const g = (cwd: string, ...args: string[]) => {
   return r.stdout.trim();
 };
 
-function branchExists(cwd: string, branch: string): boolean {
-  return (
-    spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`], { cwd })
-      .status === 0
-  );
-}
-
-/** A real DONE task with a real verified receipt on its own branch — same
- * invariants `sddx verify` produces, not a hand-crafted fixture. */
-function realDoneTask(cwd: string, sentence: string, file: string): string {
+/** Registers a worktree-mode task forked from `mainCwd`'s resolved base ref —
+ * the default path, and the only mode where the main checkout (home of the
+ * goal file) is never disturbed by a task's own branch/commits. */
+function registerTask(mainCwd: string, sentence: string): { id: string; wtPath: string } {
   const spec = parseSpec(
     `task: ${sentence}\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\n`,
   ).spec!;
   const id = taskId(spec.task);
-  g(cwd, "switch", "-c", `sddx/${id}`);
-  let t = createTask(cwd, spec, ".sddx/specs/x.yaml", {
-    mode: "branch",
+  const base = resolveBaseRef(mainCwd);
+  const wtPath = createWorktree(mainCwd, id, base.sha);
+  createTask(wtPath, spec, ".sddx/specs/x.yaml", {
+    mode: "worktree",
     branch: `sddx/${id}`,
-    base_sha: headSha(cwd),
+    base_sha: base.sha,
+    path: relative(mainCwd, wtPath),
   });
+  return { id, wtPath };
+}
+
+/** Creates a goal and its run branch up front — required order for
+ * run-branch-integration: the goal must exist before a listed task's own
+ * `verifyTask` call, so the automatic merge step can find it. */
+function registerGoal(mainCwd: string, sentence: string, taskIds: string[]) {
+  const base = resolveBaseRef(mainCwd);
+  const gid = goalId(sentence);
+  const runBranch = runBranchName(gid);
+  createBranchAt(mainCwd, runBranch, base.sha);
+  return createGoal(mainCwd, sentence, taskIds, { id: gid, runBranch, baseSha: base.sha });
+}
+
+/** Drives an already-registered task through RED→GREEN→VERIFY and verifies
+ * it — a real DONE task with a real receipt. If the task's goal already
+ * exists, this also merges it into the run branch automatically. */
+function completeTask(wtPath: string, id: string, file: string): void {
+  let t = readTask(wtPath, id);
   t = transition(t, "RED", { testExit: 1 });
   t = transition(t, "GREEN", { testExit: 0 });
   t = transition(t, "VERIFY");
   t.evidence.oracle_red = { exit_code: 1, at: new Date(0).toISOString() };
-  writeTask(cwd, t);
-  writeFileSync(join(cwd, file), `${id}\n`);
-  const res = verifyTask(cwd, id, { pluginVersion: "0.0.1" });
+  writeTask(wtPath, t);
+  writeFileSync(join(wtPath, file), `${id}\n`);
+  const res = verifyTask(wtPath, id, { pluginVersion: "0.0.1" });
   if (res.verdict !== "pass") throw new Error(`fixture task ${id} failed to verify`);
-  g(cwd, "switch", "main");
-  return id;
 }
 
 function configurePrHost(cwd: string): void {
@@ -57,7 +70,7 @@ function configurePrHost(cwd: string): void {
 
 function fakeGh(
   binDir: string,
-  opts: { authExit?: number; openExit?: number; openOut?: string },
+  opts: { authExit?: number; openExit?: number; openOut?: string; existingPrUrl?: string },
 ): void {
   const authExit = opts.authExit ?? 0;
   const openExit = opts.openExit ?? 0;
@@ -70,7 +83,12 @@ function fakeGh(
       '  echo "auth status"',
       `  exit ${authExit}`,
       "fi",
+      'if [ "$1" = "pr" ] && [ "$2" = "view" ]; then',
+      opts.existingPrUrl ? `  echo '{"url":"${opts.existingPrUrl}"}'\n  exit 0` : "  exit 1",
+      "fi",
       'if [ "$1" = "pr" ]; then',
+      // record the full argv (one per line) so tests can inspect --body content
+      `  printf '%s\\n' "$@" > "${binDir}/gh-args.txt"`,
       `  echo "${openOut}"`,
       `  exit ${openExit}`,
       "fi",
@@ -94,123 +112,132 @@ describe("createGoalPr", () => {
     process.env.PATH = originalPath;
   });
 
-  test("full path: two-task goal ships with markers on both tasks and the goal", () => {
+  test("full path: two-task goal ships with a real merge history and a receipt-derived body", () => {
     const { clone } = fixtureClone();
     fakeGh(binDir, {});
 
-    const id1 = realDoneTask(clone, "First shipped task", "a.txt");
-    const id2 = realDoneTask(clone, "Second shipped task", "b.txt");
-    // written on "main" after both task branches exist — writing it earlier
-    // would just get swept away by each task branch's own `switch` roundtrip
+    const t1 = registerTask(clone, "First shipped task");
+    const t2 = registerTask(clone, "Second shipped task");
     configurePrHost(clone);
-    const goal = createGoal(clone, "Ship both tasks together", [id1, id2]);
+    const goal = registerGoal(clone, "Ship both tasks together", [t1.id, t2.id]);
+
+    completeTask(t1.wtPath, t1.id, "a.txt");
+    completeTask(t2.wtPath, t2.id, "b.txt");
 
     const res = createGoalPr(clone, goal.id);
     expect(res.prUrl).toBe("https://github.com/org/repo/pull/1");
-    expect(res.taskIds).toEqual([id1, id2]);
-    expect(res.branch).toBe(goalBranchName(goal.id));
+    expect(res.taskIds).toEqual([t1.id, t2.id]);
+    expect(res.branch).toBe(goal.run_branch);
 
-    for (const id of [id1, id2]) {
-      const raw = g(clone, "show", `sddx/${id}:.sddx/tasks/${id}.json`);
-      const shipped = JSON.parse(raw).shipped;
-      expect(shipped.goal_id).toBe(goal.id);
-      expect(shipped.pr_url).toBe(res.prUrl);
-    }
+    // real merges, not a reconstruction — both files present on the run branch
+    expect(g(clone, "cat-file", "-e", `${goal.run_branch}:a.txt`)).toBe("");
+    expect(g(clone, "cat-file", "-e", `${goal.run_branch}:b.txt`)).toBe("");
+
     expect(readGoal(clone, goal.id).shipped?.pr_url).toBe(res.prUrl);
-
     const remoteBranches = g(clone, "ls-remote", "--heads", "origin");
-    expect(remoteBranches).toContain(res.branch);
+    expect(remoteBranches).toContain(goal.run_branch);
 
-    // the temp goal worktree is cleaned up, only task branches' worktrees (none, in branch mode) remain
-    expect(g(clone, "worktree", "list", "--porcelain")).not.toContain(`goal-${goal.id}`);
+    const argv = readFileSync(join(binDir, "gh-args.txt"), "utf8");
+    expect(argv).toContain(`--head\n${goal.run_branch}`);
+    expect(argv).toContain(`\`${t1.id}\``);
+    expect(argv).toContain(`\`${t2.id}\``);
+    expect(argv).toContain("2 of 2 task(s) merged");
+  });
+
+  test("PR opens from a partially-merged run — body lists only merged tasks and states the outstanding count", () => {
+    const { clone } = fixtureClone();
+    fakeGh(binDir, {});
+
+    const t1 = registerTask(clone, "Merged task only");
+    const t2 = registerTask(clone, "Still-in-flight task");
+    configurePrHost(clone);
+    const goal = registerGoal(clone, "Partial goal", [t1.id, t2.id]);
+
+    completeTask(t1.wtPath, t1.id, "a.txt");
+    // t2 is left registered but never verified — never merges
+
+    const res = createGoalPr(clone, goal.id);
+    expect(res.taskIds).toEqual([t1.id]);
+
+    const argv = readFileSync(join(binDir, "gh-args.txt"), "utf8");
+    expect(argv).toContain(`\`${t1.id}\``);
+    expect(argv).not.toContain(`\`${t2.id}\``);
+    expect(argv).toContain("1 of 2 task(s) merged");
+    expect(argv).toContain("1 outstanding");
   });
 
   test("refuses to re-run on an already-shipped goal instead of opening a duplicate PR", () => {
     const { clone } = fixtureClone();
     fakeGh(binDir, {});
 
-    const id = realDoneTask(clone, "Shipped once already", "a.txt");
+    const t = registerTask(clone, "Shipped once already");
     configurePrHost(clone);
-    const goal = createGoal(clone, "Ship exactly once", [id]);
+    const goal = registerGoal(clone, "Ship exactly once", [t.id]);
+    completeTask(t.wtPath, t.id, "a.txt");
 
     const first = createGoalPr(clone, goal.id);
     expect(first.prUrl).toBe("https://github.com/org/repo/pull/1");
 
     expect(() => createGoalPr(clone, goal.id)).toThrow(/already shipped/);
-    // no second goal branch was pushed
-    const remoteBranches = g(clone, "ls-remote", "--heads", "origin");
-    expect(
-      remoteBranches.split("\n").filter((l) => l.includes(goalBranchName(goal.id))),
-    ).toHaveLength(1);
   });
 
-  test("a push failure cleans up the goal worktree so a retry isn't blocked", () => {
+  test("refuses a duplicate PR the host already knows about, even without a local shipped marker", () => {
     const { clone } = fixtureClone();
-    const id = realDoneTask(clone, "Task whose push will fail", "a.txt");
-    const goal = createGoal(clone, "Push failure goal", [id]);
+    // no local `shipped` marker at all — simulates it being lost (e.g. the
+    // goal file, deliberately never committed, wiped by a stray `git clean`)
+    fakeGh(binDir, { existingPrUrl: "https://github.com/org/repo/pull/42" });
 
-    const realOrigin = g(clone, "remote", "get-url", "origin");
-    spawnSync("git", ["remote", "set-url", "origin", "/nonexistent/path/nope.git"], { cwd: clone });
-
-    expect(() => createGoalPr(clone, goal.id)).toThrow();
-    // the worktree must not survive a failed push — otherwise a retry's own
-    // `git worktree add` for the same path would fail
-    expect(g(clone, "worktree", "list", "--porcelain")).not.toContain(`goal-${goal.id}`);
-
-    // fix the remote and retry — must succeed despite the leftover local
-    // branch from the failed attempt (buildGoalBranch always starts over)
-    spawnSync("git", ["remote", "set-url", "origin", realOrigin], { cwd: clone });
+    const t = registerTask(clone, "Already has a PR on the host");
     configurePrHost(clone);
-    fakeGh(binDir, {});
-    const res = createGoalPr(clone, goal.id);
-    expect(res.prUrl).toBe("https://github.com/org/repo/pull/1");
+    const goal = registerGoal(clone, "Host already knows", [t.id]);
+    completeTask(t.wtPath, t.id, "a.txt");
+
+    expect(() => createGoalPr(clone, goal.id)).toThrow(/already has an open PR.*pull\/42/);
+    const remoteBranches = g(clone, "ls-remote", "--heads", "origin");
+    expect(remoteBranches).not.toContain(goal.run_branch);
   });
 
-  test("refuses an incomplete goal with no side effects", () => {
-    const { clone } = fixtureClone();
-    // no pr_host config needed — the completeness gate runs before host resolution
-
-    const done = realDoneTask(clone, "Only finished task", "a.txt");
-    const pending = createTask(
-      clone,
-      parseSpec(
-        "task: still planning\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: t\n",
-      ).spec!,
-      "s",
-      {
-        mode: "none",
-        branch: null,
-        base_sha: "a",
-      },
-    );
-    const goal = createGoal(clone, "Mixed readiness goal", [done, pending.id]);
-
-    expect(() => createGoalPr(clone, goal.id)).toThrow(/not complete/);
-    expect(branchExists(clone, goalBranchName(goal.id))).toBe(false);
-    expect(g(clone, "ls-remote", "--heads", "origin")).not.toContain(goalBranchName(goal.id));
-  });
-
-  test("refuses when the host backend isn't authenticated, before any git mutation", () => {
+  test("refuses when the host backend isn't authenticated, before any push", () => {
     const { clone } = fixtureClone();
     fakeGh(binDir, { authExit: 1 });
 
-    const id = realDoneTask(clone, "Auth failure task", "a.txt");
+    const t = registerTask(clone, "Auth failure task");
     configurePrHost(clone);
-    const goal = createGoal(clone, "Auth failure goal", [id]);
+    const goal = registerGoal(clone, "Auth failure goal", [t.id]);
+    completeTask(t.wtPath, t.id, "a.txt");
 
     expect(() => createGoalPr(clone, goal.id)).toThrow(/not authenticated/);
-    expect(branchExists(clone, goalBranchName(goal.id))).toBe(false);
-    expect(g(clone, "ls-remote", "--heads", "origin")).not.toContain(goalBranchName(goal.id));
+    expect(g(clone, "ls-remote", "--heads", "origin")).not.toContain(goal.run_branch);
   });
 
   test("refuses on an ambiguous host with no pr_host configured", () => {
     const { clone } = fixtureClone();
     // deliberately no configurePrHost() — origin is a local bare path, matches no known host
 
-    const id = realDoneTask(clone, "Ambiguous host task", "a.txt");
-    const goal = createGoal(clone, "Ambiguous host goal", [id]);
+    const t = registerTask(clone, "Ambiguous host task");
+    const goal = registerGoal(clone, "Ambiguous host goal", [t.id]);
+    completeTask(t.wtPath, t.id, "a.txt");
 
     expect(() => createGoalPr(clone, goal.id)).toThrow(/pr_host/);
-    expect(branchExists(clone, goalBranchName(goal.id))).toBe(false);
+    expect(g(clone, "ls-remote", "--heads", "origin")).not.toContain(goal.run_branch);
+  });
+
+  test("a push failure leaves the goal unshipped, safe to retry once the remote is fixed", () => {
+    const { clone } = fixtureClone();
+    const t = registerTask(clone, "Task whose push will fail");
+    configurePrHost(clone);
+    const goal = registerGoal(clone, "Push failure goal", [t.id]);
+    completeTask(t.wtPath, t.id, "a.txt");
+
+    const realOrigin = g(clone, "remote", "get-url", "origin");
+    spawnSync("git", ["remote", "set-url", "origin", "/nonexistent/path/nope.git"], { cwd: clone });
+
+    expect(() => createGoalPr(clone, goal.id)).toThrow();
+    expect(readGoal(clone, goal.id).shipped).toBeUndefined();
+
+    spawnSync("git", ["remote", "set-url", "origin", realOrigin], { cwd: clone });
+    fakeGh(binDir, {});
+    const res = createGoalPr(clone, goal.id);
+    expect(res.prUrl).toBe("https://github.com/org/repo/pull/1");
   });
 });

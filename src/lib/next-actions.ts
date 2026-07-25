@@ -17,7 +17,11 @@ import {
   stageAll,
   upstreamBranch,
 } from "./git";
+import { currentlyMergedTaskIds, readGoal } from "./goal";
+import { createGoalPr } from "./pr";
 import { resolveBackend } from "./prhost";
+import { revertTaskMerge } from "./runbranch";
+import { resolveTaskState } from "./task";
 import { isDirty } from "./worktree";
 
 export type RepoState = "uncommitted" | "committed-unpushed" | "pushed-no-pr" | "pr-open";
@@ -366,4 +370,178 @@ export function resolveSelection(input: string, visible: Action[]): SelectionRes
   if (matches.length === 1) return matches[0] as Action;
   if (matches.length > 1) return { error: "ambiguous" };
   return { error: "not-found" };
+}
+
+// --- Run-scoped menu (end of `/sddx:run`, keyed to a goal's run branch) ---
+//
+// The per-task menu above answers "what can I do with the branch I'm
+// currently on"; this answers "what can I do with the run this goal just
+// produced" — review the combined diff, retry/revert individual tasks, ship
+// or land the run branch. It reuses `renderMenu`/`resolveSelection` (both
+// operate on any `Action[]`) rather than the static `CATALOG`/`RepoState`
+// machinery above, since the action set here is built per-task (one "revert"
+// per currently-merged task, one "retry" per failed one), not a fixed list
+// filtered by a single state value.
+
+export interface RunDetectedState {
+  goalId: string;
+  runBranch: string;
+  baseSha: string;
+  targetBranch: string;
+  mergedTaskIds: string[];
+  failedTaskIds: string[];
+  outstandingTaskIds: string[];
+  shipped: { pr_url: string; at: string } | null;
+}
+
+/** Reads the goal fresh (never a cached snapshot) and classifies every listed
+ * task as merged, failed (ABANDONED), or still outstanding (in flight, or its
+ * merge conflicted). */
+export function detectRunState(cwd: string, goalId: string): RunDetectedState {
+  const goal = readGoal(cwd, goalId);
+  const merged = currentlyMergedTaskIds(goal);
+  const failed = goal.task_ids.filter((id) => {
+    if (merged.includes(id)) return false;
+    return resolveTaskState(cwd, id)?.phase === "ABANDONED";
+  });
+  const outstanding = goal.task_ids.filter((id) => !merged.includes(id) && !failed.includes(id));
+  return {
+    goalId: goal.id,
+    runBranch: goal.run_branch,
+    baseSha: goal.base_sha,
+    targetBranch: defaultBranch(cwd),
+    mergedTaskIds: merged,
+    failedTaskIds: failed,
+    outstandingTaskIds: outstanding,
+    shipped: goal.shipped ?? null,
+  };
+}
+
+/** Builds the run-scoped action list for `state` — dynamic per-task revert
+ * and retry entries, plus the fixed run-level actions, each already filtered
+ * to what's currently valid (e.g. no "create PR" until something has merged). */
+export function runActions(cwd: string, state: RunDetectedState): Action[] {
+  const actions: Action[] = [
+    {
+      id: "review",
+      label: "Review Changes",
+      category: "quality",
+      validIn: [],
+      implemented: true,
+      run(cwd, ctx) {
+        const diff = git(cwd, "diff", `${state.baseSha}...${ctx.branch}`);
+        return { ok: true, message: diff || "(no changes)" };
+      },
+    },
+  ];
+
+  for (const taskId of state.failedTaskIds) {
+    actions.push({
+      id: `retry-${taskId}`,
+      label: `Retry ${taskId}`,
+      category: "development",
+      validIn: [],
+      aliases: [`retry ${taskId}`],
+      implemented: true,
+      run() {
+        return {
+          ok: true,
+          message:
+            `${taskId} is ABANDONED (retry budget exhausted) — re-plan and dispatch a fresh ` +
+            "attempt for it; the rest of the run is unaffected",
+        };
+      },
+    });
+  }
+
+  for (const taskId of state.mergedTaskIds) {
+    actions.push({
+      id: `revert-${taskId}`,
+      label: `Revert ${taskId}`,
+      category: "git",
+      validIn: [],
+      aliases: [`revert ${taskId}`],
+      implemented: true,
+      run(cwd) {
+        const sha = revertTaskMerge(cwd, state.goalId, taskId);
+        return { ok: true, message: `reverted ${taskId}'s merge (${sha})` };
+      },
+    });
+  }
+
+  // Excludes `.sddx/goals` — same pathspec `stageAll` itself uses — so an
+  // eternally-untracked goal file (never committed by design) doesn't make
+  // this look dirty when there's genuinely nothing else to commit.
+  if (git(cwd, "status", "--porcelain", "--", ".", ":!.sddx/goals") !== "") {
+    actions.push({
+      id: "commit-remaining",
+      label: "Commit Remaining Changes",
+      category: "git",
+      validIn: [],
+      implemented: true,
+      run(cwd) {
+        stageAll(cwd);
+        if (git(cwd, "diff", "--cached", "--name-only") === "") {
+          return { ok: false, message: "nothing to commit" };
+        }
+        const sha = commit(cwd, "sddx: checkpoint");
+        return { ok: true, message: `committed ${sha}` };
+      },
+    });
+  }
+
+  actions.push({
+    id: "push-run-branch",
+    label: "Push Run Branch",
+    category: "git",
+    validIn: [],
+    implemented: true,
+    run(cwd, ctx) {
+      push(cwd, ctx.branch);
+      return { ok: true, message: `pushed ${ctx.branch}` };
+    },
+  });
+
+  if (state.mergedTaskIds.length > 0 && !state.shipped) {
+    actions.push({
+      id: "create-pr",
+      label: "Create PR/MR",
+      category: "git",
+      validIn: [],
+      aliases: ["create pull request", "create merge request", "open pr", "open mr"],
+      implemented: true,
+      run(cwd) {
+        const res = createGoalPr(cwd, state.goalId);
+        return { ok: true, message: `opened ${res.prUrl}` };
+      },
+    });
+  }
+
+  if (state.mergedTaskIds.length > 0) {
+    actions.push({
+      id: "merge-to-target",
+      label: "Merge Into Target Branch",
+      category: "git",
+      validIn: [],
+      implemented: true,
+      run(cwd, ctx) {
+        git(cwd, "switch", state.targetBranch);
+        git(cwd, "merge", "--no-ff", "-m", `sddx: merge ${ctx.branch}`, ctx.branch);
+        return { ok: true, message: `merged ${ctx.branch} into ${state.targetBranch}` };
+      },
+    });
+  }
+
+  actions.push({
+    id: "exit",
+    label: "Exit",
+    category: "other",
+    validIn: [],
+    implemented: true,
+    run() {
+      return { ok: true, message: "session ended" };
+    },
+  });
+
+  return actions;
 }

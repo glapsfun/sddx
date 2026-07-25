@@ -17,6 +17,13 @@ export const createBranch = (cwd: string, name: string): void => {
   git(cwd, "switch", "-c", name);
 };
 
+/** Creates `name` at `sha` without checking it out — for branches (like a run
+ * branch) that must exist without disturbing whatever `cwd` currently has
+ * checked out. */
+export const createBranchAt = (cwd: string, name: string, sha: string): void => {
+  git(cwd, "branch", name, sha);
+};
+
 export function branchExists(cwd: string, name: string): boolean {
   const r = spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${name}`], {
     cwd,
@@ -81,8 +88,15 @@ export const push = (cwd: string, branch: string): void => {
   git(cwd, "push", "-u", "origin", branch);
 };
 
+/** `.sddx/goals/` is cross-task state that lives in the main checkout "by
+ * definition" (see `run-orchestration`) — never inside any single task's own
+ * commit. In worktree mode this exclusion is moot (a task's worktree is a
+ * separate directory that never contains the goals folder at all), but in
+ * branch mode the task's workspace *is* the shared checkout, so an
+ * indiscriminate `add -A` would otherwise sweep up a goal file that happens
+ * to be sitting there and bury it inside the task's own branch. */
 export const stageAll = (cwd: string): void => {
-  git(cwd, "add", "-A");
+  git(cwd, "add", "-A", "--", ".", ":!.sddx/goals");
 };
 
 /** Stages exactly one path — unlike `stageAll`, safe to call in a shared

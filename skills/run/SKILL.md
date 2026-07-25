@@ -46,23 +46,30 @@ skill's own judgment.
    `... graph create --graph .sddx/drafts/<date>-<goal-slug>-graph.yaml`
    This is the gate: it validates every oracle, the DAG (cycle-free, and
    **overlap ⟹ ordered** across every unordered pair — including fan-in
-   co-parents), and every `on_dependency_failure`/`retry` value, then writes
-   all task files (worktrees forked from origin/HEAD for roots; dependents
-   deferred) and `.sddx/goals/<goal-id>.json` with its edges — or writes
-   **nothing** and names the offending node. Auto downgrades to branch mode
-   (one notice) when worktrees are unsafe. Record the printed alias→id map and
-   goal id.
+   co-parents), and every `on_dependency_failure`/`retry` value, then creates
+   the goal's run branch (`sddx/run-<goal-id>`, forked from the resolved
+   `origin/HEAD`) and writes all task files (worktrees forked from that same
+   run branch for roots; dependents deferred) and `.sddx/goals/<goal-id>.json`
+   with its edges — or writes **nothing** and names the offending node. Auto
+   downgrades to branch mode (one notice) when worktrees are unsafe. Record
+   the printed alias→id map, goal id, and run branch name.
 4. **Execute as a fan-in-aware chain-walk** — dispatch a `tdd-executor` for
    every **ready** task (a root, or one whose parents are *all* DONE) in a
    single message, each given its task id and worktree path. Executors never
    leave their worktree and run `... red-check <id>` once RED is recorded,
    before implementing.
 5. **Verify and advance** — per finished task, dispatch a `verifier` (only
-   `sddx verify` sets DONE and writes the receipt). Each dispatched verifier
-   follows /sddx:verify, which on a pass runs `... next-actions` inside that
-   task's own worktree/branch and relays it — so each task gets the same
-   deterministic hand-off /sddx:quick uses, scoped to its own branch. When
-   every parent of a child reaches DONE, materialize it with
+   `sddx verify` sets DONE and writes the receipt). On a pass, `sddx verify`
+   also merges the task's commit into the goal's run branch automatically, as
+   part of the same command — no separate ask; this is the one exception to
+   "merging is the user's decision" (see Rules), scoped to the disposable run
+   branch only, never the target branch. A merge conflict here is reported,
+   not silently resolved: the task keeps its DONE phase and receipt, but is
+   flagged as verified-and-not-yet-integrated. Each dispatched verifier
+   follows /sddx:verify, which on a pass also runs `... next-actions` inside
+   that task's own worktree/branch and relays it — so each task still gets the
+   same deterministic hand-off /sddx:quick uses, scoped to its own branch.
+   When every parent of a child reaches DONE, materialize it with
    `... task materialize <child-id>` — forks from its sole parent's commit, or
    sequentially merges every parent's commit for a fan-in child (safe by
    construction: the graph gate already proved their scopes disjoint) — then
@@ -78,12 +85,17 @@ skill's own judgment.
    `skipped-on-<id>`) and receipt references come from the same board data
    that `.sddx/BOARD.md` is built from, so the report and the committed board
    can never disagree. Prefer `--output json` instead when relaying to another
-   tool/agent rather than a human. Then run `... sweep` to clear disposable
-   leftovers (it skips anything dirty or unverified, loudly). `next-actions`
-   is single-branch and doesn't know about goals, so it isn't run here: if
-   every non-skipped task is DONE, mention that `sddx pr create --goal
-   <goal-id>` will open one PR for the whole goal — but offer it, never run it
-   unasked.
+   tool/agent rather than a human. Then run
+   `... run report --goal <goal-id>` and relay it — the run branch name, the
+   target branch (unchanged), merged/failed/outstanding counts, a diff
+   summary, and the review commands (`git switch`, `git diff`, `git log`).
+   This is meaningful even when the goal is only partially done: the run
+   branch already reflects whatever verified so far. Then run
+   `... next-actions --goal <goal-id>` and relay its menu — review, retry a
+   failed task, revert one task's merge, commit remaining changes, push the
+   run branch, create a PR/MR, merge into the target branch, exit — offer it,
+   never act on it unasked. Finally run `... sweep` to clear disposable
+   leftovers (it skips anything dirty or unverified, loudly).
 
 ## Resume
 
@@ -100,16 +112,24 @@ anything and act only on what it reports as Ready.
 
 ## Rules
 
-- Merging `sddx/<id>` branches back, and opening a PR for the goal, are the
-  **user's** decision. Offer either; never do it unasked.
+- Merging into the **original target branch** — and pushing or merging
+  anything to it — is always the **user's** decision; nothing here ever does
+  either automatically. Merging a *verified* task into its own goal's
+  disposable run branch is different: `sddx verify` does that automatically,
+  by design, since the run branch is sddx's own scratch integration surface,
+  not the user's branch. Pushing the run branch, opening a PR/MR from it, or
+  merging it into the target branch are, in turn, the user's decision again —
+  offer via the run-scoped Next Actions menu; never do any of them unasked.
 - A task that exhausts its spec's `stop_rules` (default max_iterations) and
   has no retry budget left stops and is reported ABANDONED — escalate to the
   human, don't loop forever. (A task with `retry.max_attempts` > 1 gets
   additional automatic attempts before that happens — see `retryWorkspace`.)
 - Never dispatch two tasks whose specs touch the same files; re-decompose
-  instead. This isn't just a parallel-safety rule — it's also what keeps a
-  later `pr create`'s cherry-picks conflict-free.
+  instead. This isn't just a parallel-safety rule — it's also what keeps each
+  task's automatic merge into the run branch conflict-free.
 - State lives in `.sddx/` inside each task's own workspace and merges without
   conflict — one file per task, no exceptions. The goal file is the one
   exception that lives in the main checkout, since it spans multiple tasks'
-  workspaces by definition.
+  workspaces by definition — and, unlike task/receipt files, it's never
+  committed (plain local coordination state, like `.sddx/sweep.json`), so it
+  stays visible regardless of which branch happens to be checked out.

@@ -6944,36 +6944,377 @@ var require_public_api = __commonJS((exports) => {
 });
 
 // src/cli.ts
-import { copyFileSync as copyFileSync2, existsSync as existsSync11, mkdirSync as mkdirSync6, readdirSync as readdirSync5, readFileSync as readFileSync10 } from "node:fs";
-import { dirname as dirname2, join as join13, relative as relative2, resolve } from "node:path";
+import { copyFileSync as copyFileSync2, existsSync as existsSync11, mkdirSync as mkdirSync7, readdirSync as readdirSync6, readFileSync as readFileSync9 } from "node:fs";
+import { dirname as dirname2, join as join12, relative as relative2, resolve } from "node:path";
 
 // src/audit.ts
-import { spawnSync as spawnSync3 } from "node:child_process";
-import { existsSync as existsSync2, readdirSync as readdirSync2, readFileSync as readFileSync2 } from "node:fs";
-import { join as join3 } from "node:path";
+import { spawnSync as spawnSync4 } from "node:child_process";
+import { existsSync as existsSync4, readdirSync as readdirSync3, readFileSync as readFileSync4 } from "node:fs";
+import { join as join5 } from "node:path";
 
 // src/lib/receipt.ts
-import { spawnSync } from "node:child_process";
+import { spawnSync as spawnSync2 } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  writeFileSync
+  existsSync as existsSync3,
+  mkdirSync as mkdirSync3,
+  readdirSync as readdirSync2,
+  readFileSync as readFileSync3,
+  writeFileSync as writeFileSync3
 } from "node:fs";
+import { join as join3 } from "node:path";
+
+// src/lib/goal.ts
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
+import { join as join2 } from "node:path";
+
+// src/lib/task.ts
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+
+// src/lib/glob.ts
+function segmentToRegex(segment) {
+  let out = "";
+  for (const ch of segment) {
+    if (ch === "*")
+      out += "[^/]*";
+    else if (ch === "?")
+      out += "[^/]";
+    else
+      out += ch.replace(/[.+^${}()|[\]\\]/, "\\$&");
+  }
+  return out;
+}
+function globToRegExp(pattern) {
+  const segments = pattern.split("/");
+  let re = "^";
+  for (let i = 0;i < segments.length; i++) {
+    const last = i === segments.length - 1;
+    if (segments[i] === "**") {
+      re += last ? ".+" : "(?:[^/]+/)*";
+    } else {
+      re += segmentToRegex(segments[i]) + (last ? "" : "/");
+    }
+  }
+  return new RegExp(`${re}$`);
+}
+var globMatch = (pattern, path) => globToRegExp(pattern).test(path);
+
+// src/lib/classify.ts
+var BUILTIN_EXEMPT_GLOBS = [
+  ".sddx/**",
+  "docs/**",
+  "**/*.md",
+  "package.json",
+  "tsconfig.json",
+  ".github/**",
+  "openspec/**",
+  ".claude/**"
+];
+var BUILTIN_TEST_GLOBS = [
+  "**/*.test.*",
+  "**/*.spec.*",
+  "**/*_test.*",
+  "**/test_*.py",
+  "tests/**",
+  "test/**",
+  "__tests__/**",
+  "spec/**"
+];
+var splitGlobs = (value) => (value ?? "").split(/\s+/).filter((g) => g !== "");
+var normalizeRelPath = (path) => path.replace(/\\/g, "/").replace(/^(\.\/)+/, "");
+function classify(relPath, allow, config = {}) {
+  const path = normalizeRelPath(relPath);
+  for (const entry of allow) {
+    if (normalizeRelPath(entry) === path)
+      return { rule: "allow", pattern: entry };
+  }
+  for (const pattern of [...BUILTIN_EXEMPT_GLOBS, ...splitGlobs(config.exemptGlobs)]) {
+    if (globMatch(pattern, path))
+      return { rule: "exempt", pattern };
+  }
+  for (const pattern of [...BUILTIN_TEST_GLOBS, ...splitGlobs(config.testGlobs)]) {
+    if (globMatch(pattern, path))
+      return { rule: "test", pattern };
+  }
+  return { rule: "implementation", pattern: null };
+}
+
+// src/lib/task.ts
+var TRANSITIONS = {
+  PLAN: ["RED", "ABANDONED"],
+  RED: ["GREEN", "ABANDONED"],
+  GREEN: ["REFACTOR", "VERIFY", "ABANDONED"],
+  REFACTOR: ["GREEN", "VERIFY", "ABANDONED"],
+  VERIFY: ["DONE", "ABANDONED"],
+  DONE: [],
+  ABANDONED: []
+};
+var DEFAULT_RETRY = { max_attempts: 1, workspace: "fresh" };
+function dependsOnList(t) {
+  const d = t.depends_on;
+  if (d === undefined)
+    return [];
+  return Array.isArray(d) ? d : [d];
+}
+function retryPolicyOf(t) {
+  return { ...DEFAULT_RETRY, ...t.retry };
+}
+function failurePolicyOf(t) {
+  return t.on_dependency_failure ?? "skip";
+}
+var sddxDir = (cwd) => join(cwd, ".sddx");
+var taskPath = (cwd, id) => join(sddxDir(cwd), "tasks", `${id}.json`);
+function taskId(sentence, date = new Date) {
+  const slug = sentence.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
+  const ymd = date.toISOString().slice(0, 10).replace(/-/g, "");
+  return `${ymd}-${slug}`;
+}
+function createTask(cwd, spec, specPath, workspace, opts = {}) {
+  const now = new Date().toISOString();
+  const dependsOn = opts.dependsOn === undefined ? [] : dependsOnList({ depends_on: opts.dependsOn });
+  const t = {
+    id: taskId(spec.task),
+    task: spec.task,
+    phase: "PLAN",
+    spec_path: specPath,
+    oracle: spec.oracle,
+    workspace,
+    scope: spec.scope,
+    ...dependsOn.length > 0 ? { depends_on: dependsOn } : {},
+    ...spec.on_dependency_failure ? { on_dependency_failure: spec.on_dependency_failure } : {},
+    ...spec.retry ? { retry: spec.retry } : {},
+    attempt_count: 1,
+    allow: [],
+    iterations: 0,
+    evidence: {},
+    history: [{ phase: "PLAN", at: now }],
+    created_at: now,
+    updated_at: now
+  };
+  const path = taskPath(cwd, t.id);
+  if (existsSync(path))
+    throw new Error(`task ${t.id} already exists at ${path}`);
+  mkdirSync(join(sddxDir(cwd), "tasks"), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(t, null, 2)}
+`);
+  return t;
+}
+function readTask(cwd, id) {
+  const path = taskPath(cwd, id);
+  if (!existsSync(path))
+    throw new Error(`no such task: ${id} (${path})`);
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+function writeTask(cwd, t) {
+  t.updated_at = new Date().toISOString();
+  writeFileSync(taskPath(cwd, t.id), `${JSON.stringify(t, null, 2)}
+`);
+}
+function transition(t, to, opts = {}) {
+  if (!TRANSITIONS[t.phase].includes(to)) {
+    throw new Error(`illegal transition ${t.phase} → ${to}`);
+  }
+  const at = new Date().toISOString();
+  const source = opts.source ?? "manual";
+  if (to === "RED") {
+    if (opts.testExit === undefined || opts.testExit === 0) {
+      throw new Error("RED requires evidence of a failing test: --test-exit <nonzero exit code>");
+    }
+    t.evidence.red = { test_exit: opts.testExit, at, source };
+  }
+  if (to === "GREEN") {
+    if (opts.testExit !== 0) {
+      throw new Error("GREEN requires evidence of a passing test: --test-exit 0");
+    }
+    t.evidence.green = { test_exit: 0, at, source };
+  }
+  if (to === "DONE" && !opts.internal) {
+    throw new Error("DONE is set by the verifier, not by phase transitions");
+  }
+  t.phase = to;
+  t.history.push({ phase: to, at });
+  return t;
+}
+var TERMINAL_PHASES = new Set(["DONE", "ABANDONED"]);
+var isTerminal = (phase) => TERMINAL_PHASES.has(phase);
+function allowPath(t, path) {
+  if (isTerminal(t.phase)) {
+    throw new Error(`task ${t.id} is ${t.phase}; allow-list is frozen on terminal tasks`);
+  }
+  const normalized = normalizeRelPath(path);
+  if (normalized === "" || normalized.startsWith("/") || normalized.split("/").includes("..")) {
+    throw new Error(`allow requires a repo-relative path, got: ${path}`);
+  }
+  if (!t.allow.includes(normalized))
+    t.allow.push(normalized);
+  return t;
+}
+function blockedOn(cwd, task) {
+  for (const parentId of dependsOnList(task)) {
+    if (parentId === task.id)
+      continue;
+    const parent = resolveTaskState(cwd, parentId);
+    if (parent?.phase !== "DONE")
+      return parentId;
+  }
+  return null;
+}
+function skippedOn(cwd, task, seen = new Set) {
+  if (failurePolicyOf(task) !== "skip")
+    return null;
+  if (seen.has(task.id))
+    return null;
+  seen.add(task.id);
+  for (const parentId of dependsOnList(task)) {
+    if (parentId === task.id)
+      continue;
+    const parent = resolveTaskState(cwd, parentId);
+    if (!parent)
+      continue;
+    if (parent.phase === "ABANDONED")
+      return parentId;
+    if (skippedOn(cwd, parent, seen))
+      return parentId;
+  }
+  return null;
+}
+function abandonOrRetry(t) {
+  if (isTerminal(t.phase)) {
+    throw new Error(`illegal transition ${t.phase} → ABANDONED`);
+  }
+  const policy = retryPolicyOf(t);
+  const attempts = t.attempt_count ?? 1;
+  const at = new Date().toISOString();
+  if (attempts < policy.max_attempts) {
+    t.attempt_count = attempts + 1;
+    t.phase = "PLAN";
+    t.iterations = 0;
+    t.evidence = {};
+    t.stuck = undefined;
+    t.history.push({ phase: "PLAN", at });
+    return { retried: true, attempt_count: t.attempt_count, max_attempts: policy.max_attempts };
+  }
+  t.phase = "ABANDONED";
+  t.history.push({ phase: "ABANDONED", at });
+  return { retried: false, attempt_count: attempts, max_attempts: policy.max_attempts };
+}
+function readTaskFrom(dir, id) {
+  try {
+    return JSON.parse(readFileSync(taskPath(dir, id), "utf8"));
+  } catch {
+    return null;
+  }
+}
+function readTaskFromBranch(cwd, id) {
+  const r = spawnSync("git", ["show", `sddx/${id}:.sddx/tasks/${id}.json`], {
+    cwd,
+    encoding: "utf8"
+  });
+  if (r.status !== 0)
+    return null;
+  try {
+    return JSON.parse(r.stdout);
+  } catch {
+    return null;
+  }
+}
+function resolveTaskState(cwd, id) {
+  return readTaskFrom(join(cwd, ".sddx-worktrees", id), id) ?? readTaskFrom(cwd, id) ?? readTaskFromBranch(cwd, id);
+}
+
+// src/lib/goal.ts
+var goalsDir = (cwd) => join2(sddxDir(cwd), "goals");
+var goalPath = (cwd, id) => join2(goalsDir(cwd), `${id}.json`);
+var goalId = (sentence, date = new Date) => taskId(sentence, date);
+var runBranchName = (id) => `sddx/run-${id}`;
+function createGoal(cwd, goalSentence, taskIds, opts) {
+  if (taskIds.length === 0) {
+    throw new Error("a goal requires at least one task id");
+  }
+  const now = new Date().toISOString();
+  const id = opts.id ?? goalId(goalSentence);
+  const path = goalPath(cwd, id);
+  if (existsSync2(path))
+    throw new Error(`goal ${id} already exists at ${path}`);
+  for (const tid of taskIds) {
+    if (!resolveTaskState(cwd, tid)) {
+      throw new Error(`task ${tid} does not exist — cannot register it in a goal`);
+    }
+  }
+  const g = {
+    id,
+    goal: goalSentence,
+    task_ids: taskIds,
+    ...opts.deps && Object.keys(opts.deps).length > 0 ? { deps: opts.deps } : {},
+    run_branch: opts.runBranch,
+    base_sha: opts.baseSha,
+    merges: [],
+    created_at: now,
+    updated_at: now
+  };
+  mkdirSync2(goalsDir(cwd), { recursive: true });
+  writeFileSync2(path, `${JSON.stringify(g, null, 2)}
+`);
+  return g;
+}
+function readGoal(cwd, id) {
+  const path = goalPath(cwd, id);
+  if (!existsSync2(path))
+    throw new Error(`no such goal: ${id} (${path})`);
+  const g = JSON.parse(readFileSync2(path, "utf8"));
+  if (typeof g.run_branch !== "string" || typeof g.base_sha !== "string" || !g.merges) {
+    throw new Error(`goal ${id} (${path}) is missing run_branch/base_sha/merges — written by an ` + "incompatible sddx version; recreate it with the current graph/goal create");
+  }
+  return g;
+}
+function writeGoal(cwd, g) {
+  g.updated_at = new Date().toISOString();
+  writeFileSync2(goalPath(cwd, g.id), `${JSON.stringify(g, null, 2)}
+`);
+}
+function findGoalForTask(cwd, id) {
+  const dir = goalsDir(cwd);
+  if (!existsSync2(dir))
+    return null;
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".json"))
+      continue;
+    let g;
+    try {
+      g = JSON.parse(readFileSync2(join2(dir, f), "utf8"));
+    } catch {
+      continue;
+    }
+    if (g.task_ids.includes(id))
+      return g;
+  }
+  return null;
+}
+function currentlyMergedTaskIds(g) {
+  const latestByTask = new Map;
+  for (const entry of g.merges)
+    latestByTask.set(entry.task_id, entry);
+  return [...latestByTask.values()].filter((e) => e.result === "merged").map((e) => e.task_id);
+}
+function goalCounts(g) {
+  const merged = currentlyMergedTaskIds(g).length;
+  return { merged, outstanding: g.task_ids.length - merged, total: g.task_ids.length };
+}
+
+// src/lib/receipt.ts
 var sha256 = (data) => createHash("sha256").update(data).digest("hex");
-var receiptsDir = (cwd) => join(cwd, ".sddx", "receipts");
-var receiptPath = (cwd, taskId) => join(receiptsDir(cwd), `${taskId}.json`);
+var receiptsDir = (cwd) => join3(cwd, ".sddx", "receipts");
+var receiptPath = (cwd, taskId2) => join3(receiptsDir(cwd), `${taskId2}.json`);
 function listReceipts(cwd) {
   const dir = receiptsDir(cwd);
-  if (!existsSync(dir))
+  if (!existsSync3(dir))
     return [];
-  return readdirSync(dir).filter((f) => f.endsWith(".json")).map((f) => ({
-    file: join(dir, f),
-    receipt: JSON.parse(readFileSync(join(dir, f), "utf8"))
+  return readdirSync2(dir).filter((f) => f.endsWith(".json")).map((f) => ({
+    file: join3(dir, f),
+    receipt: JSON.parse(readFileSync3(join3(dir, f), "utf8"))
   })).sort((a, b) => a.receipt.seq - b.receipt.seq);
 }
 function chainHead(cwd) {
@@ -6981,7 +7322,7 @@ function chainHead(cwd) {
   const last = receipts.at(-1);
   if (!last)
     return { seq: 0, prevHash: "genesis" };
-  return { seq: last.receipt.seq, prevHash: sha256(readFileSync(last.file)) };
+  return { seq: last.receipt.seq, prevHash: sha256(readFileSync3(last.file)) };
 }
 function writeReceipt(cwd, r) {
   const schemaErrors = validateReceipt(r);
@@ -6989,11 +7330,11 @@ function writeReceipt(cwd, r) {
     throw new Error(`refusing to write invalid receipt: ${schemaErrors.join("; ")}`);
   }
   const path = receiptPath(cwd, r.task_id);
-  if (existsSync(path)) {
+  if (existsSync3(path)) {
     throw new Error(`receipt for ${r.task_id} already exists — receipts are immutable`);
   }
-  mkdirSync(receiptsDir(cwd), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(r, null, 2)}
+  mkdirSync3(receiptsDir(cwd), { recursive: true });
+  writeFileSync3(path, `${JSON.stringify(r, null, 2)}
 `);
   chmodSync(path, 292);
   return path;
@@ -7049,35 +7390,40 @@ function validateReceipt(raw) {
   need("verified_at", typeof r.verified_at === "string" && !Number.isNaN(Date.parse(r.verified_at)));
   return errors;
 }
-function readReceiptFrom(dir, id) {
+function readReceiptRawFrom(dir, id) {
   try {
-    return JSON.parse(readFileSync(receiptPath(dir, id), "utf8"));
+    return readFileSync3(receiptPath(dir, id));
   } catch {
     return null;
   }
 }
-function readReceiptFromBranch(cwd, id) {
-  const r = spawnSync("git", ["show", `sddx/${id}:.sddx/receipts/${id}.json`], {
-    cwd,
-    encoding: "utf8"
-  });
-  if (r.status !== 0)
-    return null;
-  try {
-    return JSON.parse(r.stdout);
-  } catch {
-    return null;
-  }
+function readReceiptRawFromRef(cwd, ref, id) {
+  const r = spawnSync2("git", ["show", `${ref}:.sddx/receipts/${id}.json`], { cwd });
+  return r.status === 0 ? r.stdout : null;
+}
+function resolveReceiptRaw(cwd, id) {
+  const direct = readReceiptRawFrom(join3(cwd, ".sddx-worktrees", id), id) ?? readReceiptRawFrom(cwd, id) ?? readReceiptRawFromRef(cwd, `sddx/${id}`, id);
+  if (direct)
+    return direct;
+  const goal = findGoalForTask(cwd, id);
+  return goal ? readReceiptRawFromRef(cwd, goal.run_branch, id) : null;
 }
 function resolveReceipt(cwd, id) {
-  return readReceiptFrom(join(cwd, ".sddx-worktrees", id), id) ?? readReceiptFrom(cwd, id) ?? readReceiptFromBranch(cwd, id);
+  const raw = resolveReceiptRaw(cwd, id);
+  if (!raw)
+    return null;
+  try {
+    return JSON.parse(raw.toString("utf8"));
+  } catch {
+    return null;
+  }
 }
 function verifyChain(cwd) {
   const errors = [];
   const receipts = listReceipts(cwd);
   const seqByHash = new Map;
   for (const { file, receipt } of receipts) {
-    seqByHash.set(sha256(readFileSync(file)), receipt.seq);
+    seqByHash.set(sha256(readFileSync3(file)), receipt.seq);
   }
   for (const { file, receipt } of receipts) {
     for (const e of validateReceipt(receipt))
@@ -7099,10 +7445,10 @@ function verifyChain(cwd) {
 }
 
 // src/lib/sign.ts
-import { spawnSync as spawnSync2 } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { spawnSync as spawnSync3 } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync as writeFileSync4 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join as join2 } from "node:path";
+import { join as join4 } from "node:path";
 var NAMESPACE = "sddx-receipt";
 var gitConfigCache = new Map;
 function gitConfig(cwd, key) {
@@ -7110,13 +7456,13 @@ function gitConfig(cwd, key) {
   const cached = gitConfigCache.get(cacheKey);
   if (cached !== undefined)
     return cached;
-  const r = spawnSync2("git", ["config", "--get", key], { cwd, encoding: "utf8" });
+  const r = spawnSync3("git", ["config", "--get", key], { cwd, encoding: "utf8" });
   const v = r.status === 0 ? (r.stdout ?? "").trim() : "";
   const result = v === "" ? null : v;
   gitConfigCache.set(cacheKey, result);
   return result;
 }
-var expandHome = (p) => p.startsWith("~/") ? join2(homedir(), p.slice(2)) : p;
+var expandHome = (p) => p.startsWith("~/") ? join4(homedir(), p.slice(2)) : p;
 function signPayload(cwd, payload) {
   if (gitConfig(cwd, "gpg.format") !== "ssh")
     return null;
@@ -7126,7 +7472,7 @@ function signPayload(cwd, payload) {
   const signer = gitConfig(cwd, "user.email");
   if (!signer)
     return null;
-  const r = spawnSync2("ssh-keygen", ["-Y", "sign", "-n", NAMESPACE, "-f", expandHome(key)], {
+  const r = spawnSync3("ssh-keygen", ["-Y", "sign", "-n", NAMESPACE, "-f", expandHome(key)], {
     cwd,
     input: payload,
     encoding: "utf8"
@@ -7140,12 +7486,12 @@ function verifySignature(cwd, payload, sig) {
   const allowed = gitConfig(cwd, "gpg.ssh.allowedSignersFile");
   if (!allowed)
     return "unverifiable";
-  const tmp = mkdtempSync(join2(tmpdir(), "sddx-sig-"));
+  const tmp = mkdtempSync(join4(tmpdir(), "sddx-sig-"));
   try {
-    const sigFile = join2(tmp, "receipt.sig");
-    writeFileSync2(sigFile, `${sig.signature}
+    const sigFile = join4(tmp, "receipt.sig");
+    writeFileSync4(sigFile, `${sig.signature}
 `);
-    const r = spawnSync2("ssh-keygen", ["-Y", "verify", "-f", expandHome(allowed), "-I", sig.signer, "-n", NAMESPACE, "-s", sigFile], { cwd, input: payload, encoding: "utf8" });
+    const r = spawnSync3("ssh-keygen", ["-Y", "verify", "-f", expandHome(allowed), "-I", sig.signer, "-n", NAMESPACE, "-s", sigFile], { cwd, input: payload, encoding: "utf8" });
     return r.status === 0 ? "valid" : "invalid";
   } finally {
     rmSync(tmp, { recursive: true, force: true });
@@ -7154,7 +7500,7 @@ function verifySignature(cwd, payload, sig) {
 
 // src/audit.ts
 function gitLines(cwd, ...args) {
-  const r = spawnSync3("git", args, { cwd, encoding: "utf8" });
+  const r = spawnSync4("git", args, { cwd, encoding: "utf8" });
   if (r.status !== 0)
     return { ok: false, lines: [], err: (r.stderr ?? "").trim() };
   return { ok: true, lines: (r.stdout ?? "").split(`
@@ -7164,20 +7510,20 @@ function auditReceipts(cwd, opts = {}) {
   const findings = verifyChain(cwd).map((f) => `chain: ${f}`);
   const notes = [];
   const dir = receiptsDir(cwd);
-  const files = existsSync2(dir) ? readdirSync2(dir).filter((f) => f.endsWith(".json")).sort() : [];
+  const files = existsSync4(dir) ? readdirSync3(dir).filter((f) => f.endsWith(".json")).sort() : [];
   const tracked = gitLines(cwd, "ls-tree", "-r", "--name-only", "HEAD", "--", ".sddx/receipts");
   if (tracked.ok) {
     for (const rel of tracked.lines) {
-      if (rel.endsWith(".json") && !existsSync2(join3(cwd, rel))) {
+      if (rel.endsWith(".json") && !existsSync4(join5(cwd, rel))) {
         findings.push(`${rel}: committed receipt missing from working tree — receipt deleted`);
       }
     }
   }
   for (const file of files) {
-    const rel = join3(".sddx", "receipts", file);
+    const rel = join5(".sddx", "receipts", file);
     let raw = null;
     try {
-      raw = readFileSync2(join3(cwd, rel), "utf8");
+      raw = readFileSync4(join5(cwd, rel), "utf8");
     } catch {}
     if (raw !== null && raw.includes('"signature"')) {
       let parsed = null;
@@ -7217,20 +7563,20 @@ function auditReceipts(cwd, opts = {}) {
       findings.push(`${rel}: working tree differs from committed state — receipt bytes tampered`);
     }
     if (opts.signatures) {
-      const v = spawnSync3("git", ["verify-commit", introducing], { cwd });
+      const v = spawnSync4("git", ["verify-commit", introducing], { cwd });
       if (v.status !== 0) {
         findings.push(`${rel}: binding commit ${introducing.slice(0, 12)} has no valid signature`);
       }
     }
   }
   if (opts.ci) {
-    const tasksDir = join3(cwd, ".sddx", "tasks");
-    if (existsSync2(tasksDir)) {
-      for (const f of readdirSync2(tasksDir).filter((x) => x.endsWith(".json"))) {
-        const rel = join3(".sddx", "tasks", f);
+    const tasksDir = join5(cwd, ".sddx", "tasks");
+    if (existsSync4(tasksDir)) {
+      for (const f of readdirSync3(tasksDir).filter((x) => x.endsWith(".json"))) {
+        const rel = join5(".sddx", "tasks", f);
         try {
-          const t = JSON.parse(readFileSync2(join3(tasksDir, f), "utf8"));
-          if (t.phase === "DONE" && !existsSync2(join3(dir, `${t.id}.json`))) {
+          const t = JSON.parse(readFileSync4(join5(tasksDir, f), "utf8"));
+          if (t.phase === "DONE" && !existsSync4(join5(dir, `${t.id}.json`))) {
             findings.push(`${rel}: task is DONE without a receipt — completion unproven`);
           }
         } catch {
@@ -7243,18 +7589,18 @@ function auditReceipts(cwd, opts = {}) {
 }
 
 // src/board.ts
-import { existsSync as existsSync6, mkdirSync as mkdirSync4, readdirSync as readdirSync4, readFileSync as readFileSync6, writeFileSync as writeFileSync5 } from "node:fs";
-import { join as join7 } from "node:path";
+import { existsSync as existsSync7, mkdirSync as mkdirSync5, readdirSync as readdirSync5, readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "node:fs";
+import { join as join8 } from "node:path";
 
 // src/lib/config.ts
-import { existsSync as existsSync3, readFileSync as readFileSync3 } from "node:fs";
-import { join as join4 } from "node:path";
+import { existsSync as existsSync5, readFileSync as readFileSync5 } from "node:fs";
+import { join as join6 } from "node:path";
 function readConfig(root) {
-  const path = join4(root, ".sddx", "config.json");
-  if (!existsSync3(path))
+  const path = join6(root, ".sddx", "config.json");
+  if (!existsSync5(path))
     return {};
   try {
-    const parsed = JSON.parse(readFileSync3(path, "utf8"));
+    const parsed = JSON.parse(readFileSync5(path, "utf8"));
     return typeof parsed === "object" && parsed !== null ? parsed : {};
   } catch {
     return {};
@@ -7421,282 +7767,22 @@ function validateConfigObject(obj) {
   return warnings;
 }
 
-// src/lib/task.ts
-import { spawnSync as spawnSync4 } from "node:child_process";
-import { existsSync as existsSync4, mkdirSync as mkdirSync2, readFileSync as readFileSync4, writeFileSync as writeFileSync3 } from "node:fs";
-import { join as join5 } from "node:path";
-
-// src/lib/glob.ts
-function segmentToRegex(segment) {
-  let out = "";
-  for (const ch of segment) {
-    if (ch === "*")
-      out += "[^/]*";
-    else if (ch === "?")
-      out += "[^/]";
-    else
-      out += ch.replace(/[.+^${}()|[\]\\]/, "\\$&");
-  }
-  return out;
-}
-function globToRegExp(pattern) {
-  const segments = pattern.split("/");
-  let re = "^";
-  for (let i = 0;i < segments.length; i++) {
-    const last = i === segments.length - 1;
-    if (segments[i] === "**") {
-      re += last ? ".+" : "(?:[^/]+/)*";
-    } else {
-      re += segmentToRegex(segments[i]) + (last ? "" : "/");
-    }
-  }
-  return new RegExp(`${re}$`);
-}
-var globMatch = (pattern, path) => globToRegExp(pattern).test(path);
-
-// src/lib/classify.ts
-var BUILTIN_EXEMPT_GLOBS = [
-  ".sddx/**",
-  "docs/**",
-  "**/*.md",
-  "package.json",
-  "tsconfig.json",
-  ".github/**",
-  "openspec/**",
-  ".claude/**"
-];
-var BUILTIN_TEST_GLOBS = [
-  "**/*.test.*",
-  "**/*.spec.*",
-  "**/*_test.*",
-  "**/test_*.py",
-  "tests/**",
-  "test/**",
-  "__tests__/**",
-  "spec/**"
-];
-var splitGlobs = (value) => (value ?? "").split(/\s+/).filter((g) => g !== "");
-var normalizeRelPath = (path) => path.replace(/\\/g, "/").replace(/^(\.\/)+/, "");
-function classify(relPath, allow, config = {}) {
-  const path = normalizeRelPath(relPath);
-  for (const entry of allow) {
-    if (normalizeRelPath(entry) === path)
-      return { rule: "allow", pattern: entry };
-  }
-  for (const pattern of [...BUILTIN_EXEMPT_GLOBS, ...splitGlobs(config.exemptGlobs)]) {
-    if (globMatch(pattern, path))
-      return { rule: "exempt", pattern };
-  }
-  for (const pattern of [...BUILTIN_TEST_GLOBS, ...splitGlobs(config.testGlobs)]) {
-    if (globMatch(pattern, path))
-      return { rule: "test", pattern };
-  }
-  return { rule: "implementation", pattern: null };
-}
-
-// src/lib/task.ts
-var TRANSITIONS = {
-  PLAN: ["RED", "ABANDONED"],
-  RED: ["GREEN", "ABANDONED"],
-  GREEN: ["REFACTOR", "VERIFY", "ABANDONED"],
-  REFACTOR: ["GREEN", "VERIFY", "ABANDONED"],
-  VERIFY: ["DONE", "ABANDONED"],
-  DONE: [],
-  ABANDONED: []
-};
-var DEFAULT_RETRY = { max_attempts: 1, workspace: "fresh" };
-function dependsOnList(t) {
-  const d = t.depends_on;
-  if (d === undefined)
-    return [];
-  return Array.isArray(d) ? d : [d];
-}
-function retryPolicyOf(t) {
-  return { ...DEFAULT_RETRY, ...t.retry };
-}
-function failurePolicyOf(t) {
-  return t.on_dependency_failure ?? "skip";
-}
-var sddxDir = (cwd) => join5(cwd, ".sddx");
-var taskPath = (cwd, id) => join5(sddxDir(cwd), "tasks", `${id}.json`);
-function taskId(sentence, date = new Date) {
-  const slug = sentence.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
-  const ymd = date.toISOString().slice(0, 10).replace(/-/g, "");
-  return `${ymd}-${slug}`;
-}
-function createTask(cwd, spec, specPath, workspace, opts = {}) {
-  const now = new Date().toISOString();
-  const dependsOn = opts.dependsOn === undefined ? [] : dependsOnList({ depends_on: opts.dependsOn });
-  const t = {
-    id: taskId(spec.task),
-    task: spec.task,
-    phase: "PLAN",
-    spec_path: specPath,
-    oracle: spec.oracle,
-    workspace,
-    scope: spec.scope,
-    ...dependsOn.length > 0 ? { depends_on: dependsOn } : {},
-    ...spec.on_dependency_failure ? { on_dependency_failure: spec.on_dependency_failure } : {},
-    ...spec.retry ? { retry: spec.retry } : {},
-    attempt_count: 1,
-    allow: [],
-    iterations: 0,
-    evidence: {},
-    history: [{ phase: "PLAN", at: now }],
-    created_at: now,
-    updated_at: now
-  };
-  const path = taskPath(cwd, t.id);
-  if (existsSync4(path))
-    throw new Error(`task ${t.id} already exists at ${path}`);
-  mkdirSync2(join5(sddxDir(cwd), "tasks"), { recursive: true });
-  writeFileSync3(path, `${JSON.stringify(t, null, 2)}
-`);
-  return t;
-}
-function readTask(cwd, id) {
-  const path = taskPath(cwd, id);
-  if (!existsSync4(path))
-    throw new Error(`no such task: ${id} (${path})`);
-  return JSON.parse(readFileSync4(path, "utf8"));
-}
-function writeTask(cwd, t) {
-  t.updated_at = new Date().toISOString();
-  writeFileSync3(taskPath(cwd, t.id), `${JSON.stringify(t, null, 2)}
-`);
-}
-function transition(t, to, opts = {}) {
-  if (!TRANSITIONS[t.phase].includes(to)) {
-    throw new Error(`illegal transition ${t.phase} → ${to}`);
-  }
-  const at = new Date().toISOString();
-  const source = opts.source ?? "manual";
-  if (to === "RED") {
-    if (opts.testExit === undefined || opts.testExit === 0) {
-      throw new Error("RED requires evidence of a failing test: --test-exit <nonzero exit code>");
-    }
-    t.evidence.red = { test_exit: opts.testExit, at, source };
-  }
-  if (to === "GREEN") {
-    if (opts.testExit !== 0) {
-      throw new Error("GREEN requires evidence of a passing test: --test-exit 0");
-    }
-    t.evidence.green = { test_exit: 0, at, source };
-  }
-  if (to === "DONE" && !opts.internal) {
-    throw new Error("DONE is set by the verifier, not by phase transitions");
-  }
-  t.phase = to;
-  t.history.push({ phase: to, at });
-  return t;
-}
-var TERMINAL_PHASES = new Set(["DONE", "ABANDONED"]);
-var isTerminal = (phase) => TERMINAL_PHASES.has(phase);
-function allowPath(t, path) {
-  if (isTerminal(t.phase)) {
-    throw new Error(`task ${t.id} is ${t.phase}; allow-list is frozen on terminal tasks`);
-  }
-  const normalized = normalizeRelPath(path);
-  if (normalized === "" || normalized.startsWith("/") || normalized.split("/").includes("..")) {
-    throw new Error(`allow requires a repo-relative path, got: ${path}`);
-  }
-  if (!t.allow.includes(normalized))
-    t.allow.push(normalized);
-  return t;
-}
-function blockedOn(cwd, task) {
-  for (const parentId of dependsOnList(task)) {
-    if (parentId === task.id)
-      continue;
-    const parent = resolveTaskState(cwd, parentId);
-    if (parent?.phase !== "DONE")
-      return parentId;
-  }
-  return null;
-}
-function skippedOn(cwd, task, seen = new Set) {
-  if (failurePolicyOf(task) !== "skip")
-    return null;
-  if (seen.has(task.id))
-    return null;
-  seen.add(task.id);
-  for (const parentId of dependsOnList(task)) {
-    if (parentId === task.id)
-      continue;
-    const parent = resolveTaskState(cwd, parentId);
-    if (!parent)
-      continue;
-    if (parent.phase === "ABANDONED")
-      return parentId;
-    if (skippedOn(cwd, parent, seen))
-      return parentId;
-  }
-  return null;
-}
-function abandonOrRetry(t) {
-  if (isTerminal(t.phase)) {
-    throw new Error(`illegal transition ${t.phase} → ABANDONED`);
-  }
-  const policy = retryPolicyOf(t);
-  const attempts = t.attempt_count ?? 1;
-  const at = new Date().toISOString();
-  if (attempts < policy.max_attempts) {
-    t.attempt_count = attempts + 1;
-    t.phase = "PLAN";
-    t.iterations = 0;
-    t.evidence = {};
-    t.stuck = undefined;
-    t.history.push({ phase: "PLAN", at });
-    return { retried: true, attempt_count: t.attempt_count, max_attempts: policy.max_attempts };
-  }
-  t.phase = "ABANDONED";
-  t.history.push({ phase: "ABANDONED", at });
-  return { retried: false, attempt_count: attempts, max_attempts: policy.max_attempts };
-}
-function markShipped(t, goalId, prUrl) {
-  t.shipped = { goal_id: goalId, pr_url: prUrl, at: new Date().toISOString() };
-  return t;
-}
-function readTaskFrom(dir, id) {
-  try {
-    return JSON.parse(readFileSync4(taskPath(dir, id), "utf8"));
-  } catch {
-    return null;
-  }
-}
-function readTaskFromBranch(cwd, id) {
-  const r = spawnSync4("git", ["show", `sddx/${id}:.sddx/tasks/${id}.json`], {
-    cwd,
-    encoding: "utf8"
-  });
-  if (r.status !== 0)
-    return null;
-  try {
-    return JSON.parse(r.stdout);
-  } catch {
-    return null;
-  }
-}
-function resolveTaskState(cwd, id) {
-  return readTaskFrom(join5(cwd, ".sddx-worktrees", id), id) ?? readTaskFrom(cwd, id) ?? readTaskFromBranch(cwd, id);
-}
-
 // src/lib/worktree.ts
 import { spawnSync as spawnSync6 } from "node:child_process";
 import {
   appendFileSync,
   copyFileSync,
-  existsSync as existsSync5,
-  mkdirSync as mkdirSync3,
-  readdirSync as readdirSync3,
-  readFileSync as readFileSync5,
+  existsSync as existsSync6,
+  mkdirSync as mkdirSync4,
+  readdirSync as readdirSync4,
+  readFileSync as readFileSync6,
   realpathSync,
   rmdirSync,
   rmSync as rmSync2,
   statSync,
-  writeFileSync as writeFileSync4
+  writeFileSync as writeFileSync5
 } from "node:fs";
-import { dirname, isAbsolute, join as join6, relative } from "node:path";
+import { dirname, isAbsolute, join as join7, relative } from "node:path";
 
 // src/lib/git.ts
 import { spawnSync as spawnSync5 } from "node:child_process";
@@ -7713,6 +7799,9 @@ var headSha = (cwd) => git(cwd, "rev-parse", "HEAD");
 var currentBranch = (cwd) => git(cwd, "rev-parse", "--abbrev-ref", "HEAD");
 var createBranch = (cwd, name) => {
   git(cwd, "switch", "-c", name);
+};
+var createBranchAt = (cwd, name, sha) => {
+  git(cwd, "branch", name, sha);
 };
 function branchExists(cwd, name) {
   const r = spawnSync5("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${name}`], {
@@ -7761,7 +7850,7 @@ var push = (cwd, branch) => {
   git(cwd, "push", "-u", "origin", branch);
 };
 var stageAll = (cwd) => {
-  git(cwd, "add", "-A");
+  git(cwd, "add", "-A", "--", ".", ":!.sddx/goals");
 };
 var stagePath = (cwd, path) => {
   git(cwd, "add", "--", path);
@@ -7773,7 +7862,7 @@ function commit(cwd, message) {
 }
 
 // src/lib/worktree.ts
-var worktreesDir = (cwd) => join6(cwd, ".sddx-worktrees");
+var worktreesDir = (cwd) => join7(cwd, ".sddx-worktrees");
 function tryRev(cwd, ref) {
   const r = spawnSync6("git", ["rev-parse", "--verify", "--quiet", ref], {
     cwd,
@@ -7803,15 +7892,15 @@ function resolveBaseRef(cwd) {
 }
 var gitCommonDir = (cwd) => {
   const dir = git(cwd, "rev-parse", "--git-common-dir");
-  return isAbsolute(dir) ? dir : join6(cwd, dir);
+  return isAbsolute(dir) ? dir : join7(cwd, dir);
 };
 var resolveMainRepoRoot = (cwd) => dirname(gitCommonDir(cwd));
 var EXCLUDE_LINE = ".sddx-worktrees/";
 function ensureExcluded(cwd) {
-  const infoDir = join6(gitCommonDir(cwd), "info");
-  mkdirSync3(infoDir, { recursive: true });
-  const exclude = join6(infoDir, "exclude");
-  const current = existsSync5(exclude) ? readFileSync5(exclude, "utf8") : "";
+  const infoDir = join7(gitCommonDir(cwd), "info");
+  mkdirSync4(infoDir, { recursive: true });
+  const exclude = join7(infoDir, "exclude");
+  const current = existsSync6(exclude) ? readFileSync6(exclude, "utf8") : "";
   if (current.split(`
 `).includes(EXCLUDE_LINE))
     return;
@@ -7831,8 +7920,8 @@ function worktreeAvailable(cwd) {
 }
 function createWorktree(cwd, id, baseSha) {
   ensureExcluded(cwd);
-  mkdirSync3(worktreesDir(cwd), { recursive: true });
-  const path = join6(worktreesDir(cwd), id);
+  mkdirSync4(worktreesDir(cwd), { recursive: true });
+  const path = join7(worktreesDir(cwd), id);
   git(cwd, "worktree", "add", "-q", path, "-b", `sddx/${id}`, baseSha);
   return path;
 }
@@ -7850,7 +7939,7 @@ function mergeParentsSequential(worktreePath, remaining) {
   return git(worktreePath, "rev-parse", "HEAD");
 }
 function mergeParentsInBranch(cwd, taskId2, remaining) {
-  const tmpPath = join6(worktreesDir(cwd), `materialize-${taskId2}`);
+  const tmpPath = join7(worktreesDir(cwd), `materialize-${taskId2}`);
   git(cwd, "worktree", "add", "-q", tmpPath, `sddx/${taskId2}`);
   try {
     return mergeParentsSequential(tmpPath, remaining);
@@ -7907,20 +7996,20 @@ function materializeDependent(cwd, taskId2) {
     }
   }
   const relSpec = task.spec_path;
-  const specSrc = join6(cwd, relSpec);
-  if (existsSync5(specSrc)) {
-    mkdirSync3(join6(sddxDir(path), "specs"), { recursive: true });
-    copyFileSync(specSrc, join6(path, relSpec));
+  const specSrc = join7(cwd, relSpec);
+  if (existsSync6(specSrc)) {
+    mkdirSync4(join7(sddxDir(path), "specs"), { recursive: true });
+    copyFileSync(specSrc, join7(path, relSpec));
   }
   task.workspace = {
     mode: "worktree",
     branch: `sddx/${taskId2}`,
     base_sha: finalSha,
-    path: join6(".sddx-worktrees", taskId2)
+    path: join7(".sddx-worktrees", taskId2)
   };
   writeTask(path, task);
-  rmSync2(join6(cwd, ".sddx", "tasks", `${taskId2}.json`), { force: true });
-  if (existsSync5(specSrc))
+  rmSync2(join7(cwd, ".sddx", "tasks", `${taskId2}.json`), { force: true });
+  if (existsSync6(specSrc))
     rmSync2(specSrc, { force: true });
   return { path, baseSha: finalSha, mode: "worktree" };
 }
@@ -7930,10 +8019,10 @@ function retryWorkspace(cwd, task) {
   if (policy.workspace === "fresh") {
     const branch = `sddx/${task.id}`;
     if (task.workspace.mode === "worktree" && task.workspace.path) {
-      const oldAbs = join6(root, task.workspace.path);
-      const specAbs = join6(oldAbs, task.spec_path);
-      const specBytes = existsSync5(specAbs) ? readFileSync5(specAbs) : null;
-      if (existsSync5(oldAbs)) {
+      const oldAbs = join7(root, task.workspace.path);
+      const specAbs = join7(oldAbs, task.spec_path);
+      const specBytes = existsSync6(specAbs) ? readFileSync6(specAbs) : null;
+      if (existsSync6(oldAbs)) {
         try {
           removeWorktreeForced(root, oldAbs);
         } catch {}
@@ -7941,10 +8030,10 @@ function retryWorkspace(cwd, task) {
       if (branchExists(root, branch))
         forceDeleteBranch(root, branch);
       const newAbs = createWorktree(root, task.id, task.workspace.base_sha);
-      mkdirSync3(join6(sddxDir(newAbs), "tasks"), { recursive: true });
+      mkdirSync4(join7(sddxDir(newAbs), "tasks"), { recursive: true });
       if (specBytes) {
-        mkdirSync3(dirname(join6(newAbs, task.spec_path)), { recursive: true });
-        writeFileSync4(join6(newAbs, task.spec_path), specBytes);
+        mkdirSync4(dirname(join7(newAbs, task.spec_path)), { recursive: true });
+        writeFileSync5(join7(newAbs, task.spec_path), specBytes);
       }
       task.workspace = { ...task.workspace, path: relative(root, newAbs) };
     } else if (task.workspace.mode === "branch" && task.workspace.branch) {
@@ -7955,9 +8044,9 @@ function retryWorkspace(cwd, task) {
 }
 var allKnownTaskIds = (cwd) => {
   const ids = new Set;
-  const mainDir = join6(cwd, ".sddx", "tasks");
-  if (existsSync5(mainDir)) {
-    for (const f of readdirSync3(mainDir))
+  const mainDir = join7(cwd, ".sddx", "tasks");
+  if (existsSync6(mainDir)) {
+    for (const f of readdirSync4(mainDir))
       if (f.endsWith(".json"))
         ids.add(f.slice(0, -5));
   }
@@ -7980,8 +8069,8 @@ function rematerializeStaleDependents(cwd, retriedTaskId) {
       continue;
     const staleBranch = `sddx/${id}`;
     if (t.workspace.mode === "worktree" && t.workspace.path) {
-      const abs = join6(cwd, t.workspace.path);
-      if (existsSync5(abs)) {
+      const abs = join7(cwd, t.workspace.path);
+      if (existsSync6(abs)) {
         try {
           removeWorktreeForced(cwd, abs);
         } catch {}
@@ -7994,7 +8083,7 @@ function rematerializeStaleDependents(cwd, retriedTaskId) {
       branch: null,
       base_sha: `pending:${dependsOnList(t).join(",")}`
     };
-    mkdirSync3(join6(cwd, ".sddx", "tasks"), { recursive: true });
+    mkdirSync4(join7(cwd, ".sddx", "tasks"), { recursive: true });
     writeTask(cwd, t);
     materializeDependent(cwd, id);
     rebuilt.push(id);
@@ -8013,7 +8102,7 @@ function removeWorktreeForced(cwd, path) {
 }
 function listSddxWorktrees(cwd) {
   const dir = worktreesDir(cwd);
-  if (!existsSync5(dir))
+  if (!existsSync6(dir))
     return [];
   const realPrefix = `${realpathSync(dir)}/`;
   const prefix = `${dir}/`;
@@ -8046,7 +8135,7 @@ function hasSubmodules(cwd, baseSha) {
 var LOCK_STALE_MS = 10 * 60000;
 function acquireLock(lockPath, now) {
   try {
-    mkdirSync3(lockPath);
+    mkdirSync4(lockPath);
     return true;
   } catch {
     let age = 0;
@@ -8054,7 +8143,7 @@ function acquireLock(lockPath, now) {
       age = now - statSync(lockPath).mtimeMs;
     } catch {
       try {
-        mkdirSync3(lockPath);
+        mkdirSync4(lockPath);
         return true;
       } catch {
         return false;
@@ -8064,7 +8153,7 @@ function acquireLock(lockPath, now) {
       return false;
     try {
       rmdirSync(lockPath);
-      mkdirSync3(lockPath);
+      mkdirSync4(lockPath);
       return true;
     } catch {
       return false;
@@ -8072,9 +8161,9 @@ function acquireLock(lockPath, now) {
   }
 }
 function readWorktreeTask(worktreePath, id) {
-  const path = join6(worktreePath, ".sddx", "tasks", `${id}.json`);
+  const path = join7(worktreePath, ".sddx", "tasks", `${id}.json`);
   try {
-    return JSON.parse(readFileSync5(path, "utf8"));
+    return JSON.parse(readFileSync6(path, "utf8"));
   } catch {
     return null;
   }
@@ -8082,13 +8171,13 @@ function readWorktreeTask(worktreePath, id) {
 var DISPOSABLE = new Set(["DONE", "ABANDONED"]);
 function writeSweepState(cwd, skipped) {
   const entries = skipped.map((s) => ({ path: relative(cwd, s.path), reason: s.reason })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-  mkdirSync3(join6(cwd, ".sddx"), { recursive: true });
-  writeFileSync4(join6(cwd, ".sddx", "sweep.json"), `${JSON.stringify({ skipped: entries }, null, 2)}
+  mkdirSync4(join7(cwd, ".sddx"), { recursive: true });
+  writeFileSync5(join7(cwd, ".sddx", "sweep.json"), `${JSON.stringify({ skipped: entries }, null, 2)}
 `);
 }
 function sweep(cwd, opts = {}) {
   const now = opts.now ?? Date.now();
-  const lockPath = join6(gitCommonDir(cwd), "sddx-sweep.lock");
+  const lockPath = join7(gitCommonDir(cwd), "sddx-sweep.lock");
   if (!acquireLock(lockPath, now)) {
     return { removed: [], skipped: [], locked: true };
   }
@@ -8114,7 +8203,7 @@ function sweep(cwd, opts = {}) {
         skipped.push({ path: wt.path, reason: "dirty" });
         continue;
       }
-      if (task.phase === "DONE" && !existsSync5(join6(wt.path, ".sddx", "receipts", `${id}.json`))) {
+      if (task.phase === "DONE" && !existsSync6(join7(wt.path, ".sddx", "receipts", `${id}.json`))) {
         skipped.push({ path: wt.path, reason: "DONE without receipt" });
         continue;
       }
@@ -8133,17 +8222,17 @@ function sweep(cwd, opts = {}) {
   }
   return { removed, skipped, locked: false };
 }
-var worktreeIds = (cwd) => existsSync5(worktreesDir(cwd)) ? readdirSync3(worktreesDir(cwd)) : [];
+var worktreeIds = (cwd) => existsSync6(worktreesDir(cwd)) ? readdirSync4(worktreesDir(cwd)) : [];
 
 // src/board.ts
 var DASH = "—";
 var cell = (s) => s.replace(/\|/g, "\\|").replace(/\n/g, " ");
 function receiptRef(dir, id) {
-  const path = join7(dir, `${id}.json`);
-  if (!existsSync6(path))
+  const path = join8(dir, `${id}.json`);
+  if (!existsSync7(path))
     return DASH;
   try {
-    return `#${JSON.parse(readFileSync6(path, "utf8")).seq}`;
+    return `#${JSON.parse(readFileSync7(path, "utf8")).seq}`;
   } catch {
     return "unreadable";
   }
@@ -8151,7 +8240,7 @@ function receiptRef(dir, id) {
 function taskRow(taskPath2, id, receiptsDirs, threshold) {
   let t;
   try {
-    t = JSON.parse(readFileSync6(taskPath2, "utf8"));
+    t = JSON.parse(readFileSync7(taskPath2, "utf8"));
   } catch {
     return {
       id,
@@ -8187,12 +8276,12 @@ function taskRow(taskPath2, id, receiptsDirs, threshold) {
   };
 }
 function readFlagState(cwd) {
-  const path = join7(cwd, ".sddx", "sweep.json");
-  if (!existsSync6(path))
+  const path = join8(cwd, ".sddx", "sweep.json");
+  if (!existsSync7(path))
     return { entries: [], unreadable: false };
   let entries;
   try {
-    const parsed = JSON.parse(readFileSync6(path, "utf8"));
+    const parsed = JSON.parse(readFileSync7(path, "utf8"));
     entries = Array.isArray(parsed.skipped) ? parsed.skipped : [];
   } catch {
     return { entries: [], unreadable: true };
@@ -8218,21 +8307,21 @@ function flagLines(state) {
     ""
   ];
 }
-var jsonIds = (dir) => existsSync6(dir) ? readdirSync4(dir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length)).sort() : [];
+var jsonIds = (dir) => existsSync7(dir) ? readdirSync5(dir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length)).sort() : [];
 function collectRows(cwd) {
   const rows = new Map;
-  const mainReceipts = join7(cwd, ".sddx", "receipts");
+  const mainReceipts = join8(cwd, ".sddx", "receipts");
   const threshold = stuckThreshold(cwd);
-  for (const id of jsonIds(join7(cwd, ".sddx", "tasks"))) {
-    rows.set(id, taskRow(join7(cwd, ".sddx", "tasks", `${id}.json`), id, [mainReceipts], threshold));
+  for (const id of jsonIds(join8(cwd, ".sddx", "tasks"))) {
+    rows.set(id, taskRow(join8(cwd, ".sddx", "tasks", `${id}.json`), id, [mainReceipts], threshold));
   }
   const wtDir = worktreesDir(cwd);
-  if (existsSync6(wtDir)) {
-    for (const id of readdirSync4(wtDir).sort()) {
-      const taskPath2 = join7(wtDir, id, ".sddx", "tasks", `${id}.json`);
-      if (!existsSync6(taskPath2))
+  if (existsSync7(wtDir)) {
+    for (const id of readdirSync5(wtDir).sort()) {
+      const taskPath2 = join8(wtDir, id, ".sddx", "tasks", `${id}.json`);
+      if (!existsSync7(taskPath2))
         continue;
-      rows.set(id, taskRow(taskPath2, id, [join7(wtDir, id, ".sddx", "receipts"), mainReceipts], stuckThreshold(join7(wtDir, id))));
+      rows.set(id, taskRow(taskPath2, id, [join8(wtDir, id, ".sddx", "receipts"), mainReceipts], stuckThreshold(join8(wtDir, id))));
     }
   }
   return rows;
@@ -8296,7 +8385,7 @@ function renderBoardFromRows(cwd, rows, flags) {
   return lines.join(`
 `);
 }
-var boardPath = (cwd) => join7(cwd, ".sddx", "BOARD.md");
+var boardPath = (cwd) => join8(cwd, ".sddx", "BOARD.md");
 function writeBoard(cwd) {
   const { path, changed } = computeBoard(cwd);
   return { path, changed };
@@ -8306,83 +8395,14 @@ function computeBoard(cwd) {
   const flags = readFlagState(cwd);
   const rendered = renderBoardFromRows(cwd, rows, flags);
   const path = boardPath(cwd);
-  const current = existsSync6(path) ? readFileSync6(path, "utf8") : null;
+  const current = existsSync7(path) ? readFileSync7(path, "utf8") : null;
   let changed = false;
   if (current !== rendered) {
-    mkdirSync4(join7(cwd, ".sddx"), { recursive: true });
-    writeFileSync5(path, rendered);
+    mkdirSync5(join8(cwd, ".sddx"), { recursive: true });
+    writeFileSync6(path, rendered);
     changed = true;
   }
   return { path, changed, data: boardDataFromRows(cwd, rows, flags) };
-}
-
-// src/lib/goal.ts
-import { existsSync as existsSync7, mkdirSync as mkdirSync5, readFileSync as readFileSync7, writeFileSync as writeFileSync6 } from "node:fs";
-import { join as join8 } from "node:path";
-var goalsDir = (cwd) => join8(sddxDir(cwd), "goals");
-var goalPath = (cwd, id) => join8(goalsDir(cwd), `${id}.json`);
-var goalId = (sentence, date = new Date) => taskId(sentence, date);
-function createGoal(cwd, goalSentence, taskIds, deps) {
-  if (taskIds.length === 0) {
-    throw new Error("a goal requires at least one task id");
-  }
-  const now = new Date().toISOString();
-  const id = goalId(goalSentence);
-  const path = goalPath(cwd, id);
-  if (existsSync7(path))
-    throw new Error(`goal ${id} already exists at ${path}`);
-  for (const tid of taskIds) {
-    if (!resolveTaskState(cwd, tid)) {
-      throw new Error(`task ${tid} does not exist — cannot register it in a goal`);
-    }
-  }
-  const g = {
-    id,
-    goal: goalSentence,
-    task_ids: taskIds,
-    ...deps && Object.keys(deps).length > 0 ? { deps } : {},
-    created_at: now,
-    updated_at: now
-  };
-  mkdirSync5(goalsDir(cwd), { recursive: true });
-  writeFileSync6(path, `${JSON.stringify(g, null, 2)}
-`);
-  return g;
-}
-function readGoal(cwd, id) {
-  const path = goalPath(cwd, id);
-  if (!existsSync7(path))
-    throw new Error(`no such goal: ${id} (${path})`);
-  return JSON.parse(readFileSync7(path, "utf8"));
-}
-function writeGoal(cwd, g) {
-  g.updated_at = new Date().toISOString();
-  writeFileSync6(goalPath(cwd, g.id), `${JSON.stringify(g, null, 2)}
-`);
-}
-function checkGoalComplete(cwd, id) {
-  const g = readGoal(cwd, id);
-  const blocking = [];
-  for (const tid of g.task_ids) {
-    const task = resolveTaskState(cwd, tid);
-    if (!task) {
-      blocking.push({ task_id: tid, reason: "task state not found" });
-      continue;
-    }
-    if (task.phase !== "DONE") {
-      blocking.push({ task_id: tid, reason: `phase ${task.phase}` });
-      continue;
-    }
-    const receipt = resolveReceipt(cwd, tid);
-    if (!receipt) {
-      blocking.push({ task_id: tid, reason: "no receipt" });
-      continue;
-    }
-    if (receipt.verdict !== "pass") {
-      blocking.push({ task_id: tid, reason: `receipt verdict ${receipt.verdict}` });
-    }
-  }
-  return { complete: blocking.length === 0, blocking };
 }
 
 // node_modules/yaml/dist/index.js
@@ -8626,9 +8646,9 @@ function validateSchedule(nodes) {
 var dedupe = (xs) => [...new Set(xs)];
 
 // src/lib/next-actions.ts
-import { spawnSync as spawnSync8 } from "node:child_process";
-import { existsSync as existsSync8, readFileSync as readFileSync8 } from "node:fs";
-import { join as join9 } from "node:path";
+import { spawnSync as spawnSync9 } from "node:child_process";
+import { existsSync as existsSync9, readFileSync as readFileSync8 } from "node:fs";
+import { join as join10 } from "node:path";
 
 // src/lib/prhost.ts
 import { spawnSync as spawnSync7 } from "node:child_process";
@@ -8735,6 +8755,166 @@ function resolveBackend(cwd) {
   throw new Error('cannot determine PR host from the "origin" remote — set userConfig.pr_host to "gh" or "glab"');
 }
 
+// src/lib/pr.ts
+function renderPrBody(cwd, goal) {
+  const merged = currentlyMergedTaskIds(goal);
+  const counts = goalCounts(goal);
+  const lines = [
+    `Proof of work for goal \`${goal.id}\`: ${goal.goal}`,
+    "",
+    `${counts.merged} of ${counts.total} task(s) merged into \`${goal.run_branch}\`` + (counts.outstanding > 0 ? ` — ${counts.outstanding} outstanding.` : "."),
+    "",
+    "| Task | Oracle | Exit | Receipt sha256 |",
+    "| --- | --- | --- | --- |"
+  ];
+  for (const taskId2 of merged) {
+    const receipt = resolveReceipt(cwd, taskId2);
+    const raw = resolveReceiptRaw(cwd, taskId2);
+    if (!receipt || !raw) {
+      throw new Error(`receipt for merged task ${taskId2} is missing — the run branch is inconsistent`);
+    }
+    const exitCode = receipt.runs?.at(-1)?.exit_code ?? receipt.exit_code ?? "?";
+    lines.push(`| \`${taskId2}\` | \`${receipt.oracle.run}\` | ${exitCode} | \`${sha256(raw)}\` |`);
+  }
+  lines.push("", "_Generated by `sddx pr create` from verified receipts — not hand-written._");
+  return lines.join(`
+`);
+}
+function createGoalPr(cwd, id, opts = {}) {
+  const goal = readGoal(cwd, id);
+  if (goal.shipped) {
+    throw new Error(`goal ${id} already shipped as ${goal.shipped.pr_url} (${goal.shipped.at}) — ` + "re-running pr create would open a duplicate PR; nothing to do");
+  }
+  const backend = resolveBackend(cwd);
+  const auth = backend.authStatus(cwd);
+  if (!auth.ok) {
+    throw new Error(`${backend.name} is not authenticated: ${auth.message}`);
+  }
+  const existing = backend.findPr(cwd, goal.run_branch);
+  if (existing) {
+    throw new Error(`goal ${id}'s run branch already has an open PR: ${existing.url} — ` + "re-running pr create would open a duplicate; nothing to do");
+  }
+  push(cwd, goal.run_branch);
+  const body = renderPrBody(cwd, goal);
+  const title = opts.title ?? goal.goal;
+  const prUrl = backend.openPr(cwd, { branch: goal.run_branch, title, body });
+  goal.shipped = { pr_url: prUrl, at: new Date().toISOString() };
+  writeGoal(cwd, goal);
+  return { prUrl, branch: goal.run_branch, taskIds: currentlyMergedTaskIds(goal) };
+}
+
+// src/lib/runbranch.ts
+import { spawnSync as spawnSync8 } from "node:child_process";
+import { existsSync as existsSync8, mkdirSync as mkdirSync6, rmdirSync as rmdirSync2, statSync as statSync2 } from "node:fs";
+import { isAbsolute as isAbsolute2, join as join9 } from "node:path";
+var LOCK_STALE_MS2 = 5 * 60000;
+var LOCK_TIMEOUT_MS = 30000;
+function gitCommonDir2(cwd) {
+  const dir = git(cwd, "rev-parse", "--git-common-dir");
+  return isAbsolute2(dir) ? dir : join9(cwd, dir);
+}
+function withGoalLock(root, goalId2, fn) {
+  const lockPath = join9(gitCommonDir2(root), `sddx-runbranch-${goalId2}.lock`);
+  const deadline = Date.now() + LOCK_TIMEOUT_MS;
+  for (;; ) {
+    try {
+      mkdirSync6(lockPath);
+      break;
+    } catch {
+      if (existsSync8(lockPath)) {
+        try {
+          if (Date.now() - statSync2(lockPath).mtimeMs > LOCK_STALE_MS2)
+            rmdirSync2(lockPath);
+        } catch {}
+      }
+      if (Date.now() > deadline) {
+        throw new Error(`timed out waiting for run-branch integration lock on goal ${goalId2}`);
+      }
+      spawnSync8("sleep", ["0.1"]);
+    }
+  }
+  try {
+    return fn();
+  } finally {
+    try {
+      rmdirSync2(lockPath);
+    } catch {}
+  }
+}
+function integrateTaskIntoRunBranch(taskCwd, id) {
+  const root = resolveMainRepoRoot(taskCwd);
+  const goal = findGoalForTask(root, id);
+  if (!goal)
+    return { result: "none", reason: "no-goal" };
+  const task = readTask(taskCwd, id);
+  const branch = task.workspace.branch;
+  if (!branch)
+    return { result: "none", reason: "no-branch", runBranch: goal.run_branch };
+  const outcome = withGoalLock(root, goal.id, () => {
+    const tmpPath = join9(worktreesDir(root), `integrate-${id}`);
+    git(root, "worktree", "add", "-q", tmpPath, goal.run_branch);
+    let result;
+    try {
+      const r = spawnSync8("git", ["merge", "--no-ff", "-m", `sddx: merge ${id} into ${goal.run_branch}`, branch], { cwd: tmpPath, encoding: "utf8" });
+      if (r.status !== 0) {
+        spawnSync8("git", ["merge", "--abort"], { cwd: tmpPath });
+        result = { result: "conflict", runBranch: goal.run_branch };
+      } else {
+        const mergeSha = git(tmpPath, "rev-parse", "HEAD");
+        result = { result: "merged", runBranch: goal.run_branch, mergeCommit: mergeSha };
+      }
+    } finally {
+      removeWorktreeForced(root, tmpPath);
+    }
+    const fresh = readGoal(root, goal.id);
+    fresh.merges.push({
+      task_id: id,
+      ...result.mergeCommit ? { commit_sha: result.mergeCommit } : {},
+      merged_at: new Date().toISOString(),
+      result: result.result === "merged" ? "merged" : "conflict"
+    });
+    writeGoal(root, fresh);
+    return result;
+  });
+  task.integration = {
+    run_branch: goal.run_branch,
+    ...outcome.mergeCommit ? { merge_commit: outcome.mergeCommit } : {},
+    merged_at: new Date().toISOString(),
+    result: outcome.result === "merged" ? "merged" : "conflict"
+  };
+  writeTask(taskCwd, task);
+  stagePath(taskCwd, join9(".sddx", "tasks", `${id}.json`));
+  commit(taskCwd, `sddx(${id}): record integration (${outcome.result})`);
+  return outcome;
+}
+function revertTaskMerge(cwd, goalId2, id) {
+  return withGoalLock(cwd, goalId2, () => {
+    const goal = readGoal(cwd, goalId2);
+    const latest = [...goal.merges].reverse().find((e) => e.task_id === id);
+    if (latest?.result !== "merged" || !latest.commit_sha) {
+      throw new Error(`task ${id} has no current merge in goal ${goalId2} to revert`);
+    }
+    const tmpPath = join9(worktreesDir(cwd), `revert-${id}`);
+    git(cwd, "worktree", "add", "-q", tmpPath, goal.run_branch);
+    let revertSha;
+    try {
+      git(tmpPath, "revert", "-m", "1", "--no-edit", latest.commit_sha);
+      revertSha = git(tmpPath, "rev-parse", "HEAD");
+    } finally {
+      removeWorktreeForced(cwd, tmpPath);
+    }
+    goal.merges.push({
+      task_id: id,
+      commit_sha: revertSha,
+      merged_at: new Date().toISOString(),
+      result: "reverted",
+      reverts: latest.commit_sha
+    });
+    writeGoal(cwd, goal);
+    return revertSha;
+  });
+}
+
 // src/lib/next-actions.ts
 function prLookup(cwd, branch) {
   let backend;
@@ -8768,8 +8948,8 @@ function detectState(cwd) {
   return { state, branch, warning };
 }
 function runTestsAction(cwd) {
-  const pkgPath = join9(cwd, "package.json");
-  if (!existsSync8(pkgPath))
+  const pkgPath = join10(cwd, "package.json");
+  if (!existsSync9(pkgPath))
     return { ok: false, message: "no package.json found — nothing to run" };
   let hasTestScript = false;
   try {
@@ -8780,7 +8960,7 @@ function runTestsAction(cwd) {
   }
   if (!hasTestScript)
     return { ok: false, message: 'no "test" script in package.json' };
-  const r = spawnSync8("npm", ["test", "--silent"], { cwd, encoding: "utf8" });
+  const r = spawnSync9("npm", ["test", "--silent"], { cwd, encoding: "utf8" });
   const output = ((r.stdout ?? "") + (r.stderr ?? "")).trim();
   return { ok: r.status === 0, message: output || `exit ${r.status}` };
 }
@@ -9028,10 +9208,142 @@ function resolveSelection(input, visible) {
     return { error: "ambiguous" };
   return { error: "not-found" };
 }
+function detectRunState(cwd, goalId2) {
+  const goal = readGoal(cwd, goalId2);
+  const merged = currentlyMergedTaskIds(goal);
+  const failed = goal.task_ids.filter((id) => {
+    if (merged.includes(id))
+      return false;
+    return resolveTaskState(cwd, id)?.phase === "ABANDONED";
+  });
+  const outstanding = goal.task_ids.filter((id) => !merged.includes(id) && !failed.includes(id));
+  return {
+    goalId: goal.id,
+    runBranch: goal.run_branch,
+    baseSha: goal.base_sha,
+    targetBranch: defaultBranch(cwd),
+    mergedTaskIds: merged,
+    failedTaskIds: failed,
+    outstandingTaskIds: outstanding,
+    shipped: goal.shipped ?? null
+  };
+}
+function runActions(cwd, state) {
+  const actions = [
+    {
+      id: "review",
+      label: "Review Changes",
+      category: "quality",
+      validIn: [],
+      implemented: true,
+      run(cwd2, ctx) {
+        const diff = git(cwd2, "diff", `${state.baseSha}...${ctx.branch}`);
+        return { ok: true, message: diff || "(no changes)" };
+      }
+    }
+  ];
+  for (const taskId2 of state.failedTaskIds) {
+    actions.push({
+      id: `retry-${taskId2}`,
+      label: `Retry ${taskId2}`,
+      category: "development",
+      validIn: [],
+      aliases: [`retry ${taskId2}`],
+      implemented: true,
+      run() {
+        return {
+          ok: true,
+          message: `${taskId2} is ABANDONED (retry budget exhausted) — re-plan and dispatch a fresh ` + "attempt for it; the rest of the run is unaffected"
+        };
+      }
+    });
+  }
+  for (const taskId2 of state.mergedTaskIds) {
+    actions.push({
+      id: `revert-${taskId2}`,
+      label: `Revert ${taskId2}`,
+      category: "git",
+      validIn: [],
+      aliases: [`revert ${taskId2}`],
+      implemented: true,
+      run(cwd2) {
+        const sha = revertTaskMerge(cwd2, state.goalId, taskId2);
+        return { ok: true, message: `reverted ${taskId2}'s merge (${sha})` };
+      }
+    });
+  }
+  if (git(cwd, "status", "--porcelain", "--", ".", ":!.sddx/goals") !== "") {
+    actions.push({
+      id: "commit-remaining",
+      label: "Commit Remaining Changes",
+      category: "git",
+      validIn: [],
+      implemented: true,
+      run(cwd2) {
+        stageAll(cwd2);
+        if (git(cwd2, "diff", "--cached", "--name-only") === "") {
+          return { ok: false, message: "nothing to commit" };
+        }
+        const sha = commit(cwd2, "sddx: checkpoint");
+        return { ok: true, message: `committed ${sha}` };
+      }
+    });
+  }
+  actions.push({
+    id: "push-run-branch",
+    label: "Push Run Branch",
+    category: "git",
+    validIn: [],
+    implemented: true,
+    run(cwd2, ctx) {
+      push(cwd2, ctx.branch);
+      return { ok: true, message: `pushed ${ctx.branch}` };
+    }
+  });
+  if (state.mergedTaskIds.length > 0 && !state.shipped) {
+    actions.push({
+      id: "create-pr",
+      label: "Create PR/MR",
+      category: "git",
+      validIn: [],
+      aliases: ["create pull request", "create merge request", "open pr", "open mr"],
+      implemented: true,
+      run(cwd2) {
+        const res = createGoalPr(cwd2, state.goalId);
+        return { ok: true, message: `opened ${res.prUrl}` };
+      }
+    });
+  }
+  if (state.mergedTaskIds.length > 0) {
+    actions.push({
+      id: "merge-to-target",
+      label: "Merge Into Target Branch",
+      category: "git",
+      validIn: [],
+      implemented: true,
+      run(cwd2, ctx) {
+        git(cwd2, "switch", state.targetBranch);
+        git(cwd2, "merge", "--no-ff", "-m", `sddx: merge ${ctx.branch}`, ctx.branch);
+        return { ok: true, message: `merged ${ctx.branch} into ${state.targetBranch}` };
+      }
+    });
+  }
+  actions.push({
+    id: "exit",
+    label: "Exit",
+    category: "other",
+    validIn: [],
+    implemented: true,
+    run() {
+      return { ok: true, message: "session ended" };
+    }
+  });
+  return actions;
+}
 
 // src/lib/output.ts
-import { existsSync as existsSync9, writeFileSync as writeFileSync7 } from "node:fs";
-import { join as join10 } from "node:path";
+import { existsSync as existsSync10, writeFileSync as writeFileSync7 } from "node:fs";
+import { join as join11 } from "node:path";
 
 // src/lib/ansi.ts
 var CODES = {
@@ -9190,10 +9502,10 @@ function writeTerminalFinal(result, colorFor) {
   }
 }
 function uniquePath(dir, baseName, ext) {
-  let candidate = join10(dir, `${baseName}.${ext}`);
+  let candidate = join11(dir, `${baseName}.${ext}`);
   let n = 2;
-  while (existsSync9(candidate)) {
-    candidate = join10(dir, `${baseName}-${n}.${ext}`);
+  while (existsSync10(candidate)) {
+    candidate = join11(dir, `${baseName}-${n}.${ext}`);
     n++;
   }
   return candidate;
@@ -9288,143 +9600,6 @@ class Reporter {
   }
 }
 
-// src/lib/pr.ts
-import { existsSync as existsSync10, readFileSync as readFileSync9 } from "node:fs";
-import { join as join12 } from "node:path";
-
-// src/lib/prbranch.ts
-import { spawnSync as spawnSync9 } from "node:child_process";
-import { join as join11 } from "node:path";
-var goalBranchName = (goalId2) => `sddx/goal-${goalId2}`;
-function taskCommitSha(cwd, taskId2) {
-  return git(cwd, "rev-parse", `refs/heads/sddx/${taskId2}`);
-}
-function resetGoalBranch(cwd, branch) {
-  if (branchExists(cwd, branch))
-    forceDeleteBranch(cwd, branch);
-}
-function buildGoalBranch(cwd, goalId2, taskIds) {
-  if (taskIds.length === 0)
-    throw new Error("cannot build a goal branch with zero tasks");
-  const resolved = taskIds.map((taskId2) => {
-    const task = resolveTaskState(cwd, taskId2);
-    if (!task) {
-      throw new Error(`task ${taskId2} could not be resolved while building the goal branch`);
-    }
-    if (!branchExists(cwd, `sddx/${taskId2}`)) {
-      throw new Error(`task ${taskId2} has no sddx/${taskId2} branch — workspace mode "none" tasks can't be ` + "cherry-picked into a goal PR; recreate the task with --workspace branch or worktree");
-    }
-    return { taskId: taskId2, createdAt: task.created_at, commitSha: taskCommitSha(cwd, taskId2) };
-  });
-  const commits = resolved.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
-  const branch = goalBranchName(goalId2);
-  resetGoalBranch(cwd, branch);
-  const base = resolveBaseRef(cwd);
-  const worktreePath = join11(worktreesDir(cwd), `goal-${goalId2}`);
-  git(cwd, "worktree", "add", "-q", worktreePath, "-b", branch, base.sha);
-  try {
-    for (const { taskId: taskId2, commitSha } of commits) {
-      const r = spawnSync9("git", ["cherry-pick", commitSha], {
-        cwd: worktreePath,
-        encoding: "utf8"
-      });
-      if (r.status !== 0) {
-        spawnSync9("git", ["cherry-pick", "--abort"], { cwd: worktreePath });
-        throw new Error(`cherry-pick failed for task ${taskId2} while building ${branch}: ${(r.stderr ?? "").trim()}`);
-      }
-    }
-  } catch (e) {
-    removeWorktreeForced(cwd, worktreePath);
-    forceDeleteBranch(cwd, branch);
-    throw e;
-  }
-  const headSha2 = git(worktreePath, "rev-parse", "HEAD");
-  return { branch, headSha: headSha2, worktreePath };
-}
-
-// src/lib/pr.ts
-function renderPrBody(worktreePath, goal) {
-  const lines = [
-    `Proof of work for goal \`${goal.id}\`: ${goal.goal}`,
-    "",
-    "| Task | Oracle | Exit | Receipt sha256 |",
-    "| --- | --- | --- | --- |"
-  ];
-  for (const taskId2 of goal.task_ids) {
-    const rPath = receiptPath(worktreePath, taskId2);
-    if (!existsSync10(rPath)) {
-      throw new Error(`receipt for task ${taskId2} is missing from the goal branch — the cherry-pick is incomplete`);
-    }
-    const raw = readFileSync9(rPath);
-    const receipt = JSON.parse(raw.toString("utf8"));
-    const exitCode = receipt.runs?.at(-1)?.exit_code ?? receipt.exit_code ?? "?";
-    lines.push(`| \`${taskId2}\` | \`${receipt.oracle.run}\` | ${exitCode} | \`${sha256(raw)}\` |`);
-  }
-  lines.push("", "_Generated by `sddx pr create` from verified receipts — not hand-written._");
-  return lines.join(`
-`);
-}
-function shipTask(cwd, taskId2, goalId2, prUrl) {
-  const branch = `sddx/${taskId2}`;
-  const mark = (workPath) => {
-    const task = readTask(workPath, taskId2);
-    markShipped(task, goalId2, prUrl);
-    writeTask(workPath, task);
-    git(workPath, "add", taskPath(workPath, taskId2));
-    git(workPath, "commit", "-qm", `sddx(${taskId2}): mark shipped in goal ${goalId2}`);
-  };
-  if (currentBranch(cwd) === branch) {
-    mark(cwd);
-    return;
-  }
-  const existingWtPath = join12(worktreesDir(cwd), taskId2);
-  if (existsSync10(existingWtPath)) {
-    mark(existingWtPath);
-    return;
-  }
-  const tmpPath = join12(worktreesDir(cwd), `ship-${taskId2}`);
-  git(cwd, "worktree", "add", "-q", tmpPath, branch);
-  try {
-    mark(tmpPath);
-  } finally {
-    removeWorktreeForced(cwd, tmpPath);
-  }
-}
-function createGoalPr(cwd, id, opts = {}) {
-  const completeness = checkGoalComplete(cwd, id);
-  if (!completeness.complete) {
-    const reasons = completeness.blocking.map((b) => `${b.task_id} (${b.reason})`).join(", ");
-    throw new Error(`goal ${id} is not complete — blocking: ${reasons}`);
-  }
-  const goal = readGoal(cwd, id);
-  if (goal.shipped) {
-    throw new Error(`goal ${id} already shipped as ${goal.shipped.pr_url} (${goal.shipped.at}) — ` + "re-running pr create would open a duplicate PR; nothing to do");
-  }
-  const backend = resolveBackend(cwd);
-  const auth = backend.authStatus(cwd);
-  if (!auth.ok) {
-    throw new Error(`${backend.name} is not authenticated: ${auth.message}`);
-  }
-  const built = buildGoalBranch(cwd, id, goal.task_ids);
-  let prUrl;
-  try {
-    push(cwd, built.branch);
-    const body = renderPrBody(built.worktreePath, goal);
-    const title = opts.title ?? goal.goal;
-    prUrl = backend.openPr(cwd, { branch: built.branch, title, body });
-  } finally {
-    removeWorktreeForced(cwd, built.worktreePath);
-  }
-  for (const taskId2 of goal.task_ids) {
-    shipTask(cwd, taskId2, id, prUrl);
-  }
-  goal.shipped = { pr_url: prUrl, at: new Date().toISOString() };
-  writeGoal(cwd, goal);
-  stagePath(cwd, goalPath(cwd, goal.id));
-  commit(cwd, `sddx: goal ${goal.id} shipped as ${prUrl}`);
-  return { prUrl, branch: built.branch, taskIds: goal.task_ids };
-}
-
 // src/lib/oracle.ts
 import { spawnSync as spawnSync10 } from "node:child_process";
 var ORACLE_TIMEOUT_MS = 10 * 60000;
@@ -9462,6 +9637,51 @@ function redCheck(cwd, id) {
   };
   writeTask(cwd, task);
   return { ok: true, exitCode };
+}
+
+// src/lib/runreport.ts
+function generateRunReport(cwd, goalId2, targetBranch) {
+  const goal = readGoal(cwd, goalId2);
+  const merged = currentlyMergedTaskIds(goal);
+  const failed = goal.task_ids.filter((id) => !merged.includes(id) && resolveTaskState(cwd, id)?.phase === "ABANDONED");
+  const outstanding = goal.task_ids.filter((id) => !merged.includes(id) && !failed.includes(id));
+  const diffStat = git(cwd, "diff", "--stat", `${goal.base_sha}...${goal.run_branch}`);
+  return {
+    goalId: goal.id,
+    runBranch: goal.run_branch,
+    targetBranch,
+    baseSha: goal.base_sha,
+    merged: merged.length,
+    failed: failed.length,
+    outstanding: outstanding.length,
+    total: goalCounts(goal).total,
+    diffStat,
+    reviewCommands: [
+      `git switch ${goal.run_branch}`,
+      `git diff ${targetBranch}...${goal.run_branch}`,
+      `git log --oneline ${targetBranch}..${goal.run_branch}`
+    ]
+  };
+}
+function renderRunReport(r) {
+  const lines = [
+    r.outstanding > 0 ? "Run in progress" : "Run completed",
+    "",
+    `Review branch: ${r.runBranch}`,
+    `Base branch remains unchanged: ${r.targetBranch}`,
+    "",
+    "Summary",
+    `- ${r.merged} of ${r.total} task(s) merged`,
+    ...r.failed > 0 ? [`- ${r.failed} task(s) failed`] : [],
+    ...r.outstanding > 0 ? [`- ${r.outstanding} task(s) outstanding`] : [],
+    ...r.diffStat ? r.diffStat.split(`
+`).map((l) => `- ${l.trim()}`) : [],
+    "",
+    "Review commands",
+    ...r.reviewCommands
+  ];
+  return lines.join(`
+`);
 }
 
 // src/lib/spec.ts
@@ -9656,7 +9876,8 @@ function verifyTask(cwd, id, opts) {
   const receiptPath2 = writeReceipt(cwd, receipt);
   stageAll(cwd);
   const commitSha = commit(cwd, `sddx(${id}): ${task.task}`);
-  return { verdict: "pass", exitCode, durationMs, receiptPath: receiptPath2, commitSha };
+  const integration = integrateTaskIntoRunBranch(cwd, id);
+  return { verdict: "pass", exitCode, durationMs, receiptPath: receiptPath2, commitSha, integration };
 }
 
 // src/cli.ts
@@ -9672,11 +9893,13 @@ var USAGE = `usage:
   sddx goal show <id>
   sddx graph create --graph <path> [--workspace auto|worktree|branch|none]
   sddx pr create --goal <goal-id> [--title <title>]
+  sddx run report --goal <goal-id>
   sddx board
   sddx audit [--signatures] [--ci]
   sddx cleanup <id>
   sddx sweep
   sddx next-actions [--select <reply>]
+  sddx next-actions --goal <goal-id> [--select <reply>]
   sddx config show [--json (deprecated, use --output json)]
   sddx config validate
 
@@ -9712,10 +9935,10 @@ function makeReporter(command, format, noColor) {
   });
 }
 function mainTaskIds(cwd) {
-  const dir = join13(sddxDir(cwd), "tasks");
+  const dir = join12(sddxDir(cwd), "tasks");
   if (!existsSync11(dir))
     return [];
-  return readdirSync5(dir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length));
+  return readdirSync6(dir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length));
 }
 function flag(args, name) {
   const i = args.indexOf(name);
@@ -9741,7 +9964,7 @@ function flags(args, name) {
 function readVersionField(relativePath) {
   try {
     const manifest = new URL(relativePath, import.meta.url);
-    return JSON.parse(readFileSync10(manifest, "utf8")).version;
+    return JSON.parse(readFileSync9(manifest, "utf8")).version;
   } catch {
     return "unknown";
   }
@@ -9767,35 +9990,41 @@ function pickWorkspace(cwd, requested, reporter) {
   }
   return "worktree";
 }
-function createRootTask(cwd, spec, specSrc, mode, reporter) {
+function createRootTask(cwd, spec, specSrc, mode, reporter, forkSha) {
   const id = taskId(spec.task);
   if (mode === "worktree") {
-    const base2 = resolveBaseRef(cwd);
-    if (base2.source === "HEAD")
-      reporter.success("no origin remote — forking from local HEAD");
-    const wtPath = createWorktree(cwd, id, base2.sha);
-    const relPath = join13(".sddx-worktrees", id);
-    mkdirSync6(join13(sddxDir(wtPath), "specs"), { recursive: true });
-    const specPath2 = join13(".sddx", "specs", `${id}.yaml`);
-    copyFileSync2(specSrc, join13(wtPath, specPath2));
+    let baseSha;
+    if (forkSha) {
+      baseSha = forkSha;
+    } else {
+      const base2 = resolveBaseRef(cwd);
+      if (base2.source === "HEAD")
+        reporter.success("no origin remote — forking from local HEAD");
+      baseSha = base2.sha;
+    }
+    const wtPath = createWorktree(cwd, id, baseSha);
+    const relPath = join12(".sddx-worktrees", id);
+    mkdirSync7(join12(sddxDir(wtPath), "specs"), { recursive: true });
+    const specPath2 = join12(".sddx", "specs", `${id}.yaml`);
+    copyFileSync2(specSrc, join12(wtPath, specPath2));
     createTask(wtPath, spec, specPath2, {
       mode: "worktree",
       branch: `sddx/${id}`,
-      base_sha: base2.sha,
+      base_sha: baseSha,
       path: relPath
     });
     return {
       id,
-      line: `created ${id} phase=PLAN worktree=${relPath} branch=sddx/${id} base=${base2.sha}`
+      line: `created ${id} phase=PLAN worktree=${relPath} branch=sddx/${id} base=${baseSha}`
     };
   }
   const useBranch = mode === "branch";
   const base = headSha(cwd);
   if (useBranch)
     createBranch(cwd, `sddx/${id}`);
-  mkdirSync6(join13(sddxDir(cwd), "specs"), { recursive: true });
-  const specPath = join13(".sddx", "specs", `${id}.yaml`);
-  copyFileSync2(specSrc, join13(cwd, specPath));
+  mkdirSync7(join12(sddxDir(cwd), "specs"), { recursive: true });
+  const specPath = join12(".sddx", "specs", `${id}.yaml`);
+  copyFileSync2(specSrc, join12(cwd, specPath));
   createTask(cwd, spec, specPath, {
     mode,
     branch: useBranch ? `sddx/${id}` : null,
@@ -9808,9 +10037,9 @@ function createDeferredTask(cwd, spec, specSrc, mode, dependsOn) {
     throw new Error("dependent tasks require worktree or branch mode — `none` has no isolatable base to fork from");
   }
   const id = taskId(spec.task);
-  mkdirSync6(join13(sddxDir(cwd), "specs"), { recursive: true });
-  const specPath = join13(".sddx", "specs", `${id}.yaml`);
-  copyFileSync2(specSrc, join13(cwd, specPath));
+  mkdirSync7(join12(sddxDir(cwd), "specs"), { recursive: true });
+  const specPath = join12(".sddx", "specs", `${id}.yaml`);
+  copyFileSync2(specSrc, join12(cwd, specPath));
   createTask(cwd, spec, specPath, { mode, branch: null, base_sha: `pending:${dependsOn.join(",")}` }, { dependsOn });
   return id;
 }
@@ -9824,7 +10053,7 @@ function cmdTaskCreate(cwd, args, format, noColor) {
     fail(USAGE, 2);
   let yamlText;
   try {
-    yamlText = readFileSync10(join13(cwd, specArg), "utf8");
+    yamlText = readFileSync9(join12(cwd, specArg), "utf8");
   } catch {
     fail(`cannot read spec file: ${specArg}`);
   }
@@ -9833,7 +10062,7 @@ function cmdTaskCreate(cwd, args, format, noColor) {
     failWith(errors2.map((e) => `spec error: ${e}`));
   }
   const mode = pickWorkspace(cwd, requested, reporter);
-  const specSrc = join13(cwd, specArg);
+  const specSrc = join12(cwd, specArg);
   const dependsOn = flags(args, "--depends-on");
   if (dependsOn.length > 0) {
     for (const parentId of dependsOn) {
@@ -9889,7 +10118,7 @@ function cmdGraphCreate(cwd, args, format, noColor) {
     fail(USAGE, 2);
   let graphText;
   try {
-    graphText = readFileSync10(join13(cwd, graphArg), "utf8");
+    graphText = readFileSync9(join12(cwd, graphArg), "utf8");
   } catch {
     fail(`cannot read graph file: ${graphArg}`);
   }
@@ -9897,7 +10126,7 @@ function cmdGraphCreate(cwd, args, format, noColor) {
   if (!graph) {
     failWith(graphErrors.map((e) => `graph error: ${e}`));
   }
-  const graphDir = dirname2(join13(cwd, graphArg));
+  const graphDir = dirname2(join12(cwd, graphArg));
   const errs = [];
   if (requested === "none" && graph.tasks.some((n) => n.depends_on.length > 0)) {
     errs.push("workspace none is incompatible with dependent tasks — use worktree or branch mode");
@@ -9908,7 +10137,7 @@ function cmdGraphCreate(cwd, args, format, noColor) {
     const src = resolve(graphDir, node.spec);
     let text;
     try {
-      text = readFileSync10(src, "utf8");
+      text = readFileSync9(src, "utf8");
     } catch {
       errs.push(`${node.alias}: cannot read spec ${node.spec}`);
       continue;
@@ -9934,9 +10163,18 @@ function cmdGraphCreate(cwd, args, format, noColor) {
     dependsOn: n.depends_on,
     scope: loaded.get(n.alias)?.spec.scope ?? []
   }))));
+  const gid = goalId(graph.goal);
+  if (existsSync11(goalPath(cwd, gid)))
+    errs.push(`goal error: goal ${gid} already exists`);
   if (errs.length > 0) {
     failWith(errs.map((e) => `graph error: ${e}`));
   }
+  const base = resolveBaseRef(cwd);
+  if (base.source === "HEAD")
+    reporter.success("no origin remote — forking from local HEAD");
+  const runBranch = runBranchName(gid);
+  createBranchAt(cwd, runBranch, base.sha);
+  reporter.success(`created run branch ${runBranch} at ${base.sha}`);
   const mode = pickWorkspace(cwd, requested, reporter);
   const aliasToId = new Map;
   const deps = {};
@@ -9944,7 +10182,7 @@ function cmdGraphCreate(cwd, args, format, noColor) {
   for (const node of topoOrder(graph.tasks)) {
     const { spec, src } = loaded.get(node.alias);
     if (node.depends_on.length === 0) {
-      const { id, line } = createRootTask(cwd, spec, src, mode, reporter);
+      const { id, line } = createRootTask(cwd, spec, src, mode, reporter, base.sha);
       aliasToId.set(node.alias, id);
       created.push(id);
       reporter.success(line);
@@ -9957,13 +10195,22 @@ function cmdGraphCreate(cwd, args, format, noColor) {
       reporter.success(`created ${id} phase=PLAN depends_on=${parentIds.join(",")} workspace=deferred(${mode})`);
     }
   }
-  const g = createGoal(cwd, graph.goal, created, deps);
-  stagePath(cwd, goalPath(cwd, g.id));
-  commit(cwd, `sddx: register goal ${g.id}`);
-  reporter.success(`created goal ${g.id} tasks=[${g.task_ids.join(", ")}]`);
+  const g = createGoal(cwd, graph.goal, created, {
+    deps,
+    id: gid,
+    runBranch,
+    baseSha: base.sha
+  });
+  reporter.success(`created goal ${g.id} tasks=[${g.task_ids.join(", ")}] run_branch=${runBranch}`);
   for (const [alias, id] of aliasToId)
     reporter.success(`  ${alias} → ${id}`);
-  reporter.finish({ goalId: g.id, taskIds: g.task_ids, aliasToId: Object.fromEntries(aliasToId) });
+  reporter.finish({
+    goalId: g.id,
+    taskIds: g.task_ids,
+    aliasToId: Object.fromEntries(aliasToId),
+    runBranch,
+    baseSha: base.sha
+  });
 }
 function cmdTaskPhase(cwd, args, format, noColor) {
   const reporter = makeReporter("task phase", format, noColor);
@@ -10024,14 +10271,23 @@ function cmdVerify(cwd, args, format, noColor) {
     pluginVersion: pluginVersion()
   });
   if (res.verdict === "pass") {
+    const integration = res.integration ?? { result: "none" };
     reporter.success(`verdict=pass receipt=${res.receiptPath} commit=${res.commitSha} duration_ms=${res.durationMs}`);
+    if (integration.result === "merged") {
+      reporter.success(`integrated: merged into ${integration.runBranch} (${integration.mergeCommit})`);
+    } else if (integration.result === "conflict") {
+      reporter.error(`integration conflict: ${id} passed its oracle but could not be merged into ${integration.runBranch} — resolve manually`, { stream: "stdout" });
+    } else if (integration.reason === "no-branch") {
+      reporter.error(`warning: ${id} belongs to goal (run branch ${integration.runBranch}) but was created with --workspace none — it has no branch and can never be merged into the run branch`, { stream: "stdout" });
+    }
     reporter.finish({
       id,
       verdict: "pass",
       receiptPath: res.receiptPath,
       commitSha: res.commitSha,
       durationMs: res.durationMs,
-      exitCode: res.exitCode
+      exitCode: res.exitCode,
+      integration
     });
     return;
   }
@@ -10047,29 +10303,19 @@ function cmdVerify(cwd, args, format, noColor) {
   }, { status: "error" });
   process.exit(1);
 }
-function corroboratedShip(cwd, taskId2, shipped) {
-  if (!shipped)
-    return false;
-  try {
-    const goal = readGoal(cwd, shipped.goal_id);
-    return goal.task_ids.includes(taskId2) && goal.shipped?.pr_url === shipped.pr_url;
-  } catch {
-    return false;
-  }
-}
 function cmdCleanup(cwd, args, format, noColor) {
   const reporter = makeReporter("cleanup", format, noColor);
   const [id] = args;
   if (!id)
     fail(USAGE, 2);
   const branch = `sddx/${id}`;
-  const wtPath = join13(worktreesDir(cwd), id);
+  const wtPath = join12(worktreesDir(cwd), id);
   if (existsSync11(wtPath)) {
     if (isDirty(wtPath)) {
-      fail(`refusing: worktree ${join13(".sddx-worktrees", id)} has uncommitted changes`);
+      fail(`refusing: worktree ${join12(".sddx-worktrees", id)} has uncommitted changes`);
     }
     removeWorktree(cwd, wtPath);
-    reporter.success(`removed worktree ${join13(".sddx-worktrees", id)}`);
+    reporter.success(`removed worktree ${join12(".sddx-worktrees", id)}`);
   }
   if (!branchExists(cwd, branch)) {
     reporter.success(`no branch ${branch} — nothing to clean up`);
@@ -10080,19 +10326,19 @@ function cmdCleanup(cwd, args, format, noColor) {
     fail(`refusing: ${branch} is checked out — switch branches first`);
   }
   if (!isMerged(cwd, branch)) {
-    const shipped = resolveTaskState(cwd, id)?.shipped;
-    if (!shipped || !corroboratedShip(cwd, id, shipped)) {
+    const goal = findGoalForTask(cwd, id);
+    if (!goal || !currentlyMergedTaskIds(goal).includes(id)) {
       fail(`refusing: ${branch} is not merged into HEAD`);
     }
-    reporter.success(`${branch} not merged by ancestry but shipped in goal ${shipped.goal_id} (${shipped.pr_url})`);
+    reporter.success(`${branch} not merged into HEAD but merged into run branch ${goal.run_branch}`);
     forceDeleteBranch(cwd, branch);
-    reporter.success(`deleted shipped branch ${branch}`);
-    reporter.finish({ id, branch, removed: true, shipped: true });
+    reporter.success(`deleted branch ${branch} (merged via run branch)`);
+    reporter.finish({ id, branch, removed: true, viaRunBranch: true });
     return;
   }
   deleteBranch(cwd, branch);
   reporter.success(`deleted merged branch ${branch}`);
-  reporter.finish({ id, branch, removed: true, shipped: false });
+  reporter.finish({ id, branch, removed: true, viaRunBranch: false });
 }
 function cmdGoalCreate(cwd, args, format, noColor) {
   const reporter = makeReporter("goal create", format, noColor);
@@ -10108,11 +10354,18 @@ function cmdGoalCreate(cwd, args, format, noColor) {
   if (scheduleErrs.length > 0) {
     failWith(scheduleErrs.map((e) => `goal error: ${e}`));
   }
-  const g = createGoal(cwd, goalSentence, taskIds);
-  stagePath(cwd, goalPath(cwd, g.id));
-  commit(cwd, `sddx: register goal ${g.id}`);
-  reporter.success(`created goal ${g.id} tasks=[${g.task_ids.join(", ")}]`);
-  reporter.finish({ id: g.id, taskIds: g.task_ids });
+  const gid = goalId(goalSentence);
+  if (existsSync11(goalPath(cwd, gid)))
+    fail(`goal ${gid} already exists at ${goalPath(cwd, gid)}`);
+  const base = resolveBaseRef(cwd);
+  if (base.source === "HEAD")
+    reporter.success("no origin remote — forking from local HEAD");
+  const runBranch = runBranchName(gid);
+  createBranchAt(cwd, runBranch, base.sha);
+  reporter.success(`created run branch ${runBranch} at ${base.sha}`);
+  const g = createGoal(cwd, goalSentence, taskIds, { id: gid, runBranch, baseSha: base.sha });
+  reporter.success(`created goal ${g.id} tasks=[${g.task_ids.join(", ")}] run_branch=${runBranch}`);
+  reporter.finish({ id: g.id, taskIds: g.task_ids, runBranch, baseSha: base.sha });
 }
 function cmdPrCreate(cwd, args, format, noColor) {
   const reporter = makeReporter("pr create", format, noColor);
@@ -10122,6 +10375,15 @@ function cmdPrCreate(cwd, args, format, noColor) {
   const res = createGoalPr(cwd, goalIdArg, { title: flag(args, "--title") });
   reporter.success(`pr=${res.prUrl} branch=${res.branch} tasks=[${res.taskIds.join(", ")}]`);
   reporter.finish({ prUrl: res.prUrl, branch: res.branch, taskIds: res.taskIds });
+}
+function cmdRunReport(cwd, args, format, noColor) {
+  const reporter = makeReporter("run report", format, noColor);
+  const goalIdArg = flag(args, "--goal");
+  if (!goalIdArg)
+    fail(USAGE, 2);
+  const report = generateRunReport(cwd, goalIdArg, defaultBranch(cwd));
+  reporter.success(renderRunReport(report));
+  reporter.finish(report);
 }
 function cmdSweep(cwd, format, noColor) {
   const reporter = makeReporter("sweep", format, noColor);
@@ -10138,9 +10400,46 @@ function cmdSweep(cwd, format, noColor) {
   reporter.success(`sweep: ${res.removed.length} removed, ${res.skipped.length} skipped`);
   reporter.finish({ locked: false, removed: res.removed, skipped: res.skipped });
 }
+function cmdNextActionsRun(cwd, goalArg, selectArg, reporter) {
+  if (selectArg === undefined) {
+    const visible = runActions(cwd, detectRunState(cwd, goalArg));
+    reporter.success(renderMenu(visible));
+    reporter.finish({ selected: null, nextActions: visible.map((a) => a.label) });
+    return;
+  }
+  const fresh = detectRunState(cwd, goalArg);
+  const freshVisible = runActions(cwd, fresh);
+  const resolved = resolveSelection(selectArg, freshVisible);
+  if ("error" in resolved) {
+    reporter.error(resolved.error === "ambiguous" ? `"${selectArg}" matches more than one action — be more specific.` : `"${selectArg}" isn't a valid action right now.`, { stream: "stdout" });
+    reporter.success(renderMenu(freshVisible));
+    process.exitCode = 1;
+    reporter.finish({ selected: selectArg, error: resolved.error }, { status: "error" });
+    return;
+  }
+  if (!resolved.run) {
+    reporter.error(`${resolved.label}: not implemented yet.`, { stream: "stdout" });
+    process.exitCode = 1;
+    reporter.finish({ selected: resolved.label, implemented: false }, { status: "error" });
+    return;
+  }
+  const result = resolved.run(cwd, { branch: fresh.runBranch });
+  if (result.ok) {
+    reporter.success(result.message);
+  } else {
+    reporter.error(result.message, { stream: "stdout" });
+    process.exitCode = 1;
+  }
+  reporter.finish({ selected: resolved.label, ok: result.ok }, { status: result.ok ? "success" : "error" });
+}
 function cmdNextActions(cwd, args, format, noColor) {
   const reporter = makeReporter("next-actions", format, noColor);
   const selectArg = flag(args, "--select");
+  const goalArg = flag(args, "--goal");
+  if (goalArg) {
+    cmdNextActionsRun(cwd, goalArg, selectArg, reporter);
+    return;
+  }
   const detected = detectState(cwd);
   if (detected.warning)
     reporter.success(`warning: ${detected.warning}`);
@@ -10228,7 +10527,7 @@ function cmdConfigShow(cwd, args, format, noColor) {
 }
 function cmdConfigValidate(cwd, format, noColor) {
   const reporter = makeReporter("config validate", format, noColor);
-  const path = join13(sddxDir(cwd), "config.json");
+  const path = join12(sddxDir(cwd), "config.json");
   if (!existsSync11(path)) {
     reporter.success("config validate: no .sddx/config.json — using built-in defaults");
     reporter.finish({ hasConfig: false, warnings: [] });
@@ -10236,7 +10535,7 @@ function cmdConfigValidate(cwd, format, noColor) {
   }
   let parsed;
   try {
-    parsed = JSON.parse(readFileSync10(path, "utf8"));
+    parsed = JSON.parse(readFileSync9(path, "utf8"));
   } catch (e) {
     fail(`config validate: .sddx/config.json is not valid JSON: ${e.message}`);
   }
@@ -10374,6 +10673,10 @@ function main(argv) {
     }
     if (cmd === "pr" && rest[0] === "create") {
       cmdPrCreate(cwd, rest.slice(1), format, noColor);
+      return;
+    }
+    if (cmd === "run" && rest[0] === "report") {
+      cmdRunReport(cwd, rest.slice(1), format, noColor);
       return;
     }
     if (cmd === "cleanup") {

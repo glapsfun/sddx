@@ -160,61 +160,35 @@ describe("sddx cli", () => {
     expect(existsSync(wt)).toBe(false);
   });
 
-  test("cleanup accepts a shipped marker corroborated by its goal file", () => {
+  test("cleanup accepts a task merged into its goal's run branch (real ancestry, no marker)", () => {
     const cwd = fixtureRepo();
     writeFileSync(join(cwd, "spec.yaml"), SPEC);
-    const id = /created (\S+)/.exec(
-      cli(cwd, "task", "create", "--spec", "spec.yaml", "--workspace", "branch").stdout,
-    )![1]!;
+    writeFileSync(
+      join(cwd, "graph.yaml"),
+      "goal: ship it\ntasks:\n  - alias: only\n    spec: spec.yaml\n",
+    );
+    const created = cli(cwd, "graph", "create", "--graph", "graph.yaml", "--workspace", "branch");
+    expect(created.status).toBe(0);
+    const id = /created (\S+) phase=PLAN/.exec(created.stdout)![1]!;
+
     cli(cwd, "task", "phase", id, "RED", "--test-exit", "1");
     cli(cwd, "task", "phase", id, "GREEN", "--test-exit", "0");
     cli(cwd, "task", "phase", id, "VERIFY");
     fakeRedCheck(cwd, id);
+    // verify merges the task's branch into the goal's run branch automatically
     expect(cli(cwd, "verify", id).status).toBe(0);
-    spawnSync("git", ["switch", "-q", "main"], { cwd });
-
-    // not merged by ancestry (no merge happened) — refused, same as always
-    expect(cli(cwd, "cleanup", id).status).toBe(1);
-
-    // a real goal, shipped — this is the corroborating record `cleanup` checks.
-    // `goal create` now commits the goal file itself (state is files in git),
-    // so the shipped-marker edit below must be committed too, the same way
-    // `pr create` commits it — an uncommitted edit would block the branch
-    // switch that follows (git refuses to discard local changes on checkout).
-    const goalCreated = cli(cwd, "goal", "create", "--goal", "Ship it", "--tasks", id);
-    const goalId = /created goal (\S+)/.exec(goalCreated.stdout)![1]!;
-    const prUrl = "https://github.com/org/repo/pull/1";
-    const goalFile = join(cwd, ".sddx", "goals", `${goalId}.json`);
-    const g = JSON.parse(readFileSync(goalFile, "utf8"));
-    g.shipped = { pr_url: prUrl, at: new Date().toISOString() };
-    writeFileSync(goalFile, `${JSON.stringify(g, null, 2)}\n`);
-    spawnSync("git", ["add", "--", goalFile], { cwd });
-    spawnSync("git", ["commit", "-qm", "mark goal shipped"], { cwd });
-
-    // simulate what `pr create` does after cherry-picking this task's commit
-    // into that goal PR: a shipped-marker commit on the task's own branch
-    spawnSync("git", ["switch", "-q", `sddx/${id}`], { cwd });
-    const taskFile = join(cwd, ".sddx", "tasks", `${id}.json`);
-    const t = JSON.parse(readFileSync(taskFile, "utf8"));
-    t.shipped = { goal_id: goalId, pr_url: prUrl, at: new Date().toISOString() };
-    writeFileSync(taskFile, `${JSON.stringify(t, null, 2)}\n`);
-    // scoped add: `-A` would also sweep the still-uncommitted goal file (it
-    // carries over across the branch switch) onto the task's own branch and
-    // strand it there once we switch back to main
-    spawnSync("git", ["add", taskFile], { cwd });
-    spawnSync("git", ["commit", "-qm", "mark shipped"], { cwd });
     spawnSync("git", ["switch", "-q", "main"], { cwd });
 
     const ok = cli(cwd, "cleanup", id);
     expect(ok.status).toBe(0);
-    expect(ok.stdout).toContain(`shipped in goal ${goalId}`);
+    expect(ok.stdout).toContain("merged into run branch");
     expect(
       spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/sddx/${id}`], { cwd })
         .status,
     ).not.toBe(0);
   });
 
-  test("cleanup refuses a shipped marker with no corroborating goal record", () => {
+  test("cleanup refuses a task not merged into HEAD or any goal's run branch", () => {
     const cwd = fixtureRepo();
     writeFileSync(join(cwd, "spec.yaml"), SPEC);
     const id = /created (\S+)/.exec(
@@ -225,20 +199,6 @@ describe("sddx cli", () => {
     cli(cwd, "task", "phase", id, "VERIFY");
     fakeRedCheck(cwd, id);
     expect(cli(cwd, "verify", id).status).toBe(0);
-
-    // a fabricated (or stale) shipped marker with no matching goal file —
-    // e.g. a hand-edited task file, or a goal id that was never shipped
-    spawnSync("git", ["switch", "-q", `sddx/${id}`], { cwd });
-    const taskFile = join(cwd, ".sddx", "tasks", `${id}.json`);
-    const t = JSON.parse(readFileSync(taskFile, "utf8"));
-    t.shipped = {
-      goal_id: "20260719-nonexistent-goal",
-      pr_url: "https://github.com/org/repo/pull/999",
-      at: new Date().toISOString(),
-    };
-    writeFileSync(taskFile, `${JSON.stringify(t, null, 2)}\n`);
-    spawnSync("git", ["add", "-A"], { cwd });
-    spawnSync("git", ["commit", "-qm", "mark shipped"], { cwd });
     spawnSync("git", ["switch", "-q", "main"], { cwd });
 
     const refused = cli(cwd, "cleanup", id);
@@ -546,5 +506,42 @@ describe("sddx cli", () => {
       expect(r.stdout).toContain("usage:");
       expect(r.stdout).toContain("sddx task create");
     }
+  });
+
+  test("graph create + verify merges automatically; run report and next-actions --goal reflect it", () => {
+    const cwd = fixtureRepo();
+    writeFileSync(join(cwd, "spec.yaml"), SPEC);
+    writeFileSync(
+      join(cwd, "graph.yaml"),
+      "goal: report it\ntasks:\n  - alias: only\n    spec: spec.yaml\n",
+    );
+    const created = cli(cwd, "graph", "create", "--graph", "graph.yaml", "--workspace", "worktree");
+    expect(created.status).toBe(0);
+    const id = /created (\S+) phase=PLAN/.exec(created.stdout)![1]!;
+    const goalId = /created goal (\S+)/.exec(created.stdout)![1]!;
+    const wt = join(cwd, ".sddx-worktrees", id);
+
+    cli(wt, "task", "phase", id, "RED", "--test-exit", "1");
+    cli(wt, "task", "phase", id, "GREEN", "--test-exit", "0");
+    cli(wt, "task", "phase", id, "VERIFY");
+    fakeRedCheck(wt, id);
+    const verified = cli(wt, "verify", id);
+    expect(verified.status).toBe(0);
+    expect(verified.stdout).toContain("integrated: merged into");
+
+    const report = cli(cwd, "run", "report", "--goal", goalId);
+    expect(report.status).toBe(0);
+    expect(report.stdout).toContain("Run completed");
+    expect(report.stdout).toContain("1 of 1 task(s) merged");
+    expect(report.stdout).toContain("Base branch remains unchanged: main");
+
+    const menu = cli(cwd, "next-actions", "--goal", goalId);
+    expect(menu.status).toBe(0);
+    expect(menu.stdout).toContain("Create PR/MR");
+    expect(menu.stdout).toContain("Review Changes");
+
+    const reviewed = cli(cwd, "next-actions", "--goal", goalId, "--select", "review changes");
+    expect(reviewed.status).toBe(0);
+    expect(reviewed.stdout).toContain(".sddx/specs");
   });
 });

@@ -5,21 +5,37 @@ import { computeBoard } from "./board";
 import { readConfig, resolveConfig, validateConfigObject } from "./lib/config";
 import {
   branchExists,
-  commit,
   createBranch,
+  createBranchAt,
   currentBranch,
+  defaultBranch,
   deleteBranch,
   forceDeleteBranch,
   headSha,
   isMerged,
-  stagePath,
 } from "./lib/git";
-import { createGoal, goalPath, readGoal } from "./lib/goal";
+import {
+  createGoal,
+  currentlyMergedTaskIds,
+  findGoalForTask,
+  goalId,
+  goalPath,
+  readGoal,
+  runBranchName,
+} from "./lib/goal";
 import { type GraphNode, parseGraph, validateSchedule } from "./lib/graph";
-import { detectState, renderMenu, resolveSelection, visibleActions } from "./lib/next-actions";
+import {
+  detectRunState,
+  detectState,
+  renderMenu,
+  resolveSelection,
+  runActions,
+  visibleActions,
+} from "./lib/next-actions";
 import { type OutputFormat, parseOutputFlag, printError, printLine, Reporter } from "./lib/output";
 import { createGoalPr } from "./lib/pr";
 import { redCheck } from "./lib/redcheck";
+import { generateRunReport, renderRunReport } from "./lib/runreport";
 import { parseSpec, type Spec } from "./lib/spec";
 import {
   abandonOrRetry,
@@ -60,11 +76,13 @@ const USAGE = `usage:
   sddx goal show <id>
   sddx graph create --graph <path> [--workspace auto|worktree|branch|none]
   sddx pr create --goal <goal-id> [--title <title>]
+  sddx run report --goal <goal-id>
   sddx board
   sddx audit [--signatures] [--ci]
   sddx cleanup <id>
   sddx sweep
   sddx next-actions [--select <reply>]
+  sddx next-actions --goal <goal-id> [--select <reply>]
   sddx config show [--json (deprecated, use --output json)]
   sddx config validate
 
@@ -179,19 +197,29 @@ function pickWorkspace(
 }
 
 /** Create a root task with a real workspace (worktree/branch/none). `specSrc` is
- * the absolute path of the spec file to copy into the task's `.sddx/specs/`. */
+ * the absolute path of the spec file to copy into the task's `.sddx/specs/`.
+ * `forkSha`, when given (a goal's run branch tip), is used as the worktree's
+ * fork point instead of resolving `origin/HEAD` independently per task —
+ * every root task in a run forks from the same run branch state. */
 function createRootTask(
   cwd: string,
   spec: Spec,
   specSrc: string,
   mode: "worktree" | "branch" | "none",
   reporter: Reporter,
+  forkSha?: string,
 ): { id: string; line: string } {
   const id = taskId(spec.task);
   if (mode === "worktree") {
-    const base = resolveBaseRef(cwd);
-    if (base.source === "HEAD") reporter.success("no origin remote — forking from local HEAD");
-    const wtPath = createWorktree(cwd, id, base.sha);
+    let baseSha: string;
+    if (forkSha) {
+      baseSha = forkSha;
+    } else {
+      const base = resolveBaseRef(cwd);
+      if (base.source === "HEAD") reporter.success("no origin remote — forking from local HEAD");
+      baseSha = base.sha;
+    }
+    const wtPath = createWorktree(cwd, id, baseSha);
     const relPath = join(".sddx-worktrees", id);
     mkdirSync(join(sddxDir(wtPath), "specs"), { recursive: true });
     const specPath = join(".sddx", "specs", `${id}.yaml`);
@@ -199,12 +227,12 @@ function createRootTask(
     createTask(wtPath, spec, specPath, {
       mode: "worktree",
       branch: `sddx/${id}`,
-      base_sha: base.sha,
+      base_sha: baseSha,
       path: relPath,
     });
     return {
       id,
-      line: `created ${id} phase=PLAN worktree=${relPath} branch=sddx/${id} base=${base.sha}`,
+      line: `created ${id} phase=PLAN worktree=${relPath} branch=sddx/${id} base=${baseSha}`,
     };
   }
   const useBranch = mode === "branch";
@@ -391,12 +419,23 @@ function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noCol
       })),
     ),
   );
+  const gid = goalId(graph.goal);
+  if (existsSync(goalPath(cwd, gid))) errs.push(`goal error: goal ${gid} already exists`);
   if (errs.length > 0) {
     failWith(errs.map((e) => `graph error: ${e}`));
   }
 
-  // Gate passed — now create tasks in dependency order (roots create real
-  // workspaces; dependents are deferred), then register the goal with its edges.
+  // Gate passed. Create the run branch first — before any task worktree —
+  // from the same base every root task would otherwise resolve independently
+  // (run-branch-integration): one fork point for the whole run, not one per task.
+  const base = resolveBaseRef(cwd);
+  if (base.source === "HEAD") reporter.success("no origin remote — forking from local HEAD");
+  const runBranch = runBranchName(gid);
+  createBranchAt(cwd, runBranch, base.sha);
+  reporter.success(`created run branch ${runBranch} at ${base.sha}`);
+
+  // Now create tasks in dependency order (roots fork from the run branch's
+  // tip; dependents are deferred), then register the goal with its edges.
   const mode = pickWorkspace(cwd, requested, reporter);
   const aliasToId = new Map<string, string>();
   const deps: Record<string, string[]> = {};
@@ -404,7 +443,7 @@ function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noCol
   for (const node of topoOrder(graph.tasks)) {
     const { spec, src } = loaded.get(node.alias) as { spec: Spec; src: string };
     if (node.depends_on.length === 0) {
-      const { id, line } = createRootTask(cwd, spec, src, mode, reporter);
+      const { id, line } = createRootTask(cwd, spec, src, mode, reporter, base.sha);
       aliasToId.set(node.alias, id);
       created.push(id);
       reporter.success(line);
@@ -419,12 +458,26 @@ function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noCol
       );
     }
   }
-  const g = createGoal(cwd, graph.goal, created, deps);
-  stagePath(cwd, goalPath(cwd, g.id));
-  commit(cwd, `sddx: register goal ${g.id}`);
-  reporter.success(`created goal ${g.id} tasks=[${g.task_ids.join(", ")}]`);
+  // `.sddx/goals/<id>.json` is deliberately plain, never-committed local
+  // coordination state (like `.sddx/sweep.json`) — see the matching comment
+  // in `runbranch.ts`. Committing it would tie it to whatever branch happens
+  // to be checked out when that commit lands, breaking every later
+  // `readGoal`/`findGoalForTask` call once anything switches away from it.
+  const g = createGoal(cwd, graph.goal, created, {
+    deps,
+    id: gid,
+    runBranch,
+    baseSha: base.sha,
+  });
+  reporter.success(`created goal ${g.id} tasks=[${g.task_ids.join(", ")}] run_branch=${runBranch}`);
   for (const [alias, id] of aliasToId) reporter.success(`  ${alias} → ${id}`);
-  reporter.finish({ goalId: g.id, taskIds: g.task_ids, aliasToId: Object.fromEntries(aliasToId) });
+  reporter.finish({
+    goalId: g.id,
+    taskIds: g.task_ids,
+    aliasToId: Object.fromEntries(aliasToId),
+    runBranch,
+    baseSha: base.sha,
+  });
 }
 
 function cmdTaskPhase(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
@@ -489,9 +542,25 @@ function cmdVerify(cwd: string, args: string[], format: OutputFormat, noColor: b
     pluginVersion: pluginVersion(),
   });
   if (res.verdict === "pass") {
+    const integration = res.integration ?? { result: "none" };
     reporter.success(
       `verdict=pass receipt=${res.receiptPath} commit=${res.commitSha} duration_ms=${res.durationMs}`,
     );
+    if (integration.result === "merged") {
+      reporter.success(
+        `integrated: merged into ${integration.runBranch} (${integration.mergeCommit})`,
+      );
+    } else if (integration.result === "conflict") {
+      reporter.error(
+        `integration conflict: ${id} passed its oracle but could not be merged into ${integration.runBranch} — resolve manually`,
+        { stream: "stdout" },
+      );
+    } else if (integration.reason === "no-branch") {
+      reporter.error(
+        `warning: ${id} belongs to goal (run branch ${integration.runBranch}) but was created with --workspace none — it has no branch and can never be merged into the run branch`,
+        { stream: "stdout" },
+      );
+    }
     reporter.finish({
       id,
       verdict: "pass",
@@ -499,6 +568,7 @@ function cmdVerify(cwd: string, args: string[], format: OutputFormat, noColor: b
       commitSha: res.commitSha,
       durationMs: res.durationMs,
       exitCode: res.exitCode,
+      integration,
     });
     return;
   }
@@ -518,26 +588,6 @@ function cmdVerify(cwd: string, args: string[], format: OutputFormat, noColor: b
     { status: "error" },
   );
   process.exit(1);
-}
-
-/**
- * A task's `shipped` marker is self-reported, mutable JSON — not proof on its
- * own. Cross-check it against the goal file (which `pr create` stamps with
- * the same `pr_url` only after a real PR opened) so cleanup can't be tricked
- * into force-deleting a branch by a hand-edited or stale task file.
- */
-function corroboratedShip(
-  cwd: string,
-  taskId: string,
-  shipped: { goal_id: string; pr_url: string } | undefined,
-): boolean {
-  if (!shipped) return false;
-  try {
-    const goal = readGoal(cwd, shipped.goal_id);
-    return goal.task_ids.includes(taskId) && goal.shipped?.pr_url === shipped.pr_url;
-  } catch {
-    return false;
-  }
 }
 
 function cmdCleanup(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
@@ -562,24 +612,30 @@ function cmdCleanup(cwd: string, args: string[], format: OutputFormat, noColor: 
     fail(`refusing: ${branch} is checked out — switch branches first`);
   }
   if (!isMerged(cwd, branch)) {
-    // ancestry check fails for cherry-picked commits (new SHA, same diff) even
-    // when the task genuinely shipped via `sddx pr create` — the shipped
-    // marker on the task's own branch is the second, non-ancestry proof.
-    const shipped = resolveTaskState(cwd, id)?.shipped;
-    if (!shipped || !corroboratedShip(cwd, id, shipped)) {
+    // Ancestry into HEAD fails for a task not merged into the current
+    // checkout even when it genuinely merged into its goal's run branch. Raw
+    // ancestry into the run branch isn't the right proof either: a follow-up
+    // bookkeeping commit on the task's own branch (recording its integration
+    // result) advances the branch past what was actually merged, and a
+    // reverted merge would still show as an ancestor forever after. The
+    // goal's own `merges` log — sddx's bookkeeping, not a self-reported task
+    // marker — is the authoritative, revert-aware answer to "is this task's
+    // work currently part of the run branch."
+    const goal = findGoalForTask(cwd, id);
+    if (!goal || !currentlyMergedTaskIds(goal).includes(id)) {
       fail(`refusing: ${branch} is not merged into HEAD`);
     }
     reporter.success(
-      `${branch} not merged by ancestry but shipped in goal ${shipped.goal_id} (${shipped.pr_url})`,
+      `${branch} not merged into HEAD but merged into run branch ${goal.run_branch}`,
     );
     forceDeleteBranch(cwd, branch);
-    reporter.success(`deleted shipped branch ${branch}`);
-    reporter.finish({ id, branch, removed: true, shipped: true });
+    reporter.success(`deleted branch ${branch} (merged via run branch)`);
+    reporter.finish({ id, branch, removed: true, viaRunBranch: true });
     return;
   }
   deleteBranch(cwd, branch);
   reporter.success(`deleted merged branch ${branch}`);
-  reporter.finish({ id, branch, removed: true, shipped: false });
+  reporter.finish({ id, branch, removed: true, viaRunBranch: false });
 }
 
 function cmdGoalCreate(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
@@ -603,14 +659,23 @@ function cmdGoalCreate(cwd: string, args: string[], format: OutputFormat, noColo
   if (scheduleErrs.length > 0) {
     failWith(scheduleErrs.map((e) => `goal error: ${e}`));
   }
-  const g = createGoal(cwd, goalSentence, taskIds);
-  // committed narrowly (not `git add -A`) so registering a goal in the main
-  // checkout never sweeps up unrelated work sitting there — G5: state is
-  // files in git, and a goal is meaningless if it's only ever on disk
-  stagePath(cwd, goalPath(cwd, g.id));
-  commit(cwd, `sddx: register goal ${g.id}`);
-  reporter.success(`created goal ${g.id} tasks=[${g.task_ids.join(", ")}]`);
-  reporter.finish({ id: g.id, taskIds: g.task_ids });
+  const gid = goalId(goalSentence);
+  if (existsSync(goalPath(cwd, gid))) fail(`goal ${gid} already exists at ${goalPath(cwd, gid)}`);
+  const base = resolveBaseRef(cwd);
+  if (base.source === "HEAD") reporter.success("no origin remote — forking from local HEAD");
+  const runBranch = runBranchName(gid);
+  createBranchAt(cwd, runBranch, base.sha);
+  reporter.success(`created run branch ${runBranch} at ${base.sha}`);
+  // NOTE: this run branch starts empty — any of the listed tasks already DONE
+  // before this goal existed do not retroactively appear merged. That's a
+  // real, narrow limitation of grouping pre-existing tasks after the fact;
+  // the flagship `/sddx:run` path (`graph create`) never hits it, since its
+  // run branch always exists before any task's own worktree does.
+  // `.sddx/goals/<id>.json` is deliberately plain, never-committed local
+  // coordination state (like `.sddx/sweep.json`) — see `runbranch.ts`.
+  const g = createGoal(cwd, goalSentence, taskIds, { id: gid, runBranch, baseSha: base.sha });
+  reporter.success(`created goal ${g.id} tasks=[${g.task_ids.join(", ")}] run_branch=${runBranch}`);
+  reporter.finish({ id: g.id, taskIds: g.task_ids, runBranch, baseSha: base.sha });
 }
 
 function cmdPrCreate(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
@@ -620,6 +685,15 @@ function cmdPrCreate(cwd: string, args: string[], format: OutputFormat, noColor:
   const res = createGoalPr(cwd, goalIdArg, { title: flag(args, "--title") });
   reporter.success(`pr=${res.prUrl} branch=${res.branch} tasks=[${res.taskIds.join(", ")}]`);
   reporter.finish({ prUrl: res.prUrl, branch: res.branch, taskIds: res.taskIds });
+}
+
+function cmdRunReport(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
+  const reporter = makeReporter("run report", format, noColor);
+  const goalIdArg = flag(args, "--goal");
+  if (!goalIdArg) fail(USAGE, 2);
+  const report = generateRunReport(cwd, goalIdArg, defaultBranch(cwd));
+  reporter.success(renderRunReport(report));
+  reporter.finish(report);
 }
 
 function cmdSweep(cwd: string, format: OutputFormat, noColor: boolean): void {
@@ -636,9 +710,65 @@ function cmdSweep(cwd: string, format: OutputFormat, noColor: boolean): void {
   reporter.finish({ locked: false, removed: res.removed, skipped: res.skipped });
 }
 
+/** The run-scoped variant (`--goal <id>`): same shape as the per-task menu
+ * below, but keyed to a goal's run branch instead of `cwd`'s current branch —
+ * see `detectRunState`/`runActions`. */
+function cmdNextActionsRun(
+  cwd: string,
+  goalArg: string,
+  selectArg: string | undefined,
+  reporter: Reporter,
+): void {
+  if (selectArg === undefined) {
+    const visible = runActions(cwd, detectRunState(cwd, goalArg));
+    reporter.success(renderMenu(visible));
+    reporter.finish({ selected: null, nextActions: visible.map((a) => a.label) });
+    return;
+  }
+
+  // state re-detected here too — see the matching comment on the per-task path
+  const fresh = detectRunState(cwd, goalArg);
+  const freshVisible = runActions(cwd, fresh);
+  const resolved = resolveSelection(selectArg, freshVisible);
+  if ("error" in resolved) {
+    reporter.error(
+      resolved.error === "ambiguous"
+        ? `"${selectArg}" matches more than one action — be more specific.`
+        : `"${selectArg}" isn't a valid action right now.`,
+      { stream: "stdout" },
+    );
+    reporter.success(renderMenu(freshVisible));
+    process.exitCode = 1;
+    reporter.finish({ selected: selectArg, error: resolved.error }, { status: "error" });
+    return;
+  }
+  if (!resolved.run) {
+    reporter.error(`${resolved.label}: not implemented yet.`, { stream: "stdout" });
+    process.exitCode = 1;
+    reporter.finish({ selected: resolved.label, implemented: false }, { status: "error" });
+    return;
+  }
+  const result = resolved.run(cwd, { branch: fresh.runBranch });
+  if (result.ok) {
+    reporter.success(result.message);
+  } else {
+    reporter.error(result.message, { stream: "stdout" });
+    process.exitCode = 1;
+  }
+  reporter.finish(
+    { selected: resolved.label, ok: result.ok },
+    { status: result.ok ? "success" : "error" },
+  );
+}
+
 function cmdNextActions(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
   const reporter = makeReporter("next-actions", format, noColor);
   const selectArg = flag(args, "--select");
+  const goalArg = flag(args, "--goal");
+  if (goalArg) {
+    cmdNextActionsRun(cwd, goalArg, selectArg, reporter);
+    return;
+  }
   // detected fresh here, and again just before executing a selection — state
   // between "show the menu" and "act on a reply" spans a model turn, so it
   // can drift (the user may commit or push by hand outside sddx meanwhile)
@@ -898,6 +1028,10 @@ function main(argv: string[]): void {
     }
     if (cmd === "pr" && rest[0] === "create") {
       cmdPrCreate(cwd, rest.slice(1), format, noColor);
+      return;
+    }
+    if (cmd === "run" && rest[0] === "report") {
+      cmdRunReport(cwd, rest.slice(1), format, noColor);
       return;
     }
     if (cmd === "cleanup") {

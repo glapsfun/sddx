@@ -66,8 +66,16 @@ export interface TaskState {
   iterations: number;
   /** Consecutive identical test failures; cleared by any pass or a different failure. */
   stuck?: { fingerprint: string; count: number; since: string };
-  /** Set once by `sddx pr create` after this task's commit ships in a goal PR. */
-  shipped?: { goal_id: string; pr_url: string; at: string };
+  /** Set once, after DONE, by the run-branch integration step (see
+   * `run-branch-integration`) — a board-visible mirror of the task's most
+   * recent entry in its goal's `merges` log. Absent for a task with no goal,
+   * or one created in `--workspace none` mode (no branch to integrate). */
+  integration?: {
+    run_branch: string;
+    merge_commit?: string;
+    merged_at?: string;
+    result: "merged" | "conflict" | "reverted";
+  };
   evidence: Record<
     string,
     {
@@ -302,11 +310,6 @@ export function abandonOrRetry(t: TaskState): RetryOutcome {
   t.phase = "ABANDONED";
   t.history.push({ phase: "ABANDONED", at });
   return { retried: false, attempt_count: attempts, max_attempts: policy.max_attempts };
-}
-
-export function markShipped(t: TaskState, goalId: string, prUrl: string): TaskState {
-  t.shipped = { goal_id: goalId, pr_url: prUrl, at: new Date().toISOString() };
-  return t;
 }
 
 function readTaskFrom(dir: string, id: string): TaskState | null {

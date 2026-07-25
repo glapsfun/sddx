@@ -60,7 +60,8 @@ oracle and write the receipt but never edit sources.
   specs/<task-id>.yaml       # the registered spec (copied at task create)
   tasks/<task-id>.json       # phase, oracle, workspace, base SHA, allow list, iterations
   receipts/<task-id>.json    # immutable, written once by the verifier
-  goals/<goal-id>.json       # task ids a /sddx:run goal ties together; read by `pr create`
+  goals/<goal-id>.json       # task ids, run branch, base SHA, merges log; read by `pr create`.
+                             # plain state, deliberately never committed (like sweep.json below)
   BOARD.md                   # generated rollup — never hand-edited
   config.json                # materialized from the plugin manifest's userConfig; read-only to sddx code
   sweep.json                 # last orphan-sweep result; read by the board's flagged-worktrees section
@@ -69,11 +70,17 @@ oracle and write the receipt but never edit sources.
 Every sddx-authored artifact — draft or registered — lives under `.sddx/`. A
 few things intentionally live outside it because they aren't sddx state:
 
-- **Worktrees** live under `.sddx-worktrees/<id>` on branch `sddx/<id>`,
-  forked from `origin/HEAD`, not inside `.sddx/` — each is a real git worktree
-  checkout, and nesting one inside `.sddx/` would break the per-task isolation
-  `.sddx/` exists to keep conflict-free. The sweep and cleanup rules are
-  documented in [../tutorials/02-your-first-parallel-run.md](../tutorials/02-your-first-parallel-run.md).
+- **Worktrees** live under `.sddx-worktrees/<id>` on branch `sddx/<id>`, not
+  inside `.sddx/` — each is a real git worktree checkout, and nesting one
+  inside `.sddx/` would break the per-task isolation `.sddx/` exists to keep
+  conflict-free. For a goal, root tasks fork from that goal's run branch
+  (`sddx/run-<goal-id>`, itself forked from `origin/HEAD` before any task
+  starts); a standalone task with no goal forks from `origin/HEAD` directly.
+  As each task passes its oracle, `sddx verify` merges it into the run branch
+  automatically (a real `git merge --no-ff`, never a cherry-pick) — see
+  [../how-to/ship-a-goal-as-a-pr.md](../how-to/ship-a-goal-as-a-pr.md). The
+  sweep and cleanup rules are documented in
+  [../tutorials/02-your-first-parallel-run.md](../tutorials/02-your-first-parallel-run.md).
 - **The sweep lock and `.git/info/exclude`'s `.sddx-worktrees/` entry** live
   under `.git/` — they're git-internal bookkeeping, not sddx state.
 

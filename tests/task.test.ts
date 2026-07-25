@@ -10,7 +10,6 @@ import {
   createTask,
   dependsOnList,
   failurePolicyOf,
-  markShipped,
   type Phase,
   readTask,
   resolveTaskState,
@@ -317,13 +316,25 @@ describe("abandonOrRetry", () => {
   });
 });
 
-describe("markShipped", () => {
-  test("records goal id, PR url, and a timestamp", () => {
+describe("integration field", () => {
+  test("absent by default", () => {
     const t = createTask(tmpCwd(), spec, "s", { mode: "none", branch: null, base_sha: "a" });
-    markShipped(t, "20260719-ship-goal", "https://github.com/org/repo/pull/1");
-    expect(t.shipped?.goal_id).toBe("20260719-ship-goal");
-    expect(t.shipped?.pr_url).toBe("https://github.com/org/repo/pull/1");
-    expect(t.shipped?.at).toBeTruthy();
+    expect(t.integration).toBeUndefined();
+  });
+
+  test("round-trips a merged record", () => {
+    const cwd = tmpCwd();
+    const t = createTask(cwd, spec, "s", { mode: "none", branch: null, base_sha: "a" });
+    t.integration = {
+      run_branch: "sddx/run-g1",
+      merge_commit: "a".repeat(40),
+      merged_at: new Date().toISOString(),
+      result: "merged",
+    };
+    writeTask(cwd, t);
+    const back = readTask(cwd, t.id);
+    expect(back.integration?.result).toBe("merged");
+    expect(back.integration?.merge_commit).toBe("a".repeat(40));
   });
 });
 

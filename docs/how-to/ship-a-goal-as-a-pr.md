@@ -1,22 +1,28 @@
 # Ship a goal as a PR
 
-`sddx pr create --goal <goal-id>` opens **one PR per goal**: every task in
-the goal cherry-picked onto a single branch, with a body generated from the
-tasks' receipts. It's a deliberately separate, explicitly-invoked command —
-`/sddx:run` never calls it automatically, the same way it never merges
-branches automatically. The two refusal paths below are fully local and
-network-free — a full runnable proof is
+`sddx pr create --goal <goal-id>` pushes that goal's **run branch** —
+already continuously merged into as each task passes its oracle (see
+[architecture.md](../explanation/architecture.md#state-model)) — and opens
+one PR/MR from it, with a body generated from the receipts of whichever
+tasks have actually merged. It's a deliberately separate, explicitly-invoked
+command — `/sddx:run` never calls it automatically, the same way it never
+merges into the *original target branch* automatically. The refusal path
+below is fully local and network-free — a full runnable proof is
 [examples/08-pr-from-goal](../../examples/08-pr-from-goal/).
 
-## All-or-nothing
+## Partial goals are fine
 
-Refuses unless every task in the goal is `DONE` with a passing receipt,
-re-checked fresh at invocation time — not cached from when the goal was
-created:
+There's no completeness gate. A goal with 2 of 3 tasks merged into its run
+branch ships a PR containing exactly those 2 tasks' work — the body states
+the outstanding count rather than implying the goal finished:
 
 ```
-goal <id> is not complete — blocking: <task-id> (phase <phase>)
+1 of 2 task(s) merged into `sddx/run-<goal-id>` — 1 outstanding.
 ```
+
+Check where things stand at any point with `sddx run report --goal <goal-id>`
+— merged/failed/outstanding counts, a diff summary, and the exact commands to
+review the run branch yourself.
 
 ## Resolving the host
 
@@ -31,17 +37,20 @@ cannot determine PR host from the "origin" remote — set userConfig.pr_host to 
 
 An unauthenticated host CLI refuses the same way, one step later (after the
 host is resolved, before any push): `<host> is not authenticated: <message>`.
+Re-running `pr create` on an already-shipped goal refuses too, naming the
+existing PR URL, rather than opening a duplicate.
 
 ## What happens on success
 
-Cherry-picks each task's atomic commit onto a fresh `sddx/goal-<goal-id>`
-branch (task-creation order, never a merge commit), pushes it, and opens the
+Pushes `sddx/run-<goal-id>` exactly as it stands — no reconstruction, no
+cherry-picking, since every commit on it is either a task's own atomic commit
+or a real `git merge --no-ff` that `sddx verify` already made — and opens the
 PR (or, on GitLab, the merge request — same command name, same mechanics,
 only the host object's name differs) via the resolved host CLI. On success,
-writes a `shipped` marker onto every task's branch and the goal file — the
-second, equally valid proof `sddx cleanup` accepts for a task branch that
-will never look git-merged by ancestry, since its commit was cherry-picked,
-not merged.
+writes `shipped: {pr_url, at}` onto the goal file.
 
-A cherry-pick conflict refuses loudly too, naming the task whose commit
-failed — no partial branch is left pushed.
+Once shipped, `sddx cleanup <id>` accepts a merged task's branch even though
+it was never merged into your own `HEAD` — it checks whether the goal's
+`merges` log currently records that task as `merged` (real bookkeeping sddx
+itself wrote, not a self-reported marker, and revert-aware: a task whose
+merge was later reverted no longer counts).

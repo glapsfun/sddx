@@ -11,11 +11,14 @@ Run: `... verify <task-id> --model <your model id, if you know it>`
 
 - **pass** → the CLI has already written `.sddx/receipts/<id>.json` (immutable,
   chained to the previous receipt) and made one atomic commit containing code +
-  spec + task file + receipt. Report the receipt path and commit SHA, then run
-  `... next-actions` (same cwd as the `verify` call, so it reflects this
-  task's own branch/worktree) and relay its output verbatim as the completion
-  message — don't compose your own summary of what's next. On the user's
-  reply, run `... next-actions --select "<reply>"` and relay that output too.
+  spec + task file + receipt. If the task belongs to a goal, the same command
+  also merged it into that goal's run branch automatically — report that
+  integration line too (merged, or a conflict needing manual resolution).
+  Report the receipt path and commit SHA, then run `... next-actions` (same
+  cwd as the `verify` call, so it reflects this task's own branch/worktree)
+  and relay its output verbatim as the completion message — don't compose
+  your own summary of what's next. On the user's reply, run
+  `... next-actions --select "<reply>"` and relay that output too.
 - **fail** → the oracle's exit code and the attempt count are printed; the task
   stays in VERIFY. Return to the loop (fix under GREEN/REFACTOR rules), then
   verify again. Respect the spec's stop_rules: if iterations exceed

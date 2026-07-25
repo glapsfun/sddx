@@ -9,6 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { findGoalForTask } from "./goal";
 
 export interface OracleRun {
   exit_code: number;
@@ -199,34 +200,46 @@ export function validateReceipt(raw: unknown): string[] {
   return errors;
 }
 
-function readReceiptFrom(dir: string, id: string): Receipt | null {
+function readReceiptRawFrom(dir: string, id: string): Buffer | null {
   try {
-    return JSON.parse(readFileSync(receiptPath(dir, id), "utf8")) as Receipt;
+    return readFileSync(receiptPath(dir, id));
   } catch {
     return null;
   }
 }
 
-function readReceiptFromBranch(cwd: string, id: string): Receipt | null {
-  const r = spawnSync("git", ["show", `sddx/${id}:.sddx/receipts/${id}.json`], {
-    cwd,
-    encoding: "utf8",
-  });
-  if (r.status !== 0) return null;
-  try {
-    return JSON.parse(r.stdout) as Receipt;
-  } catch {
-    return null;
-  }
+function readReceiptRawFromRef(cwd: string, ref: string, id: string): Buffer | null {
+  const r = spawnSync("git", ["show", `${ref}:.sddx/receipts/${id}.json`], { cwd });
+  return r.status === 0 ? (r.stdout as Buffer) : null;
 }
 
-/** Same cross-location lookup as `resolveTaskState`: live worktree, then main checkout, then branch tip. */
+/**
+ * Resolves a task's receipt bytes wherever they currently live: a live
+ * worktree, the main checkout, the tip of the task's own branch (once its
+ * worktree has been swept), or — if that branch has been deleted after the
+ * task merged into a goal's run branch (`cleanup` allows this once a task is
+ * merged, whether or not it's shipped yet) — the run branch's own tree, which
+ * still carries the same receipt via that merge.
+ */
+export function resolveReceiptRaw(cwd: string, id: string): Buffer | null {
+  const direct =
+    readReceiptRawFrom(join(cwd, ".sddx-worktrees", id), id) ??
+    readReceiptRawFrom(cwd, id) ??
+    readReceiptRawFromRef(cwd, `sddx/${id}`, id);
+  if (direct) return direct;
+  const goal = findGoalForTask(cwd, id);
+  return goal ? readReceiptRawFromRef(cwd, goal.run_branch, id) : null;
+}
+
+/** Same cross-location lookup as `resolveReceiptRaw`, parsed. */
 export function resolveReceipt(cwd: string, id: string): Receipt | null {
-  return (
-    readReceiptFrom(join(cwd, ".sddx-worktrees", id), id) ??
-    readReceiptFrom(cwd, id) ??
-    readReceiptFromBranch(cwd, id)
-  );
+  const raw = resolveReceiptRaw(cwd, id);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw.toString("utf8")) as Receipt;
+  } catch {
+    return null;
+  }
 }
 
 /**

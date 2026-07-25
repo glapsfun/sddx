@@ -16,6 +16,7 @@ usage:
   sddx goal create --goal <sentence> --tasks <id1,id2,...>
   sddx goal show <id>
   sddx pr create --goal <goal-id> [--title <title>]
+  sddx run report --goal <goal-id>
   sddx board
   sddx audit [--signatures] [--ci]
   sddx cleanup <id>
@@ -150,11 +151,16 @@ sddx verify <id> [--model <m>] [--harness <h>]
 
 Executes the spec's oracle and settles the task. On success: writes the
 hash-chained receipt, makes the atomic commit (code + spec + receipt), and
-prints `verdict=pass receipt=<path> commit=<sha> duration_ms=<n>`. On failure:
-prints `verdict=fail oracle_exit=<code> duration_ms=<n> iterations=<n>` and
-exits 1 — **no receipt is written for a failed verification.**
-`--model`/`--harness` are recorded in the receipt for provenance
-([receipts-schema.md](receipts-schema.md)).
+prints `verdict=pass receipt=<path> commit=<sha> duration_ms=<n>`. If the task
+belongs to a goal, this same command then merges its commit into that goal's
+run branch automatically (`git merge --no-ff`, never a cherry-pick, no
+confirmation asked) and prints a second line: `integrated: merged into
+<run-branch> (<merge-sha>)`, or, on conflict, a loud error naming the task as
+verified-but-not-integrated — the task's own `DONE` phase and receipt are
+unaffected either way. On failure: prints `verdict=fail oracle_exit=<code>
+duration_ms=<n> iterations=<n>` and exits 1 — **no receipt is written for a
+failed verification.** `--model`/`--harness` are recorded in the receipt for
+provenance ([receipts-schema.md](receipts-schema.md)).
 
 ## sddx board
 
@@ -185,12 +191,18 @@ to stderr and exits 1 on any finding — CI-friendly. Clean run:
 sddx goal create --goal <sentence> --tasks <id1,id2,...>
 ```
 
-Persists `.sddx/goals/<goal-id>.json` listing the given task ids — the record
-`sddx pr create --goal <goal-id>` later reads to know which tasks ship
-together. Refuses if any listed task id doesn't exist, or if the derived goal
-id already exists. `/sddx:run` calls this automatically after creating a
-run's tasks; invoke it directly only when assembling a goal from tasks
-created outside `/sddx:run`. Prints `created goal <id> tasks=[...]`.
+Persists `.sddx/goals/<goal-id>.json` listing the given task ids, and creates
+its run branch (`sddx/run-<goal-id>`, forked from the resolved `origin/HEAD`)
+— the record `sddx pr create --goal <goal-id>` later reads to know what to
+push. Refuses if any listed task id doesn't exist, or if the derived goal id
+already exists. `/sddx:run` calls this automatically (via `graph create`,
+which creates the run branch *before* any task starts); invoke it directly
+only when assembling a goal from tasks created outside `/sddx:run` — in that
+case the run branch starts empty, since tasks already `DONE` before the goal
+existed don't retroactively appear merged. Prints
+`created goal <id> tasks=[...] run_branch=<branch>`. The goal file itself is
+plain, never-committed local state (like `.sddx/sweep.json`), so it stays
+visible across branch switches regardless of workspace mode.
 
 ## sddx goal show
 
@@ -198,8 +210,22 @@ created outside `/sddx:run`. Prints `created goal <id> tasks=[...]`.
 sddx goal show <id>
 ```
 
-Prints the goal state file as JSON — task ids, timestamps, and the `shipped`
-marker once a PR has been opened for it.
+Prints the goal state file as JSON — task ids, run branch, base SHA, the
+`merges` log (one entry per integration attempt: `merged`, `conflict`, or
+`reverted`), and the `shipped` marker once a PR has been opened for it.
+
+## sddx run report
+
+```sh
+sddx run report --goal <goal-id>
+```
+
+The run-completion report: run branch, target branch (stated unchanged),
+merged/failed/outstanding task counts, a `git diff --stat` summary against
+the run branch, and the exact review commands (`git switch`, `git diff`,
+`git log --oneline`). Meaningful at any point in a run, not just the end —
+the header reads "Run in progress" while anything is still outstanding,
+"Run completed" once nothing is.
 
 ## sddx pr create
 
@@ -207,30 +233,32 @@ marker once a PR has been opened for it.
 sddx pr create --goal <goal-id> [--title <title>]
 ```
 
-Opens **one PR per goal**: refuses unless every task in the goal is `DONE`
-with a passing receipt (all-or-nothing, re-checked fresh at invocation time —
-see [receipts-schema.md](receipts-schema.md)), then cherry-picks each
-task's atomic commit onto a fresh `sddx/goal-<goal-id>` branch (task-creation
-order), pushes it, and opens the PR via `gh` or `glab` — resolved from
-`userConfig.pr_host` or detected from the `origin` remote. The PR body is
-generated from the tasks' receipts, never hand-written. On success, writes a
-`shipped` marker onto every task's branch and the goal file, which is what
-lets `sddx cleanup` later remove a cherry-picked task branch despite it never
-looking git-merged by ancestry.
+Pushes the goal's run branch **exactly as it stands** — whatever subset of
+tasks has merged into it so far, no completeness gate — and opens a PR/MR
+from it via `gh` or `glab` (resolved from `userConfig.pr_host` or detected
+from the `origin` remote). No branch reconstruction happens here: every
+commit on the run branch is either a task's own atomic commit or a real
+`git merge --no-ff` that `sddx verify` already made as each task passed (see
+`sddx verify` below). The PR body is generated from the goal's `merges`
+log — only tasks currently merged, each with its receipt's oracle command,
+exit code, and hash — and states the outstanding count rather than implying
+full completion. On success, writes `shipped: {pr_url, at}` onto the goal
+file; re-running `pr create` for an already-shipped goal refuses rather than
+opening a duplicate.
 
-Refuses loudly, before any git mutation, on: an incomplete goal (names the
-blocking tasks and why), an unauthenticated or undetectable host CLI, or a
-cherry-pick conflict (names the task whose commit failed; no partial branch
-is left pushed). Prints `pr=<url> branch=<branch> tasks=[...]` on success.
+Refuses loudly, before any push, on: an already-shipped goal, or an
+unauthenticated or undetectable host CLI. Prints
+`pr=<url> branch=<branch> tasks=[...]` on success (`taskIds` here is the
+currently-merged subset, not the full goal).
 
 This is a deliberately separate, explicitly-invoked command — `/sddx:run`
-never calls it automatically, the same way it never merges branches
-automatically. See [/sddx:pr](../../skills/pr/SKILL.md).
+never calls it automatically, the same way it never merges into the
+*original target branch* automatically. See [/sddx:pr](../../skills/pr/SKILL.md).
 
 On GitLab this opens a **merge request** (`glab mr create`) — sddx calls the
-command and output `pr` uniformly across both hosts since the mechanics
-(one branch, cherry-picked commits, receipt-derived body) are identical;
-only the underlying host object's name differs.
+command and output `pr` uniformly across both hosts since the mechanics (one
+branch, receipt-derived body) are identical; only the underlying host
+object's name differs.
 
 ## sddx cleanup
 
@@ -240,8 +268,11 @@ sddx cleanup <id>
 
 Tears down one task's workspace: removes `.sddx-worktrees/<id>` (refuses if it
 has uncommitted changes) and deletes branch `sddx/<id>` (refuses if it is
-checked out, or is neither merged into HEAD nor marked `shipped` by a prior
-`sddx pr create`). Each refusal prints `refusing: …` and exits 1.
+checked out). If the branch isn't merged into HEAD by ancestry, it's still
+accepted when the goal it belongs to (if any) currently lists it as `merged`
+in that goal's `merges` log — real bookkeeping sddx itself wrote, not a
+self-reported marker, and revert-aware (a reverted merge doesn't count). Each
+refusal prints `refusing: …` and exits 1.
 
 ## sddx sweep
 
@@ -290,6 +321,23 @@ the shape is there.
 
 Used by `/sddx:quick` and `/sddx:verify` as the default post-task hand-off,
 in place of the model composing its own "what's next" prose.
+
+### Run-scoped: `--goal <goal-id>`
+
+```sh
+sddx next-actions --goal <goal-id> [--select "<reply>"]
+```
+
+The same mechanism, keyed to a goal's run branch instead of `cwd`'s current
+branch — the end-of-run counterpart to the per-task menu above. Built
+dynamically from the goal's `merges` log rather than a fixed catalog: Review
+Changes and Exit always appear; Create PR/MR and Merge Into Target Branch
+appear once at least one task has merged; one Retry `<task-id>` entry appears
+per `ABANDONED` task; one Revert `<task-id>` entry appears per currently-
+merged task (executing it runs `git revert -m 1` on the run branch and
+records a `reverted` entry in the goal's `merges` log — no history rewriting,
+no force-push). Selection (numeric or natural-language, e.g. `"revert
+<task-id>"`) works exactly like the per-task menu.
 
 ## sddx config show
 

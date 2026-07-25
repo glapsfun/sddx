@@ -13,8 +13,13 @@ runnable scaffold at
 Two tasks on one branch in one checkout compound: task B's uncommitted state
 sits on top of task A's, and a mistake in A silently leaks into B. A
 worktree per task forks its own checkout from a shared base commit — each
-task's edits, tests, and git history stay physically separate until a human
-(or `/sddx:pr`) decides to bring them back together. See
+task's edits, tests, and git history stay physically separate while work is
+in progress. Once a task passes its oracle, `sddx verify` merges it
+automatically into the goal's **run branch** — a disposable, sddx-owned
+integration branch created before any task starts, so the combined result is
+reviewable at any point, even mid-run. The *original* branch you ran
+`/sddx:run` against is never touched; landing the run branch there (or
+shipping it as a PR via `/sddx:pr`) stays a human decision. See
 [design-principles.md](../explanation/design-principles.md) principle 3,
 "state is files in git" — worktrees are that principle applied to isolation,
 not just persistence.
@@ -37,10 +42,11 @@ No edges here, so both are roots: `sddx graph create --graph graph.yaml`
 validates every spec, checks that any two *unordered* tasks have disjoint
 `scope` (the "overlap ⟹ ordered" gate —
 [model-dag-dependencies.md](../how-to/model-dag-dependencies.md) covers the case where
-they aren't independent), then creates both worktrees and registers a
-**goal** tying the task ids together. Everything is validated before
-anything is written — a bad spec in task three of ten refuses the whole
-graph rather than leaving two worktrees to clean up by hand.
+they aren't independent), then creates the goal's run branch, both worktrees
+(forked from that run branch's tip), and registers a **goal** tying the task
+ids together. Everything is validated before anything is written — a bad
+spec in task three of ten refuses the whole graph rather than leaving two
+worktrees to clean up by hand.
 
 ## Drive each worktree independently
 

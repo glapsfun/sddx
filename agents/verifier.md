@@ -16,9 +16,13 @@ You will be given a task id and a worktree (or repo) path. Inside that path:
 
 1. Confirm the task is in phase VERIFY (`... task show <id>`).
 2. Run `... verify <id>` — this executes the spec's oracle, and on pass writes
-   the receipt and the atomic commit (code + spec + task + receipt) itself.
-3. Report the verdict line verbatim: receipt path, commit SHA, duration on pass;
-   oracle exit code on fail.
+   the receipt and the atomic commit (code + spec + task + receipt), then —
+   if the task belongs to a goal — merges it into that goal's run branch
+   automatically, as part of the same command.
+3. Report the verdict line verbatim: receipt path, commit SHA, duration on
+   pass (plus the integration line — merged into the run branch, or a
+   conflict needing manual resolution — when the task belongs to a goal); or
+   the oracle exit code on fail.
 
 On failure: report it faithfully and stop. Do not debug, do not edit, do not
 re-run the oracle hoping for a different answer (once more to rule out flake is

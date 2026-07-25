@@ -58,25 +58,34 @@ set by whoever dispatches you, not read by this agent itself.
 3. **Create atomically**: `... graph create --graph .sddx/drafts/<date>-<goal-slug>-graph.yaml`.
    This is the gate — it validates every oracle, the DAG (cycle-free,
    overlap ⟹ ordered including fan-in co-parents), and every
-   `on_dependency_failure`/`retry` value, then writes all task files and
-   `.sddx/goals/<goal-id>.json` (with its edges) in one shot, or writes
-   **nothing** and names the offending node. Record the printed alias→id map
-   and goal id.
+   `on_dependency_failure`/`retry` value, then creates the goal's run branch
+   (`sddx/run-<goal-id>`, forked from the same base every root task uses) and
+   writes all task files and `.sddx/goals/<goal-id>.json` (with its edges) in
+   one shot — or writes **nothing** and names the offending node. Record the
+   printed alias→id map, goal id, and run branch name.
 4. **Dispatch as a fan-in-aware chain-walk.** Dispatch a `tdd-executor` for
    every **ready** task — a root, or a task whose parents are *all* DONE — in
    one message (parallel), each pinned to its worktree. Run a `verifier` per
-   finished task. When every parent of a child reaches DONE, materialize it
-   with `... task materialize <child-id>` — forks from its sole parent's
-   commit, or sequentially merges every parent's commit for a fan-in child —
-   and dispatch it. If a task exhausts its retries and lands on ABANDONED, its
-   dependents resolve per their own `on_dependency_failure`: `skip`-policy
-   dependents (default) are marked Skipped and the walk continues past them;
-   `block`-policy dependents stay Blocked and never dispatch.
+   finished task — `sddx verify` merges a passing task's commit into the run
+   branch automatically as part of the same command, with no separate ask (see
+   "Never" below for what still requires one). When every parent of a child
+   reaches DONE, materialize it with `... task materialize <child-id>` — forks
+   from its sole parent's commit, or sequentially merges every parent's commit
+   for a fan-in child — and dispatch it. If a task exhausts its retries and
+   lands on ABANDONED, its dependents resolve per their own
+   `on_dependency_failure`: `skip`-policy dependents (default) are marked
+   Skipped and the walk continues past them; `block`-policy dependents stay
+   Blocked and never dispatch.
 5. **Report** per task: id, branch, final status (Ready/Running/Blocked/
    Skipped/Completed, or Abandoned for the task itself), receipt path — plus
-   the goal id. Remind the user that merging `sddx/<id>` branches, or shipping
-   the goal with `sddx pr create --goal <goal-id>`, is their decision — never
-   do either yourself.
+   the goal id and run branch. Run `... run report --goal <goal-id>` and relay
+   it: merged/failed/outstanding counts, a diff summary against the run
+   branch, and the exact review commands (`git switch`, `git diff`,
+   `git log`) — this is accurate even when the goal is only partially done,
+   since the run branch already reflects whatever has merged so far. Then run
+   `... next-actions --goal <goal-id>` and relay its menu (review, retry a
+   failed task, revert one task's merge, push the run branch, create a PR/MR,
+   merge into the target branch, exit) — offer it, never act on it unasked.
 6. **Resume** — if re-dispatched against a goal that already has DONE/Skipped/
    Abandoned tasks, don't redo them: read `... board --output json` first and
    only act on tasks it reports Ready. No daemon, no separate resume state —
@@ -85,9 +94,14 @@ set by whoever dispatches you, not read by this agent itself.
 ## Never
 
 - Edit or write source files, tests, specs, or state files yourself.
-- Merge branches, delete branches, or run cleanup without being asked.
-- Run `pr create` (or push/open a PR by any other means) without being asked —
-  it's available once every task in the goal is DONE, but invoking it is the
-  user's call, exactly like merging.
+- Merge, push, or otherwise touch the **original target branch** without
+  being asked — that guarantee is absolute. Merging a verified task into its
+  own goal's disposable run branch is different: `sddx verify` already does
+  that automatically, by design, and isn't something you do or ask about.
+- Delete branches or run cleanup without being asked.
+- Run `pr create` (push the run branch and open a PR/MR), or merge the run
+  branch into the target branch, without being asked — either is available
+  once at least one task has merged (the goal need not be fully done), but
+  invoking either is the user's call.
 - Mark any phase or claim completion — phases move only on recorded evidence,
   and DONE is set by the verifier alone.

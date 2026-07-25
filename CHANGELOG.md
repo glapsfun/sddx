@@ -4,6 +4,14 @@ All notable changes to sddx are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sddx adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0](https://github.com/glapsfun/sddx/compare/v2.0.0...v2.1.0) (2026-07-24)
+
+
+### Added
+
+* add example-verification harness for docs/examples ([19a59e8](https://github.com/glapsfun/sddx/commit/19a59e8d1fd5cab81530eaeb8e1efc4cdb0e05c5))
+* extend task dependencies to a multi-parent DAG with retry and skip policy ([ecc7e64](https://github.com/glapsfun/sddx/commit/ecc7e643a08870ad8699359441ed25636ead2685))
+
 ## [2.0.0](https://github.com/glapsfun/sddx/compare/v1.1.0...v2.0.0) (2026-07-23)
 
 

@@ -51,6 +51,9 @@ EOF
 ```
 
 ```sh
+# the token records the workspace strategy it vouches for, so approve with the
+# same --workspace you intend to create with
+./sddx graph approve --graph graph.yaml --workspace branch
 OUT=$(./sddx graph create --graph graph.yaml --workspace branch)
 echo "$OUT"
 A_ID=$(echo "$OUT" | grep -E '^ *a →' | awk '{print $3}')

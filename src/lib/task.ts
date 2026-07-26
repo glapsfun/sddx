@@ -48,6 +48,9 @@ export interface TaskState {
   workspace: Workspace;
   /** Write globs the task may touch, copied from the spec. Empty = unconfined. */
   scope: string[];
+  /** Decisions resolved without asking, copied from the spec (goal-level ones
+   * denormalized in at plan-creation time) and carried into the receipt. */
+  assumptions?: string[];
   /** Zero or more predecessor task ids (a DAG, not just a forest). Absent/empty
    * for a root task. A dependent runs only once every named parent is DONE and
    * forks its worktree from the parent's commit (or a merge of several — see
@@ -143,6 +146,7 @@ export function createTask(
     oracle: spec.oracle,
     workspace,
     scope: spec.scope,
+    ...(spec.assumptions.length > 0 ? { assumptions: spec.assumptions } : {}),
     ...(dependsOn.length > 0 ? { depends_on: dependsOn } : {}),
     ...(spec.on_dependency_failure ? { on_dependency_failure: spec.on_dependency_failure } : {}),
     ...(spec.retry ? { retry: spec.retry } : {}),

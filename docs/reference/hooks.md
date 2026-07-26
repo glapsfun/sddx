@@ -14,6 +14,7 @@ bun-or-node launcher, with a 10-second timeout.
 | `SessionStart` | —                                    | `session-start` | Bootstrap: orphan-worktree sweep, board refresh, active tasks surfaced as session context |
 | `PreToolUse`   | `Edit\|Write\|MultiEdit\|NotebookEdit` | `tdd-gate`     | **TDD gate** — before GREEN (phases PLAN/RED), writes to implementation paths are denied  |
 | `PreToolUse`   | `Bash`                               | `bash-gate`    | **Bash gate** — pre-GREEN, only allow-listed test/read commands run (see below)           |
+| `PreToolUse`   | `Bash`                               | `approval-gate`| **Approval gate** — raises the user's permission dialog on `graph create` when the plan needs approval |
 | `PostToolUse`  | `Bash`                               | `record-test`  | Test-result recorder: observed test-runner exit codes drive PLAN→RED→GREEN                |
 | `Stop`         | —                                    | `stop-gate`    | Refuses to conclude a session whose task lacks a verified receipt                         |
 | `SubagentStop` | —                                    | `stop-gate`    | Same refusal for subagents                                                                |
@@ -122,3 +123,28 @@ Phases move on observed exit codes, never on claims:
   ([receipts-schema.md](receipts-schema.md)).
 - A broken or unreadable task state file **blocks writes** rather than
   silently disabling the gate.
+
+## The approval gate is the one *permission* gate
+
+The TDD and Bash gates are **prohibition** gates: they emit
+`permissionDecision: "deny"` to block, and otherwise emit **no** permission
+decision at all — never `"allow"`, because auto-approving would hand a tool past
+the user's own permission flow.
+
+The approval gate is the opposite shape and must do what they must not: emit
+`permissionDecision: "ask"`, which raises the user's permission dialog. Per the
+hook API this fires **even when the session is in an auto-accept permission
+mode**, so a permissive session config cannot silently disable `human` mode.
+
+This asymmetry is deliberate and load-bearing. A model can type `sddx graph
+approve`, so a CLI-only check proves only that the plan is the approved plan —
+the dialog is the one signal a model cannot produce for itself. A regression test
+asserts this gate emits `ask` and not a pass-through, so a future "consistency"
+cleanup toward the prohibition-gate shape fails loudly.
+
+**It fails closed.** Any error — unreadable config, corrupt token, an unexpected
+throw — resolves to `ask`. A prohibition gate that fails open loses one
+assertion; a permission gate that fails open disables the mode the user chose.
+
+The gate is registered on `PreToolUse` only and adds nothing to `SessionStart` or
+any other hot path, so the always-on token and latency budgets are unchanged.

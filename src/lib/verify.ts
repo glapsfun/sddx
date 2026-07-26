@@ -1,11 +1,13 @@
 import { oracleRuns } from "./config";
 import { captureEnv } from "./envinfo";
 import { commit, stageAll, writeTree } from "./git";
+import { findGoalForTask } from "./goal";
 import { runOracle } from "./oracle";
 import { chainHead, type OracleRun, type Receipt, sha256, writeReceipt } from "./receipt";
 import { type IntegrationOutcome, integrateTaskIntoRunBranch } from "./runbranch";
 import { signPayload } from "./sign";
 import { readTask, transition, writeTask } from "./task";
+import { resolveMainRepoRoot } from "./worktree";
 
 function expectedExit(expect: string): number {
   const m = /^exit\s+(\d+)$/.exec(expect.trim());
@@ -88,9 +90,13 @@ export function verifyTask(
   stageAll(cwd);
   const treeSha = writeTree(cwd);
 
+  // The goal file lives in the MAIN checkout, never committed (so it survives
+  // branch switches), while verify runs inside the task's own worktree — resolve
+  // through the git common dir, exactly as the run-branch merge below does.
+  const goalApproval = findGoalForTask(resolveMainRepoRoot(cwd), id)?.approval;
   const head = chainHead(cwd);
   const receipt: Receipt = {
-    version: 3,
+    version: 4,
     task_id: id,
     seq: head.seq + 1,
     prev: head.prevHash,
@@ -105,6 +111,24 @@ export function verifyTask(
     verdict: "pass",
     verified_at: new Date().toISOString(),
     allow: [...task.allow],
+    // Approval provenance is denormalized here, not resolved through the goal
+    // at read time: a receipt that needs another file to be interpreted stops
+    // being a receipt. Absent for a task created outside any goal.
+    ...(goalApproval
+      ? {
+          approval: {
+            mode: goalApproval.mode,
+            ...(goalApproval.requested_mode ? { requested_mode: goalApproval.requested_mode } : {}),
+            ...(goalApproval.degraded_reason
+              ? { degraded_reason: goalApproval.degraded_reason }
+              : {}),
+            plan_sha256: goalApproval.plan_sha256,
+            ...(goalApproval.at ? { at: goalApproval.at } : {}),
+            assumptions: [...(task.assumptions ?? [])],
+            amendments: [] as never[],
+          },
+        }
+      : {}),
   };
   // sign the unsigned bytes, then append the two fields LAST — audit
   // reconstructs the payload by deleting exactly these keys

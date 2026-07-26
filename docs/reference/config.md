@@ -24,6 +24,8 @@ validate` commands that read and check it.
 | `agent_model`               | —                        | *(empty)*             | Comma-separated `role=model` pairs (`orchestrator`, `planner`, `tddExecutor`, `verifier`) — advisory only |
 | `prefer_solo`                | —                        | `false`               | Advisory hint `/sddx:run` reads to steer a single trivial task toward `--solo`/`/sddx:quick`             |
 | `verbose`                    | —                        | `false`               | When true, `sddx config show` also prints which source resolved each key                                  |
+| `execution_mode`             | — (config only)          | `human`               | Where approval gates are armed: `human` (pause for plan approval) or `auto` (unattended up to the run branch) |
+| `auto_max_tasks`             | — (config only)          | `6`                   | In `auto`, a plan with more nodes than this arms the approval gate anyway                                  |
 
 A key with no env var column entry is resolved from `.sddx/config.json` or
 the built-in default only — setting an environment variable of a similar
@@ -52,3 +54,24 @@ model, or an unrecognized role) is dropped individually with a warning
 rather than invalidating the whole value. This key is **advisory only**:
 `/sddx:run` and `/sddx:quick` read it via `sddx config show --output json`
 when dispatching a subagent, but no hook enforces it.
+
+## The two gate keys are config-only, on purpose
+
+`execution_mode` and `auto_max_tasks` are the **only** keys with no environment
+override, and they deliberately break the precedence ladder every other key
+follows.
+
+The reason is the threat model. A CLI flag and an inline `VAR=value` prefix are
+both part of the command line an agent composes, so honoring either would let the
+thing the approval gate constrains switch the gate off — `sddx graph create …
+--mode auto` or `SDDX_EXECUTION_MODE=auto sddx …` would silently satisfy a user
+who configured `human`. Raising `auto_max_tasks` from the environment would
+likewise buy unattended blast radius. `.sddx/config.json` is a file a human
+edits and a reviewer can read, and it is the only source a gate decision trusts.
+
+For unattended CI, commit `execution_mode: "auto"` — reviewable, unlike an env
+var. There is no `--mode` flag on any command.
+
+`execution_mode` never falls through to `auto`: an unreadable config, a typo, or
+an out-of-domain value all resolve to `human`. See
+[execution-modes.md](../explanation/execution-modes.md).

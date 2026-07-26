@@ -15,15 +15,55 @@ check `.data.prefer_solo` — when true, lean toward suggesting
 explicitly. This is advisory only: no hook enforces it, it's a steer for this
 skill's own judgment.
 
+## Execution modes
+
+Two modes, **one** execution engine: they differ only in whether the
+plan-approval gate is armed. `human` (the default) pauses for approval before
+anything is created; `auto` runs unattended up to the run branch. Everything
+after approval — executors, verifiers, phase machine, receipts, the final
+summary — is identical, and `auto` is simply `human` with the gate
+pre-satisfied.
+
+**"Autonomous" stops at the run branch.** Merging or pushing the *target*
+branch is always the user's call in both modes (see Rules). Auto mode buys an
+unattended run ending in a reviewable branch with a receipt chain — not an
+unattended merge.
+
+Read the effective mode from `.data.execution_mode` in step 0. There is **no
+`--mode` flag and no environment override** — mode lives in `.sddx/config.json`
+alone, precisely so a command line you compose cannot switch off the gate you are
+subject to. Do not try to pass one. Under `human`,
+your responsibilities are: discover requirements, ask only questions that block
+an oracle (step 0.5), present the rendered plan, and **never invoke
+`graph create` before approval**. Under `auto`: resolve open questions
+conservatively, record each resolution as a spec `assumptions` entry, continue
+without interruption, and produce the summary.
+
+These are behavioral instructions layered on top of a deterministic gate, and
+they are **not** the mechanism enforcing approval. A PreToolUse hook raises the
+user's own permission dialog on `graph create`, and `graph create` itself exits
+3 without an approval token. If you ignore this section, the gate still holds —
+which is the point.
+
 ## Flow
 
 0. **Read config** — run `... config show --output json` once and keep
    `.data.agent_model` (a `role=model` map, e.g. `{"tddExecutor": "opus"}`) for
    step 1 onward: when dispatching a subagent for a role present in that map,
    pass its model as the dispatch's model override; roles absent from the map
-   use the harness default. (`--json` still works as a deprecated alias for
+   use the harness default. Also keep `.data.execution_mode` (`human`|`auto`)
+   and `.data.auto_max_tasks`. (`--json` still works as a deprecated alias for
    `--output json`, but reads the same `.data.*` shape — not the bare fields
    an older sddx once printed at the top level.)
+0.5 **Ask only what blocks an oracle.** Before planning, surface to the user
+   only those open questions whose answers make an oracle unwritable or a
+   success criterion non-binary — "which test runner?", "is auth in scope?".
+   Anything else (audience, styling preference, naming taste) you resolve
+   conservatively and record as an `assumptions` entry on the affected spec, or
+   at graph level when it is cross-cutting. The test is mechanical: **if you can
+   write the oracle, you do not get to ask.** Under `auto`, a question that
+   conservative assumption cannot resolve is the one condition that halts the
+   run — stop and escalate rather than guessing.
 1. **Decompose into a graph** — dispatch the `orchestrator` agent with the goal.
    It authors `.sddx/drafts/<date>-<goal-slug>-graph.yaml`: one node per task
    with an `alias`, a `spec` path (a bare filename alongside the graph file —
@@ -42,6 +82,31 @@ skill's own judgment.
    (`max_attempts`, `workspace: fresh|reuse`). Leave both unset for the common
    case; they default to today's behavior (skip past an unrecoverable
    ancestor, no automatic retry).
+2.5 **Render the plan and get approval** — run
+   `... graph create --graph <path> --dry-run`. This runs the *same*
+   resolve-and-validate path a real create runs and writes nothing, so it
+   reports what the drafts cannot: the effective workspace mode (including any
+   submodule downgrade), the resolved base SHA, and the validation verdict.
+   Relay it. A re-render after a revision prints only what changed, so a second
+   read is cheap.
+
+   Offer four actions and take none of them unasked:
+   - **Approve** → `... graph approve --graph <path>` (pass the same
+     `--workspace` you will create with — the token records it), then step 3.
+   - **Edit** → revise the draft YAML (the drafts *are* the plan), re-render.
+     Any edit changes the plan hash, so the gate arms again — expected, not a bug.
+   - **Regenerate** → delete this goal's drafts, return to step 1.
+   - **Cancel** → delete the drafts. **Nothing else needs undoing** — no branch,
+     worktree, or state file exists yet. This is why the gate sits here.
+
+   Under `auto` within bounds, render for the record and continue without
+   prompting. `auto` still arms the gate — reported as a degradation, not a
+   failure — when the plan exceeds `auto_max_tasks` or any node's `scope`
+   reaches sddx's own enforcement paths (`hooks/**`, `.claude-plugin/**`, CI
+   workflows). Two things `auto` refuses outright rather than asking about: a
+   node whose `oracle.type` is `manual` (nobody is present to observe it), and
+   granting a `task allow` TDD-gate exemption (an agent that can widen its own
+   gate has no gate) — both need `human`.
 3. **Create atomically** — from the repo root:
    `... graph create --graph .sddx/drafts/<date>-<goal-slug>-graph.yaml`
    This is the gate: it validates every oracle, the DAG (cycle-free, and
@@ -90,7 +155,11 @@ skill's own judgment.
    target branch (unchanged), merged/failed/outstanding counts, a diff
    summary, and the review commands (`git switch`, `git diff`, `git log`).
    This is meaningful even when the goal is only partially done: the run
-   branch already reflects whatever verified so far. Then run
+   branch already reflects whatever verified so far. The report is **identical
+   in both modes** — same sections, same order — and also carries the goal
+   sentence, per-task oracle outcomes, the approval line (effective mode, plan
+   hash, and any recorded `auto`→`human` degradation), and any assumptions
+   recorded during the run. Then run
    `... next-actions --goal <goal-id>` and relay its menu — review, retry a
    failed task, revert one task's merge, commit remaining changes, push the
    run branch, create a PR/MR, merge into the target branch, exit — offer it,
@@ -109,6 +178,30 @@ Skipped/Abandoned task is never redispatched either; only currently-Ready or
 still-in-flight tasks get dispatched. This holds even across a crash or a
 killed session between invocations — read the board before dispatching
 anything and act only on what it reports as Ready.
+
+**Resume never re-asks for approval.** The gate is armed only on `graph create`,
+and creation does not re-run for an existing goal — so an interrupted `human`
+run picks up its Ready tasks with no prompt. Approval is per-plan-hash: only a
+new plan, or one whose drafts changed, meets the gate again.
+
+## Incremental confidence is a graph shape, not a gate
+
+If the user wants to see one task land before committing to the rest, that is
+**not** a second approval gate — it is how the graph is drawn. Plan a canary
+node that every other node `depends_on`, with `on_dependency_failure: block` so
+a failure halts the graph instead of skipping past it:
+
+```yaml
+tasks:
+  - alias: spike          # the canary
+    spec: <date>-<slug>-spike.yaml
+  - alias: rest
+    spec: <date>-<slug>-rest.yaml
+    depends_on: spike     # spec sets on_dependency_failure: block
+```
+
+There is deliberately **no per-task approval prompt** — reviewing every action
+is the anti-pattern this design rejects. One gate, at the plan.
 
 ## Rules
 

@@ -16,7 +16,18 @@ export interface SddxConfig {
   agent_model?: string;
   prefer_solo?: boolean;
   verbose?: boolean;
+  execution_mode?: ExecutionMode;
+  auto_max_tasks?: number;
 }
+
+/** Which approval gates are armed. `auto` is `human` with the plan-approval
+ * gate pre-satisfied — never a second execution path. */
+export type ExecutionMode = "human" | "auto";
+
+export const EXECUTION_MODES = ["human", "auto"] as const;
+
+/** The node-count ceiling above which `auto` arms the approval gate anyway. */
+export const DEFAULT_AUTO_MAX_TASKS = 6;
 
 export function readConfig(root: string): SddxConfig {
   const path = join(root, ".sddx", "config.json");
@@ -105,6 +116,42 @@ export function boardEnabled(root: string, env: NodeJS.ProcessEnv = process.env)
   });
 }
 
+const asMode = (v: unknown): ExecutionMode | null =>
+  typeof v === "string" && (EXECUTION_MODES as readonly string[]).includes(v)
+    ? (v as ExecutionMode)
+    : null;
+
+/**
+ * `.sddx/config.json` ONLY — deliberately no CLI flag and no environment
+ * override, breaking the ladder every other key follows.
+ *
+ * The reason is the threat model this gate exists for. A CLI flag and an inline
+ * `VAR=value` prefix are both part of the command line the agent composes, so
+ * honoring either would let the thing the gate constrains switch the gate off:
+ * `sddx graph create … --mode auto` would silently satisfy a user who
+ * configured `human`. Config is a committed file a human edits, and it is the
+ * only source a gate decision may trust. For unattended CI, commit
+ * `execution_mode: "auto"` — reviewable, unlike an env var.
+ *
+ * An invalid or unreadable value resolves to `human`, never `auto`.
+ */
+export function executionMode(root: string): ExecutionMode {
+  return asMode(readConfig(root).execution_mode) ?? "human";
+}
+
+/** The gate's mode. Same config-only resolution as `executionMode`; the alias
+ * exists so gate call sites read as what they are. */
+export const gateExecutionMode = executionMode;
+
+/**
+ * `.sddx/config.json` only, for the same reason as `executionMode`: raising the
+ * ceiling widens how much unattended work self-approves, so an environment
+ * override would be a second way for the agent to buy itself blast radius.
+ */
+export function autoMaxTasks(root: string): number {
+  return positiveInt(readConfig(root).auto_max_tasks) ?? DEFAULT_AUTO_MAX_TASKS;
+}
+
 const KNOWN_AGENT_ROLES = ["orchestrator", "planner", "tddExecutor", "verifier"] as const;
 
 /**
@@ -151,6 +198,8 @@ export interface ResolvedConfig {
   agent_model: Record<string, string>;
   prefer_solo: boolean;
   verbose: boolean;
+  execution_mode: ExecutionMode;
+  auto_max_tasks: number;
 }
 
 const WORKSPACE_MODES = ["auto", "worktree", "branch", "none"] as const;
@@ -215,6 +264,9 @@ export function resolveConfig(root: string, env: NodeJS.ProcessEnv = process.env
     agent_model: parseAgentModel(cfg.agent_model).models,
     prefer_solo: resolveValue({ configValue: cfg.prefer_solo, configParse: bool, fallback: false }),
     verbose: resolveValue({ configValue: cfg.verbose, configParse: bool, fallback: false }),
+    // both config-only by design — see executionMode()
+    execution_mode: executionMode(root),
+    auto_max_tasks: autoMaxTasks(root),
   };
 }
 
@@ -248,6 +300,8 @@ const CONFIG_SCHEMA: ReadonlyArray<[string, (v: unknown) => boolean, string]> = 
   ["agent_model", isString, "a string"],
   ["prefer_solo", isBoolean, "a boolean"],
   ["verbose", isBoolean, "a boolean"],
+  ["execution_mode", isOneOf(EXECUTION_MODES), `one of ${EXECUTION_MODES.join("|")}`],
+  ["auto_max_tasks", isPositiveInt, "a positive integer"],
 ];
 
 export const KNOWN_CONFIG_KEYS: ReadonlySet<string> = new Set(CONFIG_SCHEMA.map(([key]) => key));

@@ -87,6 +87,18 @@
       "title": "Verbose CLI output",
       "default": false,
       "description": "When true, sddx config show also prints which source (env var, .sddx/config.json, or built-in default) resolved each key"
+    },
+    "execution_mode": {
+      "type": "string",
+      "title": "Execution mode",
+      "default": "human",
+      "description": "Where approval gates are armed: human (pause for plan approval before anything is created) | auto (unattended up to the run branch). Merging into the target branch always needs a human in both modes"
+    },
+    "auto_max_tasks": {
+      "type": "number",
+      "title": "Auto-mode task ceiling",
+      "default": 6,
+      "description": "In auto mode, a plan with more nodes than this arms the approval gate anyway rather than running unattended"
     }
   }
 }

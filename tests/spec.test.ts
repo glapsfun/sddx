@@ -116,3 +116,43 @@ describe("parseSpec", () => {
     expect(errors.some((e) => e.startsWith("retry.workspace:"))).toBe(true);
   });
 });
+
+describe("assumptions", () => {
+  const base = `task: do the thing
+success_criteria:
+  - "it works"
+oracle:
+  type: command
+  run: "true"
+`;
+
+  test("absent yields an empty list", () => {
+    const { spec, errors } = parseSpec(base);
+    expect(errors).toEqual([]);
+    expect(spec?.assumptions).toEqual([]);
+  });
+
+  test("a list of non-empty strings is accepted and trimmed", () => {
+    const { spec, errors } = parseSpec(
+      `${base}assumptions:\n  - "  the project uses Vite  "\n  - "no auth required"\n`,
+    );
+    expect(errors).toEqual([]);
+    expect(spec?.assumptions).toEqual(["the project uses Vite", "no auth required"]);
+  });
+
+  test("a malformed value is an itemized error naming the field", () => {
+    for (const bad of ["assumptions: notalist\n", "assumptions: []\n", 'assumptions:\n  - ""\n']) {
+      const { spec, errors } = parseSpec(base + bad);
+      expect(spec).toBeUndefined();
+      expect(errors.join("\n")).toContain("assumptions");
+    }
+  });
+
+  test("assumptions errors are itemized alongside other errors, not short-circuited", () => {
+    const { errors } = parseSpec(
+      `task: t\nsuccess_criteria:\n  - "w"\noracle:\n  type: nope\n  run: "x"\nassumptions: 3\n`,
+    );
+    expect(errors.join("\n")).toContain("assumptions");
+    expect(errors.join("\n")).toContain("oracle.type");
+  });
+});

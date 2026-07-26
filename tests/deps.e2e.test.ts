@@ -13,6 +13,30 @@ const cli = (cwd: string, ...args: string[]) =>
 const g = (cwd: string, ...args: string[]) =>
   spawnSync("git", args, { cwd, encoding: "utf8" }).stdout.trim();
 
+/** `graph create` now requires an approval token under the default human mode.
+ * These tests exercise creation mechanics, so they approve first — the same two
+ * steps a user takes — rather than sidestepping the gate with auto mode. */
+function approveAndCreate(cwd: string, ...args: string[]) {
+  const graphIdx = args.indexOf("--graph");
+  const wsIdx = args.indexOf("--workspace");
+  // The token records the workspace strategy it was approved for, so approve
+  // must be given the same one the create will use.
+  const approve = spawnSync(
+    "bun",
+    [
+      CLI,
+      "graph",
+      "approve",
+      "--graph",
+      args[graphIdx + 1],
+      ...(wsIdx === -1 ? [] : ["--workspace", args[wsIdx + 1]]),
+    ],
+    { cwd, encoding: "utf8" },
+  );
+  if (approve.status !== 0) return approve;
+  return cli(cwd, ...args);
+}
+
 function scopedGraph(cwd: string): void {
   mkdirSync(join(cwd, "specs"), { recursive: true });
   // B's scope overlaps A's — legal only because B depends on A (ordered)
@@ -35,7 +59,7 @@ describe("dependency chain end-to-end", () => {
     const { clone } = fixtureClone();
     scopedGraph(clone);
 
-    const created = cli(clone, "graph", "create", "--graph", "graph.yaml");
+    const created = approveAndCreate(clone, "graph", "create", "--graph", "graph.yaml");
     expect(created.status).toBe(0);
     const goalId = /created goal (\S+)/.exec(created.stdout)![1]!;
     const shown = JSON.parse(cli(clone, "goal", "show", goalId).stdout);
@@ -78,7 +102,15 @@ describe("dependency chain end-to-end", () => {
   test("branch-mode dependent materializes as a branch, not a worktree", () => {
     const cwd = fixtureRepo();
     scopedGraph(cwd);
-    const created = cli(cwd, "graph", "create", "--graph", "graph.yaml", "--workspace", "branch");
+    const created = approveAndCreate(
+      cwd,
+      "graph",
+      "create",
+      "--graph",
+      "graph.yaml",
+      "--workspace",
+      "branch",
+    );
     expect(created.status).toBe(0);
     const goalId = /created goal (\S+)/.exec(created.stdout)![1]!;
     const [aId, bId] = JSON.parse(cli(cwd, "goal", "show", goalId).stdout).task_ids as [
@@ -105,7 +137,7 @@ describe("dependency chain end-to-end", () => {
   test("materialize refuses while the parent is not DONE", () => {
     const { clone } = fixtureClone();
     scopedGraph(clone);
-    const created = cli(clone, "graph", "create", "--graph", "graph.yaml");
+    const created = approveAndCreate(clone, "graph", "create", "--graph", "graph.yaml");
     const goalId = /created goal (\S+)/.exec(created.stdout)![1]!;
     const [, bId] = JSON.parse(cli(clone, "goal", "show", goalId).stdout).task_ids as [
       string,
@@ -150,7 +182,7 @@ describe("fan-in dependency end-to-end", () => {
     const { clone } = fixtureClone();
     fanInGraph(clone);
 
-    const created = cli(clone, "graph", "create", "--graph", "graph.yaml");
+    const created = approveAndCreate(clone, "graph", "create", "--graph", "graph.yaml");
     expect(created.status).toBe(0);
     const goalId = /created goal (\S+)/.exec(created.stdout)![1]!;
     const shown = JSON.parse(cli(clone, "goal", "show", goalId).stdout);
@@ -241,7 +273,7 @@ describe("retry end-to-end", () => {
       join(clone, "graph.yaml"),
       "goal: ship the chain\ntasks:\n  - alias: a\n    spec: specs/a.yaml\n  - alias: b\n    spec: specs/b.yaml\n    depends_on: a\n",
     );
-    const created = cli(clone, "graph", "create", "--graph", "graph.yaml");
+    const created = approveAndCreate(clone, "graph", "create", "--graph", "graph.yaml");
     const goalId = /created goal (\S+)/.exec(created.stdout)![1]!;
     const [aId, bId] = JSON.parse(cli(clone, "goal", "show", goalId).stdout).task_ids as [
       string,

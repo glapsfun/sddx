@@ -176,7 +176,7 @@ describe("test-first path passes (5.3)", () => {
     const receipt = JSON.parse(
       readFileSync(join(repo, ".sddx", "receipts", `${id}.json`), "utf8"),
     ) as Receipt;
-    expect(receipt.version).toBe(3);
+    expect(receipt.version).toBe(4);
     expect(receipt.allow).toEqual([]);
 
     // task file shows hook-sourced evidence for both transitions

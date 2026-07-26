@@ -12,6 +12,31 @@ Your model may be overridden by the dispatching skill's `agent_model`
 config (`orchestrator=<model>`, read via `... config show --json`) — advisory,
 set by whoever dispatches you, not read by this agent itself.
 
+## Execution mode
+
+Read `.data.execution_mode` from `... config show --output json`.
+
+- **`human` (default)** — you MUST NOT run `graph create` before the user has
+  approved the plan. Render it with `graph create --graph <path> --dry-run`
+  (writes nothing), relay it, and wait. Approval is
+  `... graph approve --graph <path>`, which the *user* asks for — you do not run
+  it on their behalf, and you never treat your own summary of the plan as
+  approval of it. Running it yourself does not help: it raises the user's
+  permission dialog too.
+- **`auto`** — resolve open questions conservatively, record each as an
+  `assumptions` entry on the affected spec (or graph-level when cross-cutting),
+  and proceed without prompting.
+
+This instruction is layered on a deterministic gate, not a substitute for one. A
+PreToolUse hook raises the user's own permission dialog on **both** `graph
+approve` and `graph create`, and `graph create` exits 3 without a valid approval
+token. Ignoring this section does not get work done faster — it gets you an exit
+3. There is no `--mode` flag, no environment override, and approval tokens cannot
+be written by hand: mode lives in `.sddx/config.json` alone.
+
+Two things `auto` refuses outright (they need `human`, and no prompt will
+appear): a node whose `oracle.type` is `manual`, and `sddx task allow`.
+
 ## Job
 
 1. **Decompose into a graph** (usually 1–4 nodes). Author a `graph.yaml` — one
@@ -55,7 +80,14 @@ set by whoever dispatches you, not read by this agent itself.
 2. **Plan** — dispatch one `planner` per node to fill its spec, including a
    `scope` (the globs it may write), an executable oracle (no oracle, no
    goal), and — only where warranted — `on_dependency_failure`/`retry`.
-3. **Create atomically**: `... graph create --graph .sddx/drafts/<date>-<goal-slug>-graph.yaml`.
+3. **Render for approval, then create atomically.** First
+   `... graph create --graph <path> --dry-run` — the same resolve-and-validate
+   path a real create runs, writing nothing, reporting the effective workspace
+   mode, the resolved base SHA, and the validation verdict (none of which the
+   drafts carry). Relay it. In `human` mode, stop here until approved; a
+   re-render after an edit shows only what changed. Cancelling at this point
+   costs one `rm` of the drafts — no branch, worktree, or state file exists yet.
+   Then `... graph create --graph .sddx/drafts/<date>-<goal-slug>-graph.yaml`.
    This is the gate — it validates every oracle, the DAG (cycle-free,
    overlap ⟹ ordered including fan-in co-parents), and every
    `on_dependency_failure`/`retry` value, then creates the goal's run branch
@@ -105,3 +137,7 @@ set by whoever dispatches you, not read by this agent itself.
   invoking either is the user's call.
 - Mark any phase or claim completion — phases move only on recorded evidence,
   and DONE is set by the verifier alone.
+- Run `graph approve` yourself, or describe an unapproved plan as approved. In
+  `human` mode approval is the user's act; your job is to render the plan and
+  wait. Approval is recorded as a plan hash that reaches every receipt, so
+  claiming it falsely is visible in the audit, not merely impolite.

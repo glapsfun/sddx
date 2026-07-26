@@ -16,6 +16,30 @@ function cli(cwd: string, ...args: string[]) {
   return spawnSync("bun", [CLI_SRC, ...args], { cwd, encoding: "utf8" });
 }
 
+/** `graph create` now requires an approval token under the default human mode.
+ * These tests exercise creation mechanics, so they approve first — the same two
+ * steps a user takes — rather than sidestepping the gate with auto mode. */
+function approveAndCreate(cwd: string, ...args: string[]) {
+  const graphIdx = args.indexOf("--graph");
+  const wsIdx = args.indexOf("--workspace");
+  // The token records the workspace strategy it was approved for, so approve
+  // must be given the same one the create will use.
+  const approve = spawnSync(
+    "bun",
+    [
+      CLI_SRC,
+      "graph",
+      "approve",
+      "--graph",
+      args[graphIdx + 1],
+      ...(wsIdx === -1 ? [] : ["--workspace", args[wsIdx + 1]]),
+    ],
+    { cwd, encoding: "utf8" },
+  );
+  if (approve.status !== 0) return approve;
+  return cli(cwd, ...args);
+}
+
 const SPEC = `task: add greet
 success_criteria:
   - greet prints hello
@@ -167,7 +191,15 @@ describe("sddx cli", () => {
       join(cwd, "graph.yaml"),
       "goal: ship it\ntasks:\n  - alias: only\n    spec: spec.yaml\n",
     );
-    const created = cli(cwd, "graph", "create", "--graph", "graph.yaml", "--workspace", "branch");
+    const created = approveAndCreate(
+      cwd,
+      "graph",
+      "create",
+      "--graph",
+      "graph.yaml",
+      "--workspace",
+      "branch",
+    );
     expect(created.status).toBe(0);
     const id = /created (\S+) phase=PLAN/.exec(created.stdout)![1]!;
 
@@ -256,7 +288,15 @@ describe("sddx cli", () => {
     const cwd = fixtureRepo();
     mkdtempScopedSpecs(cwd);
     // branch mode: `none` is incompatible with dependent tasks (no base to fork from)
-    const r = cli(cwd, "graph", "create", "--graph", "graph.yaml", "--workspace", "branch");
+    const r = approveAndCreate(
+      cwd,
+      "graph",
+      "create",
+      "--graph",
+      "graph.yaml",
+      "--workspace",
+      "branch",
+    );
     expect(r.status).toBe(0);
     const goalId = /created goal (\S+)/.exec(r.stdout)![1]!;
     const goal = JSON.parse(readFileSync(join(cwd, ".sddx", "goals", `${goalId}.json`), "utf8"));
@@ -284,7 +324,15 @@ describe("sddx cli", () => {
       join(cwd, "graph.yaml"),
       "goal: do a and b\ntasks:\n  - alias: a\n    spec: a.yaml\n  - alias: b\n    spec: b.yaml\n",
     );
-    const r = cli(cwd, "graph", "create", "--graph", "graph.yaml", "--workspace", "none");
+    const r = approveAndCreate(
+      cwd,
+      "graph",
+      "create",
+      "--graph",
+      "graph.yaml",
+      "--workspace",
+      "none",
+    );
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("scope overlap");
     // atomic: no task files, no goal directory
@@ -300,7 +348,15 @@ describe("sddx cli", () => {
       join(cwd, "graph.yaml"),
       "goal: g\ntasks:\n  - alias: ok\n    spec: ok.yaml\n  - alias: bad\n    spec: bad.yaml\n",
     );
-    const r = cli(cwd, "graph", "create", "--graph", "graph.yaml", "--workspace", "none");
+    const r = approveAndCreate(
+      cwd,
+      "graph",
+      "create",
+      "--graph",
+      "graph.yaml",
+      "--workspace",
+      "none",
+    );
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("oracle");
     expect(existsSync(join(cwd, ".sddx", "tasks"))).toBe(false);
@@ -309,7 +365,15 @@ describe("sddx cli", () => {
   test("graph create refuses --workspace none when the graph has a dependency", () => {
     const cwd = fixtureRepo();
     mkdtempScopedSpecs(cwd);
-    const r = cli(cwd, "graph", "create", "--graph", "graph.yaml", "--workspace", "none");
+    const r = approveAndCreate(
+      cwd,
+      "graph",
+      "create",
+      "--graph",
+      "graph.yaml",
+      "--workspace",
+      "none",
+    );
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("none is incompatible with dependent tasks");
     expect(existsSync(join(cwd, ".sddx", "tasks"))).toBe(false);
@@ -365,7 +429,15 @@ describe("sddx cli", () => {
       join(cwd, "graph.yaml"),
       "goal: g\ntasks:\n  - alias: policy\n    spec: root.yaml\n  - alias: plain\n    spec: plain.yaml\n",
     );
-    const r = cli(cwd, "graph", "create", "--graph", "graph.yaml", "--workspace", "none");
+    const r = approveAndCreate(
+      cwd,
+      "graph",
+      "create",
+      "--graph",
+      "graph.yaml",
+      "--workspace",
+      "none",
+    );
     expect(r.status).toBe(0);
     const goalId = /created goal (\S+)/.exec(r.stdout)![1]!;
     const goal = JSON.parse(readFileSync(join(cwd, ".sddx", "goals", `${goalId}.json`), "utf8"));
@@ -389,7 +461,15 @@ describe("sddx cli", () => {
       `task: bad policy\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\non_dependency_failure: retry\n`,
     );
     writeFileSync(join(cwd, "graph.yaml"), "goal: g\ntasks:\n  - alias: bad\n    spec: bad.yaml\n");
-    const r = cli(cwd, "graph", "create", "--graph", "graph.yaml", "--workspace", "none");
+    const r = approveAndCreate(
+      cwd,
+      "graph",
+      "create",
+      "--graph",
+      "graph.yaml",
+      "--workspace",
+      "none",
+    );
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("on_dependency_failure");
     expect(existsSync(join(cwd, ".sddx", "tasks"))).toBe(false);
@@ -515,7 +595,15 @@ describe("sddx cli", () => {
       join(cwd, "graph.yaml"),
       "goal: report it\ntasks:\n  - alias: only\n    spec: spec.yaml\n",
     );
-    const created = cli(cwd, "graph", "create", "--graph", "graph.yaml", "--workspace", "worktree");
+    const created = approveAndCreate(
+      cwd,
+      "graph",
+      "create",
+      "--graph",
+      "graph.yaml",
+      "--workspace",
+      "worktree",
+    );
     expect(created.status).toBe(0);
     const id = /created (\S+) phase=PLAN/.exec(created.stdout)![1]!;
     const goalId = /created goal (\S+)/.exec(created.stdout)![1]!;

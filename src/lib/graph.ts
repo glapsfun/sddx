@@ -19,6 +19,9 @@ export interface GraphNode {
 export interface Graph {
   goal: string;
   tasks: GraphNode[];
+  /** Cross-cutting decisions resolved without asking, denormalized into every
+   * node's spec at create time so each receipt stays self-contained. */
+  assumptions: string[];
 }
 
 const ALIAS_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -42,6 +45,17 @@ export function parseGraph(yamlText: string): { graph?: Graph; errors: string[] 
   if (!Array.isArray(r.tasks) || r.tasks.length === 0) {
     errors.push("tasks: non-empty list of task nodes required");
     return { errors };
+  }
+  // same shape rule as a spec's `assumptions`: optional, but present means a
+  // non-empty list of non-empty strings
+  if (r.assumptions !== undefined) {
+    if (
+      !Array.isArray(r.assumptions) ||
+      r.assumptions.length === 0 ||
+      !r.assumptions.every((s) => typeof s === "string" && s.trim() !== "")
+    ) {
+      errors.push("assumptions: when present, must be a non-empty list of non-empty strings");
+    }
   }
 
   const nodes: GraphNode[] = [];
@@ -93,7 +107,16 @@ export function parseGraph(yamlText: string): { graph?: Graph; errors: string[] 
   }
 
   if (errors.length > 0) return { errors };
-  return { errors: [], graph: { goal: (r.goal as string).trim(), tasks: nodes } };
+  return {
+    errors: [],
+    graph: {
+      goal: (r.goal as string).trim(),
+      tasks: nodes,
+      assumptions: Array.isArray(r.assumptions)
+        ? (r.assumptions as string[]).map((s) => s.trim())
+        : [],
+    },
+  };
 }
 
 export interface ScheduleNode {

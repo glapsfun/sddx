@@ -133,3 +133,37 @@ describe("sddx config validate", () => {
     expect(r.stderr).toContain("not valid JSON");
   });
 });
+
+describe("execution mode surfaced through the config CLI", () => {
+  test("config show reports both keys in json and terminal output", () => {
+    const cwd = fixtureRepo();
+    const json = cli(cwd, process.env, "config", "show", "--output", "json");
+    expect(json.status).toBe(0);
+    expect(JSON.parse(json.stdout).data).toMatchObject({
+      execution_mode: "human",
+      auto_max_tasks: 6,
+    });
+
+    withConfig(cwd, { execution_mode: "auto", auto_max_tasks: 2 });
+    const term = cli(cwd, process.env, "config", "show");
+    expect(term.status).toBe(0);
+    expect(term.stdout).toContain("execution_mode: auto");
+    expect(term.stdout).toContain("auto_max_tasks: 2");
+  });
+
+  test("config validate reports an out-of-domain mode and ceiling", () => {
+    const cwd = fixtureRepo();
+    withConfig(cwd, { execution_mode: "yolo", auto_max_tasks: 0 });
+    const r = cli(cwd, process.env, "config", "validate");
+    expect(r.stdout + r.stderr).toContain("execution_mode");
+    expect(r.stdout + r.stderr).toContain("auto_max_tasks");
+  });
+
+  test("a broken config still resolves to human, never auto", () => {
+    const cwd = fixtureRepo();
+    mkdirSync(join(cwd, ".sddx"), { recursive: true });
+    writeFileSync(join(cwd, ".sddx", "config.json"), "{not json");
+    const r = cli(cwd, process.env, "config", "show", "--output", "json");
+    expect(JSON.parse(r.stdout).data.execution_mode).toBe("human");
+  });
+});

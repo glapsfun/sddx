@@ -103,3 +103,143 @@ describe("generateRunReport / renderRunReport", () => {
     expect(renderRunReport(report)).toContain("0 of 1 task(s) merged");
   });
 });
+
+/** registerGoal + approval provenance, the way `graph create` writes it. */
+function registerApprovedGoal(
+  mainCwd: string,
+  sentence: string,
+  taskIds: string[],
+  approval: {
+    mode: "human" | "auto";
+    requested_mode?: "human" | "auto";
+    degraded_reason?: string;
+    plan_sha256?: string;
+  },
+) {
+  const base = resolveBaseRef(mainCwd);
+  const gid = goalId(sentence);
+  const runBranch = runBranchName(gid);
+  createBranchAt(mainCwd, runBranch, base.sha);
+  return createGoal(mainCwd, sentence, taskIds, {
+    id: gid,
+    runBranch,
+    baseSha: base.sha,
+    approval: {
+      mode: approval.mode,
+      ...(approval.requested_mode ? { requested_mode: approval.requested_mode } : {}),
+      ...(approval.degraded_reason ? { degraded_reason: approval.degraded_reason } : {}),
+      plan_sha256: approval.plan_sha256 ?? "a".repeat(64),
+      at: new Date().toISOString(),
+    },
+  });
+}
+
+describe("run report completion summary", () => {
+  test("names the goal sentence and the approval line", () => {
+    const cwd = fixtureRepo();
+    const { id, wtPath } = registerTask(cwd, "build the widget");
+    registerApprovedGoal(cwd, "ship the widget", [id], { mode: "human" });
+    completeTask(wtPath, id, "widget.txt");
+
+    const r = generateRunReport(cwd, goalId("ship the widget"), "main");
+    expect(r.goal).toBe("ship the widget");
+    expect(r.approval?.mode).toBe("human");
+    expect(r.approval?.plan_sha256).toBe("a".repeat(64));
+
+    const out = renderRunReport(r);
+    expect(out).toContain("ship the widget");
+    expect(out).toContain("human");
+    expect(out).toContain("a".repeat(64).slice(0, 12));
+  });
+
+  test("reports oracle outcomes and statistics", () => {
+    const cwd = fixtureRepo();
+    const a = registerTask(cwd, "build the alpha part");
+    const b = registerTask(cwd, "build the beta part");
+    registerApprovedGoal(cwd, "ship both parts", [a.id, b.id], { mode: "auto" });
+    completeTask(a.wtPath, a.id, "alpha.txt");
+    abandonTask(b.wtPath, b.id);
+
+    const r = generateRunReport(cwd, goalId("ship both parts"), "main");
+    expect(r.oracles).toHaveLength(2);
+    const alpha = r.oracles.find((o) => o.taskId === a.id);
+    expect(alpha?.verdict).toBe("pass");
+    expect(alpha?.run).toBe("exit 0");
+    expect(r.oracles.find((o) => o.taskId === b.id)?.verdict).toBe("abandoned");
+
+    const out = renderRunReport(r);
+    expect(out).toContain("Oracle results");
+    expect(out).toContain("pass");
+  });
+
+  test("records degradation from auto to human", () => {
+    const cwd = fixtureRepo();
+    const { id } = registerTask(cwd, "build the widget");
+    registerApprovedGoal(cwd, "ship the widget", [id], {
+      mode: "human",
+      requested_mode: "auto",
+      degraded_reason: "plan has 9 nodes, over the auto_max_tasks ceiling of 6",
+    });
+    const out = renderRunReport(generateRunReport(cwd, goalId("ship the widget"), "main"));
+    expect(out).toContain("auto");
+    expect(out).toContain("auto_max_tasks");
+  });
+
+  test("surfaces assumptions recorded during the run", () => {
+    const cwd = fixtureRepo();
+    const spec = parseSpec(
+      `task: build with assumptions\nsuccess_criteria:\n  - a\nassumptions:\n  - "the project uses Vite"\noracle:\n  type: command\n  run: "exit 0"\n`,
+    ).spec!;
+    const id = taskId(spec.task);
+    const base = resolveBaseRef(cwd);
+    const wtPath = createWorktree(cwd, id, base.sha);
+    createTask(wtPath, spec, ".sddx/specs/x.yaml", {
+      mode: "worktree",
+      branch: `sddx/${id}`,
+      base_sha: base.sha,
+      path: relative(cwd, wtPath),
+    });
+    registerApprovedGoal(cwd, "ship with assumptions", [id], { mode: "auto" });
+
+    const r = generateRunReport(cwd, goalId("ship with assumptions"), "main");
+    expect(r.assumptions).toContain("the project uses Vite");
+    expect(renderRunReport(r)).toContain("the project uses Vite");
+  });
+
+  test("both modes render identical sections in identical order", () => {
+    const sectionsFor = (mode: "human" | "auto") => {
+      const cwd = fixtureRepo();
+      const { id, wtPath } = registerTask(cwd, "build the widget");
+      registerApprovedGoal(cwd, "ship the widget", [id], { mode });
+      completeTask(wtPath, id, "widget.txt");
+      return renderRunReport(generateRunReport(cwd, goalId("ship the widget"), "main"))
+        .split("\n")
+        .filter((l) => /^[A-Z][A-Za-z ]+$/.test(l.trim()) && !l.startsWith("-"));
+    };
+    expect(sectionsFor("human")).toEqual(sectionsFor("auto"));
+  });
+
+  test("a partially-completed goal still reports branch, counts, and approval", () => {
+    const cwd = fixtureRepo();
+    const a = registerTask(cwd, "build the alpha part");
+    const b = registerTask(cwd, "build the beta part");
+    registerApprovedGoal(cwd, "ship both parts", [a.id, b.id], { mode: "auto" });
+    completeTask(a.wtPath, a.id, "alpha.txt");
+
+    const out = renderRunReport(generateRunReport(cwd, goalId("ship both parts"), "main"));
+    expect(out).toContain("Run in progress");
+    expect(out).toContain(runBranchName(goalId("ship both parts")));
+    expect(out).toContain("1 of 2");
+    expect(out).toContain("auto");
+  });
+
+  test("a goal with no approval block renders without an approval line", () => {
+    const cwd = fixtureRepo();
+    const { id, wtPath } = registerTask(cwd, "build the widget");
+    registerGoal(cwd, "ship the widget", [id]);
+    completeTask(wtPath, id, "widget.txt");
+    const r = generateRunReport(cwd, goalId("ship the widget"), "main");
+    expect(r.approval).toBeUndefined();
+    expect(renderRunReport(r)).not.toContain("Approval");
+  });
+});

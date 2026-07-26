@@ -68,12 +68,39 @@ export function scopeBlockMessage(
   ].join("\n");
 }
 
+/**
+ * Approval tokens may only be created by `sddx graph approve`, whose PreToolUse
+ * gate raises the user's permission dialog. A direct Edit/Write to
+ * `.sddx/approvals/**` would forge one without ever asking — and `.sddx/**` is
+ * an EXEMPT glob for the TDD gate, so nothing else here would stop it. Blocked
+ * unconditionally, in every phase, task or no task.
+ */
+const APPROVALS_PATH = /(^|\/)\.sddx\/approvals\//;
+
+function approvalWriteBlock(relOrAbs: string): string | null {
+  if (!APPROVALS_PATH.test(normalizeRelPath(relOrAbs))) return null;
+  return [
+    `sddx approval gate: blocked write to ${relOrAbs} — approval tokens are not editable.`,
+    "A token records that a human approved a plan, so writing one directly would forge that.",
+    "Approve a plan the only way that counts (it raises your own permission dialog):",
+    "  sddx graph create --graph <path> --dry-run   # review it first",
+    "  sddx graph approve --graph <path>",
+  ].join("\n");
+}
+
 export function tddGate(input: GateInput, env = process.env): GateDecision {
   const anchor = input.filePath
     ? isAbsolute(input.filePath)
       ? input.filePath
       : resolve(input.cwd ?? process.cwd(), input.filePath)
     : (input.cwd ?? process.cwd());
+
+  // Checked before task resolution: this holds with no task in play at all,
+  // which is exactly the state a plan sits in before `graph create`.
+  if (input.filePath) {
+    const forged = approvalWriteBlock(input.filePath) ?? approvalWriteBlock(anchor);
+    if (forged) return { allow: false, reason: forged };
+  }
 
   const res = resolveTask(anchor);
   if (res.kind === "none") return { allow: true };

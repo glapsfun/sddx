@@ -75,7 +75,7 @@ describe("receipt v3 schema", () => {
   });
 });
 
-describe("verifyTask writes v3", () => {
+describe("verifyTask writes the current receipt version", () => {
   test("receipt carries one run and captured env with dirty_tree true", () => {
     const cwd = fixtureRepo();
     const spec = parseSpec(
@@ -98,7 +98,7 @@ describe("verifyTask writes v3", () => {
     expect(res.verdict).toBe("pass");
     const receipt = JSON.parse(readFileSync(res.receiptPath!, "utf8")) as Receipt;
     expect(validateReceipt(receipt)).toEqual([]);
-    expect(receipt.version).toBe(3);
+    expect(receipt.version).toBe(4);
     expect(receipt.runs).toHaveLength(1);
     expect(receipt.runs![0]!.exit_code).toBe(0);
     expect(receipt.env!.runtime === "bun" || receipt.env!.runtime === "node").toBe(true);

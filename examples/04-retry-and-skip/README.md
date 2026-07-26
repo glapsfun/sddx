@@ -138,6 +138,7 @@ EOF
 sets it explicitly.
 
 ```sh
+./sddx graph approve --graph graph2.yaml
 OUT3=$(./sddx graph create --graph graph2.yaml)
 echo "$OUT3"
 PARENT_ID=$(echo "$OUT3" | grep -E '^ *parent →' | awk '{print $3}')

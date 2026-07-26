@@ -13,6 +13,7 @@ const SPEC = {
   stop_rules: [],
   out_of_scope: [],
   scope: [],
+  assumptions: [],
 };
 
 function redTask(repo: string): TaskState {
@@ -196,5 +197,31 @@ describe("blockMessage", () => {
     expect(msg).toContain("failing test");
     expect(msg).toContain(`sddx task allow ${t.id} src/api.ts`);
     expect(readTask(repo, t.id).phase).toBe("RED");
+  });
+});
+
+describe("approval tokens are not writable by hand", () => {
+  test("a direct write to .sddx/approvals/ is blocked, task or no task", () => {
+    const cwd = fixtureRepo();
+    // No task exists at all — the state a plan sits in before `graph create`.
+    // `.sddx/**` is an EXEMPT glob for the TDD gate, so nothing else stops this.
+    const d = tddGate({ filePath: ".sddx/approvals/deadbeef.json", cwd });
+    expect(d.allow).toBe(false);
+    if (d.allow) return;
+    expect(d.reason).toContain("approval tokens are not editable");
+    expect(d.reason).toContain("graph approve");
+  });
+
+  test("blocked via an absolute path too", () => {
+    const cwd = fixtureRepo();
+    const d = tddGate({ filePath: join(cwd, ".sddx", "approvals", "x.json"), cwd });
+    expect(d.allow).toBe(false);
+  });
+
+  test("other .sddx paths stay writable", () => {
+    const cwd = fixtureRepo();
+    for (const p of [".sddx/drafts/plan.yaml", ".sddx/config.json", ".sddx/context/notes.md"]) {
+      expect(tddGate({ filePath: p, cwd }).allow).toBe(true);
+    }
   });
 });

@@ -31,6 +31,10 @@ export interface Spec {
    * relational (no sibling id), unlike `depends_on`, which stays out of the spec
    * (see `graph.yaml`) — authored directly here like `scope`. */
   on_dependency_failure?: DependencyFailurePolicy;
+  /** Decisions resolved without asking, recorded so the receipt states the
+   * conditions the task was verified under. Never machine-checked — provenance,
+   * not a criterion. Empty when the spec omits `assumptions`. */
+  assumptions: string[];
   /** Bounded automatic retry before this task is truly ABANDONED. Absent fields
    * default to `max_attempts: 1, workspace: 'fresh'` (today's single-attempt
    * behavior) once the task is created. */
@@ -109,6 +113,18 @@ export function parseSpec(yamlText: string): { spec?: Spec; errors: string[] } {
   ) {
     errors.push("on_dependency_failure: must be one of skip | block");
   }
+  // `assumptions` mirrors `scope`'s shape rule: optional, but a present value
+  // must be a non-empty list of non-empty strings — an empty list is a mistake,
+  // not "no assumptions" (omit the key for that).
+  if (r.assumptions !== undefined) {
+    if (
+      !Array.isArray(r.assumptions) ||
+      r.assumptions.length === 0 ||
+      !r.assumptions.every((s) => typeof s === "string" && s.trim() !== "")
+    ) {
+      errors.push("assumptions: when present, must be a non-empty list of non-empty strings");
+    }
+  }
   const retryRaw = r.retry;
   if (retryRaw !== undefined) {
     if (typeof retryRaw !== "object" || retryRaw === null || Array.isArray(retryRaw)) {
@@ -148,6 +164,9 @@ export function parseSpec(yamlText: string): { spec?: Spec; errors: string[] } {
         ? (r.stop_rules as Array<string | Record<string, unknown>>)
         : [],
       out_of_scope: toList(r.out_of_scope),
+      assumptions: Array.isArray(r.assumptions)
+        ? (r.assumptions as string[]).map((s) => s.trim())
+        : [],
       ...(r.on_dependency_failure !== undefined
         ? { on_dependency_failure: r.on_dependency_failure as DependencyFailurePolicy }
         : {}),

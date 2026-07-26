@@ -4,6 +4,14 @@ All notable changes to sddx are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sddx adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.2.0](https://github.com/glapsfun/sddx/compare/v2.1.0...v2.2.0) (2026-07-26)
+
+
+### Added
+
+* add .agents and AGENTS.md to .gitignore ([bd2a11f](https://github.com/glapsfun/sddx/commit/bd2a11fff45431189c5ec066f6f17ec5d7f5ad66))
+* replace goal-PR cherry-picking with a continuously-merged run branch ([1a0a121](https://github.com/glapsfun/sddx/commit/1a0a1210ba1a894b9345f24b24918435dd99d901))
+
 ## [2.1.0](https://github.com/glapsfun/sddx/compare/v2.0.0...v2.1.0) (2026-07-24)
 
 

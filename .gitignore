@@ -3,6 +3,8 @@
 
 # AI
 .claude
+.agents
+AGENTS.md
 CLAUDE.md
 openspec
 

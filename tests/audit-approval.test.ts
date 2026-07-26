@@ -82,6 +82,26 @@ describe("approval provenance audit", () => {
     expect(res.findings.filter((f) => f.includes("approval"))).toEqual([]);
   });
 
+  test("a malformed goal approval block is a finding, not a crash", () => {
+    // Goal files are parsed with a bare cast and no schema check, so this is
+    // untrusted input. Dereferencing it unguarded threw a TypeError out of
+    // auditReceipts and killed the whole report — the command whose job is to
+    // detect tampering, disabled by the tampering.
+    const { cwd, rel } = verifiedRepo({ mode: "human" });
+    const goalsDir = join(cwd, ".sddx", "goals");
+    for (const f of readdirSync(goalsDir)) {
+      const path = join(goalsDir, f);
+      const g = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+      g.approval = { mode: "human" }; // plan_sha256 dropped
+      writeFileSync(path, JSON.stringify(g, null, 2));
+    }
+    const res = auditReceipts(cwd);
+    const finding = res.findings.find((f) => f.includes(rel) && f.includes("malformed"));
+    expect(finding).toBeDefined();
+    // and the rest of the audit still ran
+    expect(res.receipts).toBeGreaterThan(0);
+  });
+
   test("a receipt whose mode disagrees with its goal is a finding naming both values", () => {
     const { cwd, id, rel } = verifiedRepo({ mode: "auto" });
     editReceipt(cwd, id, (r) => {

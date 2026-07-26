@@ -7850,7 +7850,10 @@ function mergeAssumptions(goalLevel, nodeLevel) {
 var SELF_MODIFYING_GLOBS = [
   "hooks/**",
   ".claude-plugin/**",
-  ".github/workflows/**"
+  ".github/workflows/**",
+  "dist/**",
+  "bin/**",
+  ".claude/**"
 ];
 function decideGate(cwd, graphPath, nodes, requestedMode, ceiling, overlaps2, workspaceMode) {
   const { hash, errors: errors2 } = planHash(graphPath);
@@ -7887,6 +7890,16 @@ function decideGate(cwd, graphPath, nodes, requestedMode, ceiling, overlaps2, wo
       ok: false,
       mode: "human",
       reason: `no approval on file for plan ${hash.slice(0, 12)} — review it with: sddx graph create --graph <path> --dry-run, then approve with: sddx graph approve --graph <path>`
+    };
+  }
+  if (workspaceMode === "none") {
+    const why = 'workspace "none" runs every task directly in the working checkout instead of an isolated worktree';
+    return {
+      ...base,
+      ok: false,
+      mode: "human",
+      degradedReason: why,
+      reason: `auto mode degraded to human: ${why}`
     };
   }
   const overCeiling = nodes.length > ceiling;
@@ -7940,11 +7953,17 @@ function auditApprovals(cwd, findings, notes) {
         notes.push(`${rel}: approval records mode "${String(a.mode)}" / plan ${String(a.plan_sha256).slice(0, 12)} — NOT cross-checked (its goal file is absent; goal state is local-only and never committed)`);
         continue;
       }
-      if (a.mode !== goal.approval.mode) {
-        findings.push(`${rel}: approval mode disagrees with its goal — receipt says "${String(a.mode)}", goal ${goal.id} says "${goal.approval.mode}"`);
+      const goalMode = goal.approval.mode;
+      const goalPlan = goal.approval.plan_sha256;
+      if (typeof goalMode !== "string" || typeof goalPlan !== "string") {
+        findings.push(`${rel}: goal ${goal.id} has a malformed approval block (mode/plan_sha256 missing or not a string) — provenance cannot be cross-checked`);
+        continue;
       }
-      if (a.plan_sha256 !== goal.approval.plan_sha256) {
-        findings.push(`${rel}: approval plan hash disagrees with its goal — receipt says ${String(a.plan_sha256).slice(0, 12)}, goal ${goal.id} says ${goal.approval.plan_sha256.slice(0, 12)}`);
+      if (a.mode !== goalMode) {
+        findings.push(`${rel}: approval mode disagrees with its goal — receipt says "${String(a.mode)}", goal ${goal.id} says "${goalMode}"`);
+      }
+      if (a.plan_sha256 !== goalPlan) {
+        findings.push(`${rel}: approval plan hash disagrees with its goal — receipt says ${String(a.plan_sha256).slice(0, 12)}, goal ${goal.id} says ${goalPlan.slice(0, 12)}`);
       }
     }
   }
@@ -10530,6 +10549,15 @@ function renderPlan(cwd, graphArg, plan, reporter) {
   } catch {
     previous = null;
   }
+  lines.push("execution order:");
+  for (const alias of order) {
+    const s = current[alias];
+    lines.push(`  ${alias}: ${s.task}`);
+    lines.push(`      criteria:   ${s.success_criteria}`);
+    lines.push(`      oracle:     ${s.oracle}`);
+    lines.push(`      scope:      ${s.scope}`);
+    lines.push(`      depends_on: ${s.depends_on}`);
+  }
   if (previous) {
     const changed = [];
     for (const alias of order) {
@@ -10550,17 +10578,7 @@ function renderPlan(cwd, graphArg, plan, reporter) {
       if (!current[alias])
         changed.push(`  - ${alias} (removed)`);
     }
-    lines.push(changed.length > 0 ? "changes since last render:" : "changes since last render: none", ...changed);
-  } else {
-    lines.push("execution order:");
-    for (const alias of order) {
-      const s = current[alias];
-      lines.push(`  ${alias}: ${s.task}`);
-      lines.push(`      criteria:   ${s.success_criteria}`);
-      lines.push(`      oracle:     ${s.oracle}`);
-      lines.push(`      scope:      ${s.scope}`);
-      lines.push(`      depends_on: ${s.depends_on}`);
-    }
+    lines.push("", changed.length > 0 ? "changes since last render:" : "changes since last render: none", ...changed);
   }
   lines.push("", "nothing written — this is a dry run");
   reporter.success(lines.join(`
@@ -11077,7 +11095,7 @@ function main(argv) {
       const [id, path] = rest.slice(1);
       if (!id || !path)
         fail(USAGE, 2);
-      if (gateExecutionMode(cwd) === "auto") {
+      if (gateExecutionMode(resolveMainRepoRoot(cwd)) === "auto") {
         fail(`task allow: refused in auto mode — a TDD-gate exemption always requires a human. Re-run in human mode (--mode human, or SDDX_EXECUTION_MODE=human) to grant "${path}" on ${id}.`);
       }
       const task = readTask(cwd, id);

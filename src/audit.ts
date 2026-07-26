@@ -62,14 +62,28 @@ function auditApprovals(cwd: string, findings: string[], notes: string[]): void 
         );
         continue;
       }
-      if (a.mode !== goal.approval.mode) {
+      // Goal files are parsed with a bare cast and no schema check, so the goal
+      // side of this comparison is untrusted input exactly like the receipt
+      // side — which is already defensively stringified. A hand-edited or
+      // half-written `approval` block used to throw a TypeError out of here and
+      // out of `auditReceipts`, killing the whole report: the one command whose
+      // job is to detect tampering, disabled by the tampering.
+      const goalMode = goal.approval.mode;
+      const goalPlan = goal.approval.plan_sha256;
+      if (typeof goalMode !== "string" || typeof goalPlan !== "string") {
         findings.push(
-          `${rel}: approval mode disagrees with its goal — receipt says "${String(a.mode)}", goal ${goal.id} says "${goal.approval.mode}"`,
+          `${rel}: goal ${goal.id} has a malformed approval block (mode/plan_sha256 missing or not a string) — provenance cannot be cross-checked`,
+        );
+        continue;
+      }
+      if (a.mode !== goalMode) {
+        findings.push(
+          `${rel}: approval mode disagrees with its goal — receipt says "${String(a.mode)}", goal ${goal.id} says "${goalMode}"`,
         );
       }
-      if (a.plan_sha256 !== goal.approval.plan_sha256) {
+      if (a.plan_sha256 !== goalPlan) {
         findings.push(
-          `${rel}: approval plan hash disagrees with its goal — receipt says ${String(a.plan_sha256).slice(0, 12)}, goal ${goal.id} says ${goal.approval.plan_sha256.slice(0, 12)}`,
+          `${rel}: approval plan hash disagrees with its goal — receipt says ${String(a.plan_sha256).slice(0, 12)}, goal ${goal.id} says ${goalPlan.slice(0, 12)}`,
         );
       }
     }

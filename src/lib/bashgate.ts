@@ -35,6 +35,48 @@ const EVAL_FLAGS: ReadonlySet<string> = new Set(["-e", "--eval", "-p", "--print"
 
 export type BashDecision = { allow: true } | { allow: false; reason: string };
 
+/**
+ * The trust inputs of the approval gate, refused from Bash in EVERY phase —
+ * including with no task in play at all, which is exactly the state a plan sits
+ * in while it waits to be approved.
+ *
+ * tdd-gate blocks Edit/Write to `.sddx/approvals/**` and `.sddx/config.json`,
+ * but that only ever covered the Edit/Write tools. A shell redirect reached the
+ * same files with nothing looking: the RED-phase allow-list below applies only
+ * once a task resolves, so at repo root `printf … > .sddx/approvals/<hash>.json`
+ * forged an approval token and the next `graph create` sailed through its gate
+ * on the strength of it.
+ *
+ * Matching is deliberately coarse — a textual reference is enough, no attempt is
+ * made to decide whether the command reads or writes. That mirrors this file's
+ * existing stance on redirection ("the gate does not parse targets") and it is
+ * what makes `..`, doubled slashes, and concatenation non-issues. Nothing
+ * legitimate needs these paths from a shell: the CLI opens them in-process, and
+ * `sddx config show` reports the effective configuration.
+ */
+function protectedPathRef(command: string): string | null {
+  if (!/\.sddx\b/.test(command)) return null;
+  if (/\bapprovals\b/.test(command)) return ".sddx/approvals/";
+  if (/\bconfig\.json\b/.test(command)) return ".sddx/config.json";
+  return null;
+}
+
+function protectedPathBlock(path: string): string {
+  const why =
+    path === ".sddx/config.json"
+      ? "It carries execution_mode, which decides whether a plan needs your approval at all."
+      : "A token records that a human approved a plan, so writing one would forge that.";
+  return [
+    `sddx approval gate: blocked Bash command referencing ${path}.`,
+    why,
+    "This path is not reachable from a shell in any phase — the gate does not parse",
+    "redirection targets, so it refuses the command rather than guess at intent.",
+    path === ".sddx/config.json"
+      ? "Inspect the effective configuration with: sddx config show"
+      : "Approve a plan the only way that counts: sddx graph approve --graph <path>",
+  ].join("\n");
+}
+
 const splitList = (value?: string): string[] => (value ?? "").split(/\s+/).filter((s) => s !== "");
 
 /** Words of one pipeline segment, VAR=value env prefixes skipped. */
@@ -113,6 +155,10 @@ export function bashGate(
   env: NodeJS.ProcessEnv = process.env,
 ): BashDecision {
   if (typeof input.command !== "string" || input.command.trim() === "") return { allow: true };
+  // Before everything else, including the fast path and task resolution: this
+  // holds with no task in play, which is when a plan is awaiting approval.
+  const protectedPath = protectedPathRef(input.command);
+  if (protectedPath) return { allow: false, reason: protectedPathBlock(protectedPath) };
   // fast path: commands allowed by the built-in list alone are allowed in every
   // phase — skip task resolution (fs walk) for the common case
   if (checkBashCommand(input.command, []).allow) return { allow: true };

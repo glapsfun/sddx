@@ -121,6 +121,38 @@ describe("auto mode never widens the TDD gate", () => {
     expect(task.allow ?? []).toEqual([]);
   });
 
+  test("task allow is refused from inside a worktree, where config.json is absent", () => {
+    // `task allow` is run BY the executor, from its own worktree — and
+    // `.sddx/config.json` is not committed, so a worktree forked from
+    // origin/HEAD has no copy. Reading the mode from the process cwd returned
+    // `{}` there, which resolves to `human`, silently granting the one escape
+    // hatch from the TDD gate on exactly the unattended runs it exists to stop.
+    const { clone: cwd } = fixtureClone();
+    const spec = join(cwd, "spec.yaml");
+    writeFileSync(spec, SPEC("do the widget work"));
+    withMode(cwd, "auto");
+    const created = cli(
+      cwd,
+      auto,
+      "task",
+      "create",
+      "--spec",
+      "spec.yaml",
+      "--workspace",
+      "worktree",
+    );
+    expect(created.status).toBe(0);
+    const id = readdirSync(join(cwd, ".sddx-worktrees"))[0] as string;
+    const wt = join(cwd, ".sddx-worktrees", id);
+    expect(existsSync(join(wt, ".sddx", "config.json"))).toBe(false);
+
+    const r = cli(wt, auto, "task", "allow", id, "src/migration.sql");
+    expect(r.status).not.toBe(0);
+    expect(r.stderr.toLowerCase()).toContain("human");
+    const task = JSON.parse(readFileSync(join(wt, ".sddx", "tasks", `${id}.json`), "utf8"));
+    expect(task.allow ?? []).toEqual([]);
+  });
+
   test("task allow still succeeds under human mode and is recorded", () => {
     const cwd = fixtureRepo();
     const id = taskInRepo(cwd);

@@ -40,14 +40,118 @@ const ask = (reason: string): ApprovalGateDecision => ({ decision: "ask", reason
  * line (`a && b`, `a; b`, `a | b`) is judged per command rather than as one
  * blob. A `--dry-run` in the first segment must never vouch for a real create in
  * the second, and a `# --dry-run` comment must not vouch for anything.
+ *
+ * This has to be QUOTE-AWARE, not a regex split. A naive comment strip deletes
+ * everything after a `#` that merely sits inside a quoted argument, so
+ * `git commit -m "fix #12" && sddx graph approve …` hides the approve from the
+ * gate entirely; a naive whitespace split leaves quotes glued to the token, so
+ * `graph "approve"` never matches; and a raw `\n` split cuts a line
+ * continuation in half, so `graph \<newline>approve` never matches either. Each
+ * of those is a silent bypass of the human dialog, so the lexer tracks quoting,
+ * escapes, and continuations the way the shell that will actually run the line
+ * does.
+ *
+ * `opaque` reports that the line contains command/process substitution, whose
+ * expansion this cannot see. Callers must treat an opaque line as unverifiable
+ * rather than as "no gated action found" — same stance `bashgate` takes when it
+ * refuses to parse a substitution.
  */
-function segments(command: string): string[][] {
-  const withoutComment = command.replace(/(^|\s)#.*$/, "");
-  return withoutComment
-    .split(/\|\||&&|[;|\n]/)
-    .map((seg) => seg.trim().split(/\s+/).filter(Boolean))
-    .filter((tokens) => tokens.length > 0);
+export function lex(command: string): { segments: string[][]; opaque: boolean } {
+  const segments: string[][] = [];
+  let tokens: string[] = [];
+  let cur = "";
+  let started = false; // cur holds a token, even an empty quoted one
+  let quote: '"' | "'" | null = null;
+  let opaque = false;
+
+  const endToken = (): void => {
+    if (started) tokens.push(cur);
+    cur = "";
+    started = false;
+  };
+  const endSegment = (): void => {
+    endToken();
+    if (tokens.length > 0) segments.push(tokens);
+    tokens = [];
+  };
+
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i] as string;
+
+    if (quote === "'") {
+      if (c === "'") quote = null;
+      else cur += c;
+      started = true;
+      continue;
+    }
+    if (quote === '"') {
+      if (c === '"') {
+        quote = null;
+      } else if (c === "\\" && i + 1 < command.length) {
+        i += 1;
+        cur += command[i] as string;
+      } else {
+        if ((c === "$" && command[i + 1] === "(") || c === "`") opaque = true;
+        cur += c;
+      }
+      started = true;
+      continue;
+    }
+
+    if (c === "\\") {
+      // line continuation: the shell splices it out, so neither a segment break
+      // nor a token break happens here
+      if (command[i + 1] === "\n") {
+        i += 1;
+        continue;
+      }
+      if (i + 1 < command.length) {
+        i += 1;
+        cur += command[i] as string;
+        started = true;
+      }
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c as '"' | "'";
+      started = true;
+      continue;
+    }
+    // `#` opens a comment only at a word boundary — `fix#12` is a literal
+    if (c === "#" && !started) {
+      while (i < command.length && command[i] !== "\n") i += 1;
+      continue;
+    }
+    if ((c === "$" && command[i + 1] === "(") || c === "`") {
+      opaque = true;
+      cur += c;
+      started = true;
+      continue;
+    }
+    if ((c === "&" && command[i + 1] === "&") || (c === "|" && command[i + 1] === "|")) {
+      endSegment();
+      i += 1;
+      continue;
+    }
+    if (c === ";" || c === "|" || c === "&" || c === "\n") {
+      endSegment();
+      continue;
+    }
+    if (/\s/.test(c)) {
+      endToken();
+      continue;
+    }
+    cur += c;
+    started = true;
+  }
+
+  // an unterminated quote means the parse does not describe what will run
+  if (quote !== null) opaque = true;
+  endSegment();
+  return { segments, opaque };
 }
+
+const segments = (command: string): string[][] => lex(command).segments;
 
 /** Exact-token flag test — `--dry-run=false` is NOT `--dry-run`. */
 const hasFlag = (tokens: string[], name: string): boolean => tokens.includes(name);
@@ -123,7 +227,21 @@ export function approvalGate(event: {
   if (!command || !cwd) return pass;
   try {
     const action = gatedAction(command);
-    if (!action) return pass;
+    if (!action) {
+      // A substitution can expand into `sddx graph approve` that the lexer never
+      // sees, so "no gated action found" is not a safe conclusion for a line it
+      // could not fully read. Scoped to lines that name sddx at all, so an
+      // unrelated `echo $(date)` still passes — see the FAIL CLOSED note above.
+      if (lex(command).opaque && /\bsddx\b/.test(command)) {
+        return ask(
+          [
+            "sddx: this command names sddx and uses substitution the approval gate cannot read.",
+            "What it expands to cannot be verified, so it cannot be vouched for.",
+          ].join("\n"),
+        );
+      }
+      return pass;
+    }
 
     // Find the segment that performs the action, so `--graph`/`--workspace` are
     // read from the right command in a compound line.

@@ -82,6 +82,7 @@ import {
   materializeDependent,
   removeWorktree,
   resolveBaseRef,
+  resolveMainRepoRoot,
   retryWorkspace,
   sweep,
   worktreeAvailable,
@@ -591,6 +592,23 @@ function renderPlan(cwd: string, graphArg: string, plan: ResolvedPlan, reporter:
     previous = null;
   }
 
+  // The plan itself is ALWAYS rendered. The diff below is an addition to it, not
+  // a replacement: the cache is primed by any dry run — including the agent's own
+  // review render, which is ungated — so putting the listing in the `else` arm
+  // meant the human, following the approval dialog's own instruction to run
+  // `--dry-run`, saw a hash and "changes since last render: none" describing
+  // nothing. The one artifact the whole gate depends on rendered empty in the
+  // normal flow.
+  lines.push("execution order:");
+  for (const alias of order) {
+    const s = current[alias];
+    lines.push(`  ${alias}: ${s.task}`);
+    lines.push(`      criteria:   ${s.success_criteria}`);
+    lines.push(`      oracle:     ${s.oracle}`);
+    lines.push(`      scope:      ${s.scope}`);
+    lines.push(`      depends_on: ${s.depends_on}`);
+  }
+
   if (previous) {
     const changed: string[] = [];
     for (const alias of order) {
@@ -610,19 +628,10 @@ function renderPlan(cwd: string, graphArg: string, plan: ResolvedPlan, reporter:
       if (!current[alias]) changed.push(`  - ${alias} (removed)`);
     }
     lines.push(
+      "",
       changed.length > 0 ? "changes since last render:" : "changes since last render: none",
       ...changed,
     );
-  } else {
-    lines.push("execution order:");
-    for (const alias of order) {
-      const s = current[alias];
-      lines.push(`  ${alias}: ${s.task}`);
-      lines.push(`      criteria:   ${s.success_criteria}`);
-      lines.push(`      oracle:     ${s.oracle}`);
-      lines.push(`      scope:      ${s.scope}`);
-      lines.push(`      depends_on: ${s.depends_on}`);
-    }
   }
   lines.push("", "nothing written — this is a dry run");
   reporter.success(lines.join("\n"));
@@ -1316,7 +1325,14 @@ function main(argv: string[]): void {
       // only escape hatch from the TDD gate, so an unattended run that could
       // widen it would have no gate at all. Granting one needs a human in both
       // modes — auto mode has no way to ask, so it is simply refused.
-      if (gateExecutionMode(cwd) === "auto") {
+      // Resolved through the git common dir, not the process cwd: `task allow`
+      // is run BY the executor, from inside its own worktree, and
+      // `.sddx/config.json` is not committed — so a worktree forked from
+      // origin/HEAD has no copy of it. Reading it from there returned `{}`,
+      // which resolves to `human`, which silently granted the exemption on
+      // exactly the unattended runs this refusal exists to stop. Same fix
+      // verify.ts already needed for reading the goal file.
+      if (gateExecutionMode(resolveMainRepoRoot(cwd)) === "auto") {
         fail(
           `task allow: refused in auto mode — a TDD-gate exemption always requires a human. Re-run in human mode (--mode human, or SDDX_EXECUTION_MODE=human) to grant "${path}" on ${id}.`,
         );

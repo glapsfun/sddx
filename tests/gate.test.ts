@@ -218,9 +218,35 @@ describe("approval tokens are not writable by hand", () => {
     expect(d.allow).toBe(false);
   });
 
+  test("a `..` segment does not smuggle a write past the guard", () => {
+    const cwd = fixtureRepo();
+    // Reaches .sddx/approvals/ while containing none of the substrings the
+    // guard matches — the absolute form used to bypass it entirely, because an
+    // absolute filePath was passed through un-normalized.
+    for (const p of [
+      join(cwd, ".sddx", "tasks", "..", "approvals", "x.json"),
+      ".sddx/tasks/../approvals/x.json",
+    ]) {
+      const d = tddGate({ filePath: p, cwd });
+      expect(d.allow).toBe(false);
+      if (d.allow) return;
+      expect(d.reason).toContain("approval tokens are not editable");
+    }
+  });
+
+  test(".sddx/config.json is not tool-editable — it is the only source of execution_mode", () => {
+    const cwd = fixtureRepo();
+    for (const p of [".sddx/config.json", join(cwd, ".sddx", "config.json")]) {
+      const d = tddGate({ filePath: p, cwd });
+      expect(d.allow).toBe(false);
+      if (d.allow) return;
+      expect(d.reason).toContain("execution_mode");
+    }
+  });
+
   test("other .sddx paths stay writable", () => {
     const cwd = fixtureRepo();
-    for (const p of [".sddx/drafts/plan.yaml", ".sddx/config.json", ".sddx/context/notes.md"]) {
+    for (const p of [".sddx/drafts/plan.yaml", ".sddx/context/notes.md", ".sddx/tasks/t.json"]) {
       expect(tddGate({ filePath: p, cwd }).allow).toBe(true);
     }
   });

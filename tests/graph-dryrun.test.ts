@@ -178,6 +178,22 @@ describe("re-render diffing", () => {
     expect(second.stdout).toContain("changes since last render: none");
   });
 
+  test("a re-render still shows the plan, not just the diff", () => {
+    // The approval dialog tells the human to review with `--dry-run`, but the
+    // cache is primed by ANY dry run — including the agent's own ungated review
+    // render. With the listing behind `else`, the human's read printed a hash
+    // and "changes since last render: none" describing nothing at all.
+    const { clone: cwd } = fixtureClone();
+    const rel = planRepo(cwd);
+    cli(cwd, "graph", "create", "--graph", rel, "--dry-run");
+    const second = cli(cwd, "graph", "create", "--graph", rel, "--dry-run");
+    expect(second.stdout).toContain("execution order:");
+    expect(second.stdout).toContain("alpha: build the alpha part");
+    expect(second.stdout).toContain("beta: build the beta part");
+    expect(second.stdout).toContain("oracle:");
+    expect(second.stdout).toContain("changes since last render: none");
+  });
+
   test("the first render of a plan shows it in full", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd);

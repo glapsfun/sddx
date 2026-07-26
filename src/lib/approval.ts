@@ -208,6 +208,15 @@ export const SELF_MODIFYING_GLOBS = [
   "hooks/**",
   ".claude-plugin/**",
   ".github/workflows/**",
+  // The gates users actually run are the COMPILED artifacts, not the sources:
+  // hooks.json invokes `${CLAUDE_PLUGIN_ROOT}/bin/sddx-run ${CLAUDE_PLUGIN_ROOT}/dist/hooks.mjs`.
+  // A plan scoped to `dist/**` rewrites the enforcement machinery just as surely
+  // as one scoped to `hooks/**`, and listing only the latter left the bound
+  // guarding the declaration while the implementation stayed open.
+  "dist/**",
+  "bin/**",
+  // Where a downstream repo declares its own hooks and permissions.
+  ".claude/**",
 ] as const;
 
 /**
@@ -284,6 +293,25 @@ export function decideGate(
 
   // auto: within bounds it self-approves; over them the gate arms exactly as it
   // would in human mode. Degradation is recorded, never silent.
+
+  // Isolation is a blast-radius bound, not a preference. `--workspace none` runs
+  // every task in the user's live checkout instead of a worktree, mutating the
+  // branch they are sitting on — unattended. The token path above already
+  // refuses to let a `worktree` render authorize `none`, but that check needs a
+  // token, so on the self-approving auto path nothing was checking it at all,
+  // and the strategy comes from the command line the agent itself composes.
+  if (workspaceMode === "none") {
+    const why =
+      'workspace "none" runs every task directly in the working checkout instead of an isolated worktree';
+    return {
+      ...base,
+      ok: false,
+      mode: "human",
+      degradedReason: why,
+      reason: `auto mode degraded to human: ${why}`,
+    };
+  }
+
   const overCeiling = nodes.length > ceiling;
   // An EMPTY scope is unconfined — the task may write anywhere, which includes
   // sddx's own enforcement paths. Treating "no scope" as "no reach" would have

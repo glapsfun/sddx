@@ -8671,7 +8671,10 @@ function mergeAssumptions(goalLevel, nodeLevel) {
 var SELF_MODIFYING_GLOBS = [
   "hooks/**",
   ".claude-plugin/**",
-  ".github/workflows/**"
+  ".github/workflows/**",
+  "dist/**",
+  "bin/**",
+  ".claude/**"
 ];
 function decideGate(cwd, graphPath, nodes, requestedMode, ceiling, overlaps2, workspaceMode) {
   const { hash, errors: errors2 } = planHash(graphPath);
@@ -8708,6 +8711,16 @@ function decideGate(cwd, graphPath, nodes, requestedMode, ceiling, overlaps2, wo
       ok: false,
       mode: "human",
       reason: `no approval on file for plan ${hash.slice(0, 12)} — review it with: sddx graph create --graph <path> --dry-run, then approve with: sddx graph approve --graph <path>`
+    };
+  }
+  if (workspaceMode === "none") {
+    const why = 'workspace "none" runs every task directly in the working checkout instead of an isolated worktree';
+    return {
+      ...base,
+      ok: false,
+      mode: "human",
+      degradedReason: why,
+      reason: `auto mode degraded to human: ${why}`
     };
   }
   const overCeiling = nodes.length > ceiling;
@@ -8839,10 +8852,102 @@ function parseSpec(yamlText) {
 // src/lib/approvalgate.ts
 var pass = { decision: "pass" };
 var ask = (reason) => ({ decision: "ask", reason });
-function segments2(command) {
-  const withoutComment = command.replace(/(^|\s)#.*$/, "");
-  return withoutComment.split(/\|\||&&|[;|\n]/).map((seg) => seg.trim().split(/\s+/).filter(Boolean)).filter((tokens) => tokens.length > 0);
+function lex(command) {
+  const segments2 = [];
+  let tokens = [];
+  let cur = "";
+  let started = false;
+  let quote = null;
+  let opaque = false;
+  const endToken = () => {
+    if (started)
+      tokens.push(cur);
+    cur = "";
+    started = false;
+  };
+  const endSegment = () => {
+    endToken();
+    if (tokens.length > 0)
+      segments2.push(tokens);
+    tokens = [];
+  };
+  for (let i = 0;i < command.length; i++) {
+    const c = command[i];
+    if (quote === "'") {
+      if (c === "'")
+        quote = null;
+      else
+        cur += c;
+      started = true;
+      continue;
+    }
+    if (quote === '"') {
+      if (c === '"') {
+        quote = null;
+      } else if (c === "\\" && i + 1 < command.length) {
+        i += 1;
+        cur += command[i];
+      } else {
+        if (c === "$" && command[i + 1] === "(" || c === "`")
+          opaque = true;
+        cur += c;
+      }
+      started = true;
+      continue;
+    }
+    if (c === "\\") {
+      if (command[i + 1] === `
+`) {
+        i += 1;
+        continue;
+      }
+      if (i + 1 < command.length) {
+        i += 1;
+        cur += command[i];
+        started = true;
+      }
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      started = true;
+      continue;
+    }
+    if (c === "#" && !started) {
+      while (i < command.length && command[i] !== `
+`)
+        i += 1;
+      continue;
+    }
+    if (c === "$" && command[i + 1] === "(" || c === "`") {
+      opaque = true;
+      cur += c;
+      started = true;
+      continue;
+    }
+    if (c === "&" && command[i + 1] === "&" || c === "|" && command[i + 1] === "|") {
+      endSegment();
+      i += 1;
+      continue;
+    }
+    if (c === ";" || c === "|" || c === "&" || c === `
+`) {
+      endSegment();
+      continue;
+    }
+    if (/\s/.test(c)) {
+      endToken();
+      continue;
+    }
+    cur += c;
+    started = true;
+  }
+  if (quote !== null)
+    opaque = true;
+  endSegment();
+  return { segments: segments2, opaque };
 }
+var segments2 = (command) => lex(command).segments;
 var hasFlag = (tokens, name) => tokens.includes(name);
 function tokenValue(tokens, name) {
   for (let i = 0;i < tokens.length; i++) {
@@ -8893,8 +8998,16 @@ function approvalGate(event) {
     return pass;
   try {
     const action = gatedAction(command);
-    if (!action)
+    if (!action) {
+      if (lex(command).opaque && /\bsddx\b/.test(command)) {
+        return ask([
+          "sddx: this command names sddx and uses substitution the approval gate cannot read.",
+          "What it expands to cannot be verified, so it cannot be vouched for."
+        ].join(`
+`));
+      }
       return pass;
+    }
     const tokens = segments2(command).find((t) => action === "approve" ? isSubcommand(t, "graph", "approve") : isSubcommand(t, "graph", "create") && !hasFlag(t, "--dry-run")) ?? [];
     const graphArg = tokenValue(tokens, "--graph");
     if (action === "approve") {
@@ -9050,6 +9163,26 @@ var BASH_ALLOW_BASE = [
 var GIT_READ_SUBCOMMANDS = ["status", "diff", "log", "show"];
 var EVAL_CAPABLE = new Set(["bun", "node", "npx", "python", "python3"]);
 var EVAL_FLAGS = new Set(["-e", "--eval", "-p", "--print", "-c", "--exec"]);
+function protectedPathRef(command) {
+  if (!/\.sddx\b/.test(command))
+    return null;
+  if (/\bapprovals\b/.test(command))
+    return ".sddx/approvals/";
+  if (/\bconfig\.json\b/.test(command))
+    return ".sddx/config.json";
+  return null;
+}
+function protectedPathBlock(path) {
+  const why = path === ".sddx/config.json" ? "It carries execution_mode, which decides whether a plan needs your approval at all." : "A token records that a human approved a plan, so writing one would forge that.";
+  return [
+    `sddx approval gate: blocked Bash command referencing ${path}.`,
+    why,
+    "This path is not reachable from a shell in any phase — the gate does not parse",
+    "redirection targets, so it refuses the command rather than guess at intent.",
+    path === ".sddx/config.json" ? "Inspect the effective configuration with: sddx config show" : "Approve a plan the only way that counts: sddx graph approve --graph <path>"
+  ].join(`
+`);
+}
 var splitList = (value) => (value ?? "").split(/\s+/).filter((s) => s !== "");
 function commandWords(segment) {
   const words = segment.trim().split(/\s+/).filter((w) => w !== "");
@@ -9117,6 +9250,9 @@ function blockMessage(task, why) {
 function bashGate(input, env = process.env) {
   if (typeof input.command !== "string" || input.command.trim() === "")
     return { allow: true };
+  const protectedPath = protectedPathRef(input.command);
+  if (protectedPath)
+    return { allow: false, reason: protectedPathBlock(protectedPath) };
   if (checkBashCommand(input.command, []).allow)
     return { allow: true };
   const res = resolveTask(input.cwd ?? process.cwd());
@@ -9254,7 +9390,7 @@ function stopGate(event) {
 }
 
 // src/tdd-gate.ts
-import { isAbsolute as isAbsolute3, relative as relative2, resolve as resolve3 } from "node:path";
+import { relative as relative2, resolve as resolve3 } from "node:path";
 function loadGateConfig(root, env = process.env) {
   const fileConfig = readConfig(root);
   return {
@@ -9292,20 +9428,32 @@ function scopeBlockMessage(task, relPath, scope) {
 `);
 }
 var APPROVALS_PATH = /(^|\/)\.sddx\/approvals\//;
+var CONFIG_PATH = /(^|\/)\.sddx\/config\.json$/;
 function approvalWriteBlock(relOrAbs) {
-  if (!APPROVALS_PATH.test(normalizeRelPath(relOrAbs)))
-    return null;
-  return [
-    `sddx approval gate: blocked write to ${relOrAbs} — approval tokens are not editable.`,
-    "A token records that a human approved a plan, so writing one directly would forge that.",
-    "Approve a plan the only way that counts (it raises your own permission dialog):",
-    "  sddx graph create --graph <path> --dry-run   # review it first",
-    "  sddx graph approve --graph <path>"
-  ].join(`
+  const path = normalizeRelPath(relOrAbs);
+  if (APPROVALS_PATH.test(path)) {
+    return [
+      `sddx approval gate: blocked write to ${relOrAbs} — approval tokens are not editable.`,
+      "A token records that a human approved a plan, so writing one directly would forge that.",
+      "Approve a plan the only way that counts (it raises your own permission dialog):",
+      "  sddx graph create --graph <path> --dry-run   # review it first",
+      "  sddx graph approve --graph <path>"
+    ].join(`
 `);
+  }
+  if (CONFIG_PATH.test(path)) {
+    return [
+      `sddx approval gate: blocked write to ${relOrAbs} — sddx configuration is not tool-editable.`,
+      "It carries execution_mode, which decides whether a plan needs your approval at all,",
+      "so a tool that could rewrite it could switch off the gate that constrains it.",
+      "Edit it yourself, or inspect the effective values with: sddx config show"
+    ].join(`
+`);
+  }
+  return null;
 }
 function tddGate(input, env = process.env) {
-  const anchor = input.filePath ? isAbsolute3(input.filePath) ? input.filePath : resolve3(input.cwd ?? process.cwd(), input.filePath) : input.cwd ?? process.cwd();
+  const anchor = input.filePath ? resolve3(input.cwd ?? process.cwd(), input.filePath) : input.cwd ?? process.cwd();
   if (input.filePath) {
     const forged = approvalWriteBlock(input.filePath) ?? approvalWriteBlock(anchor);
     if (forged)

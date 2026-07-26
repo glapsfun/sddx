@@ -69,11 +69,19 @@ Three things make that airtight, and each closes a way the gate was defeatable:
   pre-satisfies it.
 - **Approval tokens cannot be written by hand.** `.sddx/**` is exempt from the
   TDD gate, so a direct `Write` to `.sddx/approvals/` would forge a token. That
-  path is now blocked unconditionally, in every phase, task or no task.
+  path is blocked unconditionally for `Edit`/`Write`, in every phase, task or no
+  task. Bash is covered too, but by a *textual* check: a command naming the path
+  is refused unless it is a plain read (an approval token is not a secret). That
+  check sees `..`, doubled slashes and concatenation, and does **not** see shell
+  expansion — `.sddx/approv?ls/` or `${d}dx/approvals/` never spell the path out.
+  It raises the bar behind the `Edit`/`Write` block; it is not a second proof.
 - **Mode is read from `.sddx/config.json` only.** A `--mode` flag or an inline
   `SDDX_EXECUTION_MODE=auto` is part of the command line the agent composes, so
   honoring either would let the constrained thing switch off the constraint.
-  There is no `--mode` flag.
+  There is no `--mode` flag. The file itself is not tool-writable either, for
+  the same reason: leaving it open would hand back the same choice one
+  indirection later. Edit it yourself; read the effective values with
+  `sddx config show`.
 
 Four tiers, weakest first. sddx stacks all of them because 1–3 are cheap:
 
@@ -110,7 +118,7 @@ and "cancel" means `rm`.
 
 ```
  Approve     → sddx graph approve --graph <path>
- Edit        → edit the YAML, re-render (shows only what changed)
+ Edit        → edit the YAML, re-render (shows the plan, plus what changed)
  Regenerate  → delete the drafts, re-plan
  Cancel      → delete the drafts. nothing else to undo.
 ```
@@ -138,7 +146,8 @@ its isolated worktree and into your live checkout; the mismatch exits 3.
 That is deliberate. A canonical *semantic* hash would have to enumerate every
 meaningful field correctly, and missing one — say `retry.max_attempts` — would
 leave an edit from 1 to 50 silently approved. False invalidation costs a
-re-approval, and a re-render shows only the diff. False validation is unbounded.
+re-approval, and a re-render shows the plan again with the diff called out.
+False validation is unbounded.
 
 ## Approval reaches the receipt chain
 
@@ -183,13 +192,14 @@ than refusing it:
    escape hatch from the TDD gate. An unattended run that could widen its own
    gate would have no gate. Exemptions need a human in **both** modes.
 
-Two more **arm the gate** rather than failing — nothing is lost, the drafts are
-already written:
+Three more **arm the gate** rather than failing — nothing is lost, the drafts
+are already written:
 
 | Bound | Why it's the right proxy |
 |---|---|
 | node count > `auto_max_tasks` (default 6) | blast radius ≈ worktrees forked |
-| any `scope` reaching `hooks/**`, `.claude-plugin/**`, or CI workflows | a plan that edits the machinery enforcing the plan |
+| any `scope` reaching `hooks/**`, `.claude-plugin/**`, `dist/**`, `bin/**`, `.claude/**`, or CI workflows | a plan that edits the machinery enforcing the plan — including the *compiled* gates, which are what actually run |
+| `--workspace none` | every task runs in your live checkout instead of an isolated worktree |
 
 That second check is unconditional — it ignores the node count entirely. It
 reuses the same glob-overlap primitive the `overlap ⟹ ordered` rule uses, asked

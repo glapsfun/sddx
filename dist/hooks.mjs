@@ -8888,7 +8888,7 @@ function lex(command) {
         i += 1;
         cur += command[i];
       } else {
-        if (c === "$" && command[i + 1] === "(" || c === "`")
+        if (c === "$" || c === "`")
           opaque = true;
         cur += c;
       }
@@ -8919,7 +8919,7 @@ function lex(command) {
         i += 1;
       continue;
     }
-    if (c === "$" && command[i + 1] === "(" || c === "`") {
+    if (c === "$" || c === "`") {
       opaque = true;
       cur += c;
       started = true;
@@ -8952,23 +8952,65 @@ var hasFlag = (tokens, name) => tokens.includes(name);
 function tokenValue(tokens, name) {
   for (let i = 0;i < tokens.length; i++) {
     if (tokens[i] === name)
-      return tokens[i + 1]?.replace(/^["']|["']$/g, "");
-    if (tokens[i].startsWith(`${name}=`)) {
-      return tokens[i].slice(name.length + 1).replace(/^["']|["']$/g, "");
-    }
+      return tokens[i + 1];
+    if (tokens[i].startsWith(`${name}=`))
+      return tokens[i].slice(name.length + 1);
   }
   return;
 }
 var isSubcommand = (tokens, a, b) => {
   const i = tokens.indexOf(a);
-  return i !== -1 && tokens[i + 1] === b;
+  if (i === -1)
+    return false;
+  for (let j = i + 1;j < tokens.length; j++) {
+    const t = tokens[j];
+    if (t === b)
+      return true;
+    if (!t.startsWith("-"))
+      return false;
+    if (t === "--output")
+      j += 1;
+  }
+  return false;
 };
+var WRAPPERS = new Set([
+  "sh",
+  "bash",
+  "zsh",
+  "dash",
+  "ksh",
+  "eval",
+  "xargs",
+  "env",
+  "nohup",
+  "timeout",
+  "nice",
+  "command",
+  "exec"
+]);
+var basename = (word) => word.slice(word.lastIndexOf("/") + 1);
+function allSegments(command, depth = 0) {
+  const segs = segments2(command);
+  if (depth >= 3)
+    return segs;
+  const out = [...segs];
+  for (const tokens of segs) {
+    const head = tokens[0];
+    if (!head || !WRAPPERS.has(basename(head)))
+      continue;
+    for (const token of tokens.slice(1)) {
+      if (/\s/.test(token))
+        out.push(...allSegments(token, depth + 1));
+    }
+  }
+  return out;
+}
 function gatedAction(command) {
-  for (const tokens of segments2(command)) {
-    if (isSubcommand(tokens, "graph", "approve"))
-      return "approve";
-    if (isSubcommand(tokens, "graph", "create") && !hasFlag(tokens, "--dry-run"))
-      return "create";
+  const segs = allSegments(command);
+  if (segs.some((t) => isSubcommand(t, "graph", "approve")))
+    return "approve";
+  if (segs.some((t) => isSubcommand(t, "graph", "create") && !hasFlag(t, "--dry-run"))) {
+    return "create";
   }
   return null;
 }
@@ -8997,18 +9039,20 @@ function approvalGate(event) {
   if (!command || !cwd)
     return pass;
   try {
+    const parsed = lex(command);
     const action = gatedAction(command);
     if (!action) {
-      if (lex(command).opaque && /\bsddx\b/.test(command)) {
+      if (parsed.opaque && /\bsddx\b/.test(command) && /\bgraph\b/.test(command)) {
         return ask([
-          "sddx: this command names sddx and uses substitution the approval gate cannot read.",
+          "sddx: this command names sddx and uses an expansion the approval gate cannot read.",
           "What it expands to cannot be verified, so it cannot be vouched for."
         ].join(`
 `));
       }
       return pass;
     }
-    const tokens = segments2(command).find((t) => action === "approve" ? isSubcommand(t, "graph", "approve") : isSubcommand(t, "graph", "create") && !hasFlag(t, "--dry-run")) ?? [];
+    const owns = (t) => action === "approve" ? isSubcommand(t, "graph", "approve") : isSubcommand(t, "graph", "create") && !hasFlag(t, "--dry-run");
+    const tokens = allSegments(command).find(owns) ?? [];
     const graphArg = tokenValue(tokens, "--graph");
     if (action === "approve") {
       const plan = graphArg ? planHash(isAbsolute2(graphArg) ? graphArg : join9(cwd, graphArg)) : null;
@@ -9046,7 +9090,7 @@ function approvalGate(event) {
 
 // src/lib/resolve.ts
 import { existsSync as existsSync9, readdirSync as readdirSync6, readFileSync as readFileSync9, statSync as statSync2 } from "node:fs";
-import { basename, dirname as dirname4, join as join10, resolve as resolvePath } from "node:path";
+import { basename as basename2, dirname as dirname4, join as join10, resolve as resolvePath } from "node:path";
 function workspaceRoot(startPath) {
   let dir = resolvePath(startPath);
   try {
@@ -9104,8 +9148,8 @@ function resolveTask(startPath) {
   const root = workspaceRoot(startPath);
   if (!root || !existsSync9(join10(root, ".sddx")))
     return { kind: "none" };
-  if (basename(dirname4(root)) === ".sddx-worktrees") {
-    const byName = readTaskFile(root, basename(root));
+  if (basename2(dirname4(root)) === ".sddx-worktrees") {
+    const byName = readTaskFile(root, basename2(root));
     if (byName)
       return byName;
   }
@@ -9168,9 +9212,43 @@ function protectedPathRef(command) {
     return null;
   if (/\bapprovals\b/.test(command))
     return ".sddx/approvals/";
-  if (/\bconfig\.json\b/.test(command))
+  if (/(^|[^\w.-])config\.json\b/.test(command))
     return ".sddx/config.json";
   return null;
+}
+var READ_ONLY = new Set([
+  "cat",
+  "grep",
+  "rg",
+  "ls",
+  "head",
+  "tail",
+  "wc",
+  "stat",
+  "file",
+  "diff",
+  "echo"
+]);
+function isReadOnly(command) {
+  if (/\$\(|`|<\(/.test(command))
+    return false;
+  if (command.replace(/\d*>&\d+/g, "").includes(">"))
+    return false;
+  for (const segment of command.split(/\|\||&&|;|\||\r?\n/)) {
+    const words = commandWords(segment);
+    if (words.length === 0)
+      continue;
+    const cmd = commandBasename(words[0]);
+    if (cmd === "git") {
+      const sub = words.slice(1).find((w) => !w.startsWith("-"));
+      if (sub === undefined || !GIT_READ_SUBCOMMANDS.includes(sub))
+        return false;
+      continue;
+    }
+    if (!READ_ONLY.has(cmd))
+      return false;
+  }
+  return true;
 }
 function protectedPathBlock(path) {
   const why = path === ".sddx/config.json" ? "It carries execution_mode, which decides whether a plan needs your approval at all." : "A token records that a human approved a plan, so writing one would forge that.";
@@ -9251,8 +9329,9 @@ function bashGate(input, env = process.env) {
   if (typeof input.command !== "string" || input.command.trim() === "")
     return { allow: true };
   const protectedPath = protectedPathRef(input.command);
-  if (protectedPath)
+  if (protectedPath && !isReadOnly(input.command)) {
     return { allow: false, reason: protectedPathBlock(protectedPath) };
+  }
   if (checkBashCommand(input.command, []).allow)
     return { allow: true };
   const res = resolveTask(input.cwd ?? process.cwd());

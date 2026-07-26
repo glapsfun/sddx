@@ -47,18 +47,66 @@ export type BashDecision = { allow: true } | { allow: false; reason: string };
  * forged an approval token and the next `graph create` sailed through its gate
  * on the strength of it.
  *
- * Matching is deliberately coarse — a textual reference is enough, no attempt is
- * made to decide whether the command reads or writes. That mirrors this file's
- * existing stance on redirection ("the gate does not parse targets") and it is
- * what makes `..`, doubled slashes, and concatenation non-issues. Nothing
- * legitimate needs these paths from a shell: the CLI opens them in-process, and
- * `sddx config show` reports the effective configuration.
+ * Matching is textual, which covers `..`, doubled slashes and concatenation
+ * without parsing paths. It does NOT cover shell expansion: `.sddx/approv?ls/`
+ * and `${d}dx/approvals/` never spell the literal out and are NOT caught. This
+ * raises the bar rather than sealing it — defense in depth behind the Edit/Write
+ * guard, not a proof, and the comment says so rather than implying otherwise.
+ *
+ * (A previous attempt treated any glob or `$` beside `.sddx` as a reference.
+ * That blocked `git add .sddx/receipts/*.json` — the framework's own persistence
+ * model — while still allowing `rm -rf .sddx/worktrees/t1`, so it blocked benign
+ * commands and missed destructive ones. Removed.)
+ *
+ * Reads are NOT blocked; see `isReadOnly` for how that is decided.
  */
 function protectedPathRef(command: string): string | null {
   if (!/\.sddx\b/.test(command)) return null;
   if (/\bapprovals\b/.test(command)) return ".sddx/approvals/";
-  if (/\bconfig\.json\b/.test(command)) return ".sddx/config.json";
+  // Not preceded by a word char, `.` or `-`, so `vite.config.json` and
+  // `tsconfig.json` are excluded while `/config.json` and — importantly —
+  // `>config.json` still match. Anchoring on an explicit character class instead
+  // dropped the redirect spelling, which is precisely the write this guards.
+  if (/(^|[^\w.-])config\.json\b/.test(command)) return ".sddx/config.json";
   return null;
+}
+
+/** Commands that cannot write. Deliberately a SHORT explicit list rather than
+ * the RED-phase allow-list below: that list exists to permit test runs, so it
+ * includes `bun`, `node`, `python3`, `make` and `find` — every one of which can
+ * write a file without a redirect (`find … -delete`, `find … -exec cp …`,
+ * `bun run forge.ts`). Using it as a read-only proxy reopened the forge path it
+ * was supposed to close. */
+const READ_ONLY: ReadonlySet<string> = new Set([
+  "cat",
+  "grep",
+  "rg",
+  "ls",
+  "head",
+  "tail",
+  "wc",
+  "stat",
+  "file",
+  "diff",
+  "echo",
+]);
+
+function isReadOnly(command: string): boolean {
+  // any redirection or substitution and this is not a read, whatever the command
+  if (/\$\(|`|<\(/.test(command)) return false;
+  if (command.replace(/\d*>&\d+/g, "").includes(">")) return false;
+  for (const segment of command.split(/\|\||&&|;|\||\r?\n/)) {
+    const words = commandWords(segment);
+    if (words.length === 0) continue;
+    const cmd = commandBasename(words[0] as string);
+    if (cmd === "git") {
+      const sub = words.slice(1).find((w) => !w.startsWith("-"));
+      if (sub === undefined || !GIT_READ_SUBCOMMANDS.includes(sub)) return false;
+      continue;
+    }
+    if (!READ_ONLY.has(cmd)) return false;
+  }
+  return true;
 }
 
 function protectedPathBlock(path: string): string {
@@ -155,10 +203,14 @@ export function bashGate(
   env: NodeJS.ProcessEnv = process.env,
 ): BashDecision {
   if (typeof input.command !== "string" || input.command.trim() === "") return { allow: true };
-  // Before everything else, including the fast path and task resolution: this
-  // holds with no task in play, which is when a plan is awaiting approval.
+  // Before everything else, including task resolution: this holds with no task
+  // in play, which is when a plan is awaiting approval. Only a reference that is
+  // not a plain read is refused — an approval token is not a secret, and this
+  // repo's own source and tests name these paths constantly.
   const protectedPath = protectedPathRef(input.command);
-  if (protectedPath) return { allow: false, reason: protectedPathBlock(protectedPath) };
+  if (protectedPath && !isReadOnly(input.command)) {
+    return { allow: false, reason: protectedPathBlock(protectedPath) };
+  }
   // fast path: commands allowed by the built-in list alone are allowed in every
   // phase — skip task resolution (fs walk) for the common case
   if (checkBashCommand(input.command, []).allow) return { allow: true };

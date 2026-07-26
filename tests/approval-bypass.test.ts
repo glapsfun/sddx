@@ -5,7 +5,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { decideGate, SELF_MODIFYING_GLOBS } from "../src/lib/approval";
-import { gatedAction, lex } from "../src/lib/approvalgate";
+import { approvalGate, gatedAction, lex } from "../src/lib/approvalgate";
 import { bashGate } from "../src/lib/bashgate";
 import { scopesOverlap } from "../src/lib/glob-overlap";
 import { fixtureRepo } from "./fixtures";
@@ -54,13 +54,93 @@ describe("gatedAction sees through shell syntax", () => {
     ).toBe("create");
   });
 
-  test("lex reports command substitution as opaque", () => {
-    expect(lex("sddx graph approve --graph $(ls *.yaml)").opaque).toBe(true);
-    expect(lex("`sddx graph approve`").opaque).toBe(true);
-    expect(lex('sddx graph approve --graph "$(cat f)"').opaque).toBe(true);
+  test("a wrapper does not hide the command inside one token", () => {
+    // Quote-aware lexing is what makes `'sddx graph approve …'` a single token —
+    // the naive splitter this replaced caught these only by accident, because it
+    // never stripped quotes. Losing them would reintroduce a no-dialog approval.
+    for (const cmd of [
+      "sh -c 'sddx graph approve --graph p.yaml'",
+      'bash -c "sddx graph approve --graph p.yaml"',
+      "eval 'sddx graph approve --graph p.yaml'",
+      `sh -c "sh -c 'sddx graph approve --graph p.yaml'"`,
+    ]) {
+      expect(gatedAction(cmd)).toBe("approve");
+    }
+    expect(gatedAction("sh -c 'sddx graph create --graph p.yaml'")).toBe("create");
+    expect(gatedAction("sh -c 'sddx graph create --graph p.yaml --dry-run'")).toBe(null);
+  });
+
+  test("approve wins over create wherever it appears in the line", () => {
+    // Per-segment ordering returned on the first match, so a gate-satisfiable
+    // create in an earlier segment reported the whole line as a create — and the
+    // approve then ran with no dialog, minting a token for an arbitrary plan.
+    expect(
+      gatedAction("sddx graph create --graph good.yaml && sddx graph approve --graph evil.yaml"),
+    ).toBe("approve");
+    expect(
+      gatedAction("sddx graph create --graph good.yaml ; sddx graph approve --graph evil.yaml"),
+    ).toBe("approve");
+    expect(
+      gatedAction(
+        "sddx graph create --graph a.yaml --dry-run && sh -c 'sddx graph approve --graph b.yaml'",
+      ),
+    ).toBe("approve");
+  });
+
+  test("quoting the phrase is not a gated action", () => {
+    // Recursion is limited to wrapper commands. Unwrapping every token that
+    // contained whitespace made a commit message raise an approval dialog, and a
+    // dialog that cries wolf trains the user to click through the one prompt the
+    // design rests on.
+    expect(gatedAction('git commit -m "run sddx graph approve first"')).toBe(null);
+    expect(gatedAction('rg "graph approve" src/')).toBe(null);
+    expect(gatedAction('echo "remember: sddx graph create --graph p.yaml"')).toBe(null);
+  });
+
+  test("global flags between the subcommand pair do not hide it", () => {
+    // parseOutputFlag strips --output/--no-color from ANY position before
+    // dispatch, so `graph --output json approve` really does run graph approve.
+    expect(gatedAction("sddx graph --output json approve --graph p.yaml")).toBe("approve");
+    expect(gatedAction("sddx graph --no-color approve --graph p.yaml")).toBe("approve");
+    expect(gatedAction("sddx graph --output json create --graph p.yaml")).toBe("create");
+    // a different subcommand still is not a match
+    expect(gatedAction("sddx graph show approve")).toBe(null);
+  });
+
+  test("lex reports every expansion as opaque, not just substitution", () => {
+    for (const cmd of [
+      "sddx graph approve --graph $(ls *.yaml)",
+      "`sddx graph approve`",
+      'sddx graph approve --graph "$(cat f)"',
+      "sddx graph $'approve' --graph p.yaml",
+      "A=approve; sddx graph $A --graph p.yaml",
+      "sddx graph ${SUB} --graph p.yaml",
+    ]) {
+      expect(lex(cmd).opaque).toBe(true);
+    }
     expect(lex("sddx graph approve --graph plan.yaml").opaque).toBe(false);
+    // `$` inside single quotes is literal to the shell, so it is not an expansion
+    expect(lex("echo 'costs $5'").opaque).toBe(false);
     // an unterminated quote means the parse does not describe what will run
     expect(lex('sddx graph approve --graph "plan.yaml').opaque).toBe(true);
+  });
+
+  test("an opaque line naming sddx AND graph asks rather than passing", () => {
+    const cwd = fixtureRepo();
+    expect(approvalGate({ command: "A=approve; sddx graph $A --graph p.yaml", cwd }).decision).toBe(
+      "ask",
+    );
+    // Scoped to both words. Requiring only `sddx` asked on every command using a
+    // variable near a path containing "sddx" — including plain reads, on the hot
+    // path for all Bash.
+    for (const command of [
+      "cd $HOME/dev/github/glapsfun/sddx && bun test",
+      "sddx task show $ID",
+      "echo $HOME/sddx",
+      "echo $(date)",
+    ]) {
+      expect(approvalGate({ command, cwd }).decision).toBe("pass");
+    }
   });
 });
 
@@ -79,12 +159,20 @@ describe("approval trust inputs are unreachable from Bash", () => {
     expect(d.reason).toContain(".sddx/approvals/");
   });
 
-  test("reaching the token directory by any spelling is refused", () => {
+  test("writing to the token directory by any spelling is refused", () => {
     const cwd = fixtureRepo();
     for (const command of [
       "mkdir -p .sddx/approvals && echo x > .sddx/approvals/a.json",
       "cp /tmp/a.json .sddx/tasks/../approvals/a.json",
-      "cat .sddx/approvals/a.json",
+      "tee .sddx/approvals/a.json",
+      // The RED-phase allow-list exists to permit test runs, so it admits every
+      // one of these — using it as a read-only proxy reopened the forge path.
+      "find .sddx/approvals -name '*.json' -delete",
+      "find .sddx/approvals -type d -exec cp /tmp/forged.json {}/a.json ;",
+      "bun run /tmp/forge.ts .sddx/approvals/a.json",
+      "node /tmp/forge.js .sddx/approvals/a.json",
+      "python3 /tmp/forge.py .sddx/approvals/a.json",
+      "make forge FILE=.sddx/approvals/a.json",
     ]) {
       expect(bashGate({ command, cwd }).allow).toBe(false);
     }
@@ -92,15 +180,50 @@ describe("approval trust inputs are unreachable from Bash", () => {
 
   test(".sddx/config.json is refused too — it decides whether the gate arms", () => {
     const cwd = fixtureRepo();
-    const d = bashGate({ command: `echo '{"execution_mode":"auto"}' > .sddx/config.json`, cwd });
-    expect(d.allow).toBe(false);
-    if (d.allow) return;
-    expect(d.reason).toContain("execution_mode");
+    for (const command of [
+      `echo '{"execution_mode":"auto"}' > .sddx/config.json`,
+      // redirect glued to the filename: anchoring on an explicit character class
+      // dropped this spelling, which is exactly the write being guarded
+      `cd .sddx;printf '{"execution_mode":"auto"}'>config.json`,
+      "node /tmp/forge.js .sddx/config.json",
+    ]) {
+      const d = bashGate({ command, cwd });
+      expect(d.allow).toBe(false);
+      if (!d.allow) expect(d.reason).toContain("execution_mode");
+    }
+  });
+
+  test("reads of those paths are NOT blocked", () => {
+    // A token is not a secret, and this repo's own source and tests reference
+    // these paths constantly — refusing to grep them would make ordinary work
+    // here impossible. The allow-list already rejects every write path.
+    const cwd = fixtureRepo();
+    for (const command of [
+      "grep -rn '.sddx/approvals' src/",
+      "rg approvals .sddx",
+      "cat .sddx/approvals/a.json",
+      "ls .sddx/config.json",
+      "git diff .sddx/config.json",
+    ]) {
+      expect(bashGate({ command, cwd }).allow).toBe(true);
+    }
   });
 
   test("ordinary commands are unaffected", () => {
     const cwd = fixtureRepo();
-    for (const command of ["bun test", "git status", "cat .sddx/tasks/x.json", "ls .sddx/drafts"]) {
+    for (const command of [
+      "bun test",
+      "git status",
+      "cat .sddx/tasks/x.json",
+      "ls .sddx/drafts",
+      // Committing .sddx state is the framework's own persistence model. A
+      // glob-based clause here blocked this while still allowing `rm -rf` —
+      // blocking benign commands and missing destructive ones.
+      "git add .sddx/receipts/*.json",
+      // an unrelated *.config.json alongside a .sddx path must not trip the match
+      "cat .sddx/tasks/x.json vite.config.json",
+      "cat .sddx/x tsconfig.json",
+    ]) {
       expect(bashGate({ command, cwd }).allow).toBe(true);
     }
   });

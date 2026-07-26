@@ -102,8 +102,9 @@ which is the point.
    Under `auto` within bounds, render for the record and continue without
    prompting. `auto` still arms the gate — reported as a degradation, not a
    failure — when the plan exceeds `auto_max_tasks` or any node's `scope`
-   reaches sddx's own enforcement paths (`hooks/**`, `.claude-plugin/**`, CI
-   workflows). Two things `auto` refuses outright rather than asking about: a
+   reaches sddx's own enforcement paths (`hooks/**`, `.claude-plugin/**`,
+   `dist/**`, `bin/**`, `.claude/**`, CI workflows), or when `--workspace none`
+   would run tasks in the live checkout. Two things `auto` refuses outright rather than asking about: a
    node whose `oracle.type` is `manual` (nobody is present to observe it), and
    granting a `task allow` TDD-gate exemption (an agent that can widen its own
    gate has no gate) — both need `human`.

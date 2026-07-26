@@ -220,17 +220,27 @@ describe("approval tokens are not writable by hand", () => {
 
   test("a `..` segment does not smuggle a write past the guard", () => {
     const cwd = fixtureRepo();
-    // Reaches .sddx/approvals/ while containing none of the substrings the
-    // guard matches — the absolute form used to bypass it entirely, because an
-    // absolute filePath was passed through un-normalized.
+    // Built by CONCATENATION, not path.join — join() collapses the `..` itself,
+    // so a joined path never reproduces the bug: the gate would receive an
+    // already-clean path and block it even before the fix. The literal `..` has
+    // to survive into the gate, which is what an absolute filePath passed
+    // through un-normalized used to do.
     for (const p of [
-      join(cwd, ".sddx", "tasks", "..", "approvals", "x.json"),
+      `${cwd}/.sddx/tasks/../approvals/x.json`,
+      // the relative spelling is a genuine, non-collapsing case in its own right:
+      // a refactor that normalized only absolute paths would mirror the original
+      // bug and pass a suite that covered just the absolute form
       ".sddx/tasks/../approvals/x.json",
     ]) {
       const d = tddGate({ filePath: p, cwd });
       expect(d.allow).toBe(false);
-      if (d.allow) return;
-      expect(d.reason).toContain("approval tokens are not editable");
+      if (!d.allow) expect(d.reason).toContain("approval tokens are not editable");
+    }
+
+    for (const p of [`${cwd}/.sddx/tasks/../config.json`, ".sddx/tasks/../config.json"]) {
+      const c = tddGate({ filePath: p, cwd });
+      expect(c.allow).toBe(false);
+      if (!c.allow) expect(c.reason).toContain("execution_mode");
     }
   });
 
@@ -239,7 +249,7 @@ describe("approval tokens are not writable by hand", () => {
     for (const p of [".sddx/config.json", join(cwd, ".sddx", "config.json")]) {
       const d = tddGate({ filePath: p, cwd });
       expect(d.allow).toBe(false);
-      if (d.allow) return;
+      if (d.allow) continue;
       expect(d.reason).toContain("execution_mode");
     }
   });

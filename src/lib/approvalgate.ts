@@ -91,7 +91,9 @@ export function lex(command: string): { segments: string[][]; opaque: boolean } 
         i += 1;
         cur += command[i] as string;
       } else {
-        if ((c === "$" && command[i + 1] === "(") || c === "`") opaque = true;
+        // ANY unescaped `$` outside single quotes: `$(…)`, `$VAR`, `${VAR}`,
+        // `$'…'` and `$((…))` are all expansions whose result this cannot see.
+        if (c === "$" || c === "`") opaque = true;
         cur += c;
       }
       started = true;
@@ -122,7 +124,7 @@ export function lex(command: string): { segments: string[][]; opaque: boolean } 
       while (i < command.length && command[i] !== "\n") i += 1;
       continue;
     }
-    if ((c === "$" && command[i + 1] === "(") || c === "`") {
+    if (c === "$" || c === "`") {
       opaque = true;
       cur += c;
       started = true;
@@ -156,20 +158,33 @@ const segments = (command: string): string[][] => lex(command).segments;
 /** Exact-token flag test — `--dry-run=false` is NOT `--dry-run`. */
 const hasFlag = (tokens: string[], name: string): boolean => tokens.includes(name);
 
-/** `--name value` or `--name=value`, quotes stripped. */
+/** `--name value` or `--name=value`. The lexer already removed quoting, so
+ * stripping quote characters here would corrupt a path that legitimately
+ * contains one rather than unquote anything. */
 function tokenValue(tokens: string[], name: string): string | undefined {
   for (let i = 0; i < tokens.length; i++) {
-    if (tokens[i] === name) return tokens[i + 1]?.replace(/^["']|["']$/g, "");
-    if (tokens[i].startsWith(`${name}=`)) {
-      return tokens[i].slice(name.length + 1).replace(/^["']|["']$/g, "");
-    }
+    if (tokens[i] === name) return tokens[i + 1];
+    if (tokens[i].startsWith(`${name}=`)) return tokens[i].slice(name.length + 1);
   }
   return undefined;
 }
 
+/**
+ * `a` followed by `b`, tolerating global flags in between. `parseOutputFlag`
+ * strips `--output <v>` and `--no-color` from ANY position before dispatch, so
+ * `sddx graph --output json approve` really does run `graph approve` — matching
+ * only the immediately-next token let that ordering through the gate.
+ */
 const isSubcommand = (tokens: string[], a: string, b: string): boolean => {
   const i = tokens.indexOf(a);
-  return i !== -1 && tokens[i + 1] === b;
+  if (i === -1) return false;
+  for (let j = i + 1; j < tokens.length; j++) {
+    const t = tokens[j] as string;
+    if (t === b) return true;
+    if (!t.startsWith("-")) return false; // a different subcommand — stop
+    if (t === "--output") j += 1; // takes a value
+  }
+  return false;
 };
 
 export type GatedAction = "create" | "approve";
@@ -187,10 +202,60 @@ export type GatedAction = "create" | "approve";
  * A real `--dry-run` create writes nothing and needs no dialog; the flag is
  * matched as an exact token in the same segment as the `graph create`.
  */
+/** Commands that run their argument as a command line of its own, hiding it
+ * inside a single quoted token: `sh -c '…'`, `eval '…'`, `xargs …`. Quote-aware
+ * lexing is what makes that token whole, so without unwrapping them the
+ * subcommand disappears from the gate's view entirely.
+ *
+ * Recursion is limited to THESE, not to every token containing whitespace.
+ * Unwrapping indiscriminately made `git commit -m "run sddx graph approve
+ * first"` raise an approval dialog — and a dialog that fires on a commit message
+ * trains the user to click through the one prompt this whole design rests on.
+ * False alarms are a real cost here, not merely a nuisance. */
+const WRAPPERS: ReadonlySet<string> = new Set([
+  "sh",
+  "bash",
+  "zsh",
+  "dash",
+  "ksh",
+  "eval",
+  "xargs",
+  "env",
+  "nohup",
+  "timeout",
+  "nice",
+  "command",
+  "exec",
+]);
+
+const basename = (word: string): string => word.slice(word.lastIndexOf("/") + 1);
+
+/** Every command line this one contains: its own segments, plus those carried
+ * inside a wrapper's argument, to `depth` levels. */
+function allSegments(command: string, depth = 0): string[][] {
+  const segs = segments(command);
+  if (depth >= 3) return segs;
+  const out = [...segs];
+  for (const tokens of segs) {
+    const head = tokens[0];
+    if (!head || !WRAPPERS.has(basename(head))) continue;
+    for (const token of tokens.slice(1)) {
+      if (/\s/.test(token)) out.push(...allSegments(token, depth + 1));
+    }
+  }
+  return out;
+}
+
 export function gatedAction(command: string): GatedAction | null {
-  for (const tokens of segments(command)) {
-    if (isSubcommand(tokens, "graph", "approve")) return "approve";
-    if (isSubcommand(tokens, "graph", "create") && !hasFlag(tokens, "--dry-run")) return "create";
+  const segs = allSegments(command);
+  // `approve` is checked across ALL segments BEFORE `create` across any of them.
+  // Per-segment ordering let `graph create <benign> && graph approve <evil>`
+  // report itself as a create — which the gate can satisfy from a token — and the
+  // approve then ran with no dialog at all. Recording approval is the act that
+  // must always meet a human, so it wins wherever it appears in the line.
+  if (segs.some((t) => isSubcommand(t, "graph", "approve"))) return "approve";
+  if (segs.some((t) => isSubcommand(t, "graph", "create") && !hasFlag(t, "--dry-run"))) {
+    return "create";
   }
   return null;
 }
@@ -226,16 +291,25 @@ export function approvalGate(event: {
   // safe pass-through — the gate has no opinion on `bun test`.
   if (!command || !cwd) return pass;
   try {
+    const parsed = lex(command);
     const action = gatedAction(command);
     if (!action) {
-      // A substitution can expand into `sddx graph approve` that the lexer never
-      // sees, so "no gated action found" is not a safe conclusion for a line it
-      // could not fully read. Scoped to lines that name sddx at all, so an
-      // unrelated `echo $(date)` still passes — see the FAIL CLOSED note above.
-      if (lex(command).opaque && /\bsddx\b/.test(command)) {
+      // An expansion can produce `sddx graph approve` that the lexer never sees,
+      // so "no gated action found" is not a safe conclusion for a line it could
+      // not fully read — see the FAIL CLOSED note above.
+      //
+      // Scoped to lines naming BOTH sddx and graph. Requiring only `sddx` made
+      // every command using a variable anywhere near a path containing "sddx"
+      // ask — `cd $HOME/dev/glapsfun/sddx && bun test`, `sddx task show $ID` —
+      // which on the PreToolUse hot path for all Bash is a stream of dialogs for
+      // commands that can neither create nor approve. A line whose expansion
+      // reaches `graph approve` while spelling neither word remains possible and
+      // is not covered here; the Edit/Write and Bash write guards are what stand
+      // behind that.
+      if (parsed.opaque && /\bsddx\b/.test(command) && /\bgraph\b/.test(command)) {
         return ask(
           [
-            "sddx: this command names sddx and uses substitution the approval gate cannot read.",
+            "sddx: this command names sddx and uses an expansion the approval gate cannot read.",
             "What it expands to cannot be verified, so it cannot be vouched for.",
           ].join("\n"),
         );
@@ -244,13 +318,20 @@ export function approvalGate(event: {
     }
 
     // Find the segment that performs the action, so `--graph`/`--workspace` are
-    // read from the right command in a compound line.
-    const tokens =
-      segments(command).find((t) =>
-        action === "approve"
-          ? isSubcommand(t, "graph", "approve")
-          : isSubcommand(t, "graph", "create") && !hasFlag(t, "--dry-run"),
-      ) ?? [];
+    // read from the right command in a compound line. A wrapper (`sh -c '…'`)
+    // carries it inside one token, so those are searched too — and when it still
+    // cannot be located, `graphArg` stays undefined and both branches below ask,
+    // which is the correct direction to fail.
+    const owns = (t: string[]): boolean =>
+      action === "approve"
+        ? isSubcommand(t, "graph", "approve")
+        : isSubcommand(t, "graph", "create") && !hasFlag(t, "--dry-run");
+    // Same unwrapping `gatedAction` used to FIND the action, so the two cannot
+    // disagree about which segment owns it. Searching one level shallower left a
+    // double-wrapped command with no owning segment, and the dialog then asked
+    // the human to approve plan "(unreadable)" — safe, but the dialog is the only
+    // thing carrying meaning here, so a blank digest defeats its purpose.
+    const tokens = allSegments(command).find(owns) ?? [];
     const graphArg = tokenValue(tokens, "--graph");
 
     // Recording approval is the human act this whole mechanism exists to

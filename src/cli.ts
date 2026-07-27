@@ -683,20 +683,6 @@ function resolveApproval(cwd: string, graphArg: string, plan: ResolvedPlan): Gat
   );
 }
 
-/** Which blast-radius bound (if any) would have armed the gate for this plan —
- * recorded on the token so an approved-anyway `auto` plan says why it needed a
- * human. Ignores any existing token by asking about the bounds directly. */
-function gateDegradation(cwd: string, graphArg: string, plan: ResolvedPlan): string | undefined {
-  return decideGate(
-    cwd,
-    join(cwd, graphArg),
-    gateNodes(plan),
-    "auto",
-    autoMaxTasks(cwd),
-    scopesOverlap,
-  ).degradedReason;
-}
-
 function cmdGraphApprove(
   cwd: string,
   args: string[],
@@ -736,20 +722,15 @@ function cmdGraphApprove(
   // A token always records `mode: "human"`. Approving IS the deliberate act, so
   // recording the *configured* mode here would let a `mode: auto` receipt mean
   // "a human approved it after all" — destroying the one thing that marker is
-  // for: identifying plans no human ever saw. When config asked for `auto` and a
-  // blast-radius bound armed the gate anyway, that degradation is recorded as
-  // `requested_mode` rather than by weakening `mode`.
-  const configuredMode = gateExecutionMode(cwd);
+  // for: identifying plans no human ever saw.
+  //
+  // Nothing records a degradation any more. An `auto` plan over a bound is
+  // refused above, so the case those fields described — configured `auto`,
+  // approved by a human anyway — can no longer occur.
   const approval = writeApproval(cwd, {
     plan_sha256: hash,
     mode: "human",
     workspace_mode: plan.mode,
-    ...(configuredMode === "auto"
-      ? {
-          requested_mode: "auto" as const,
-          degraded_reason: gateDegradation(cwd, graphArg, plan) ?? "approved explicitly",
-        }
-      : {}),
   });
   reporter.success(`approved plan ${hash} (mode ${approval.mode})`);
   reporter.success(`token: ${approvalPath(cwd, hash)}`);
@@ -845,8 +826,6 @@ function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noCol
     baseSha: base.sha,
     approval: {
       mode: gate.mode,
-      ...(gate.requestedMode !== gate.mode ? { requested_mode: gate.requestedMode } : {}),
-      ...(gate.degradedReason ? { degraded_reason: gate.degradedReason } : {}),
       plan_sha256: gate.hash,
       at: new Date().toISOString(),
     },
@@ -1334,7 +1313,7 @@ function main(argv: string[]): void {
       // verify.ts already needed for reading the goal file.
       if (gateExecutionMode(resolveMainRepoRoot(cwd)) === "auto") {
         fail(
-          `task allow: refused in auto mode — a TDD-gate exemption always requires a human. Re-run in human mode (--mode human, or SDDX_EXECUTION_MODE=human) to grant "${path}" on ${id}.`,
+          `task allow: refused in auto mode — a TDD-gate exemption always requires a human. Mode is read from reviewed configuration only: set "execution_mode": "human" in .sddx/config.json to grant "${path}" on ${id}.`,
         );
       }
       const task = readTask(cwd, id);

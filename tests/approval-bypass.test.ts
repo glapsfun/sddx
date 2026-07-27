@@ -263,8 +263,9 @@ oracle:
     const g = planOn(cwd);
     const d = decideGate(cwd, g, node(["src/n0/**"]), "auto", 99, scopesOverlap, "none");
     expect(d.ok).toBe(false);
-    expect(d.mode).toBe("human");
-    expect(d.degradedReason).toContain("none");
+    // A refusal now, not a degradation into human: the bound fails the plan
+    // rather than offering a token that would run it unattended anyway.
+    expect(d.refusal).toContain("none");
   });
 
   test("worktree still self-approves within bounds", () => {
@@ -284,7 +285,7 @@ oracle:
     for (const scope of ["dist/**", "bin/**", ".claude/**"]) {
       const d = decideGate(cwd, g, node([scope]), "auto", 99, scopesOverlap, "worktree");
       expect(d.ok).toBe(false);
-      expect(d.mode).toBe("human");
+      expect(d.refusal).toContain(scope);
     }
     expect(SELF_MODIFYING_GLOBS).toContain("dist/**");
   });

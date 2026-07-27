@@ -165,15 +165,15 @@ describe("auto mode never widens the TDD gate", () => {
 });
 
 describe("auto mode blast radius", () => {
-  test("a plan over auto_max_tasks arms the gate rather than failing", () => {
+  test("a plan over auto_max_tasks is refused, not armed", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, 4);
     withMode(cwd, "auto", 3);
     const r = cli(cwd, auto, "graph", "create", "--graph", rel);
-    // armed, not failed: the distinguishing exit code is 3
-    expect(r.status).toBe(3);
-    expect(r.stderr).toContain("4");
-    expect(r.stderr).toContain("auto_max_tasks=3");
+    // exit 3 means "approval required"; a bound refuses instead, so not 3
+    expect(r.status).not.toBe(0);
+    expect(r.status).not.toBe(3);
+    expect(r.stderr).toContain("auto_max_tasks");
     expect(created(cwd).goals).toEqual([]);
   });
 
@@ -185,26 +185,39 @@ describe("auto mode blast radius", () => {
     expect(r.status).toBe(0);
   });
 
-  test("a self-modifying scope arms the gate regardless of node count", () => {
+  test("a self-modifying scope is refused regardless of node count", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, 1, () => ({ scope: "hooks/**" }));
     withMode(cwd, "auto", 99);
     const r = cli(cwd, auto, "graph", "create", "--graph", rel);
-    expect(r.status).toBe(3);
+    expect(r.status).not.toBe(0);
+    expect(r.status).not.toBe(3);
     expect(r.stderr).toContain("n0");
     expect(created(cwd).goals).toEqual([]);
   });
 
-  test("an approved plan proceeds even when a bound would have armed the gate", () => {
+  test("auto cannot approve its way past a bound", () => {
+    // Previously a token let an over-ceiling plan run unattended, recording the
+    // degradation on the token. Approving is a human act, so it belongs to
+    // human mode — reached by editing reviewed configuration, not by a token.
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, 4);
     withMode(cwd, "auto", 3);
-    expect(cli(cwd, auto, "graph", "approve", "--graph", rel).status).toBe(0);
-    expect(cli(cwd, auto, "graph", "create", "--graph", rel).status).toBe(0);
+    expect(cli(cwd, auto, "graph", "approve", "--graph", rel).status).not.toBe(0);
+    expect(cli(cwd, auto, "graph", "create", "--graph", rel).status).not.toBe(0);
+    expect(created(cwd).goals).toEqual([]);
+  });
+
+  test("the same plan runs once configuration selects human mode", () => {
+    const { clone: cwd } = fixtureClone();
+    const rel = planRepo(cwd, 4);
+    withMode(cwd, "human", 3);
+    expect(cli(cwd, human, "graph", "approve", "--graph", rel).status).toBe(0);
+    expect(cli(cwd, human, "graph", "create", "--graph", rel).status).toBe(0);
   });
 });
 
-describe("decideGate records degradation", () => {
+describe("decideGate refuses rather than degrading", () => {
   const nodes = (n: number, scope = (i: number) => [`src/n${i}/**`]) =>
     Array.from({ length: n }, (_, i) => ({
       alias: `n${i}`,
@@ -216,14 +229,15 @@ describe("decideGate records degradation", () => {
     return join(cwd, planRepo(cwd, n));
   }
 
-  test("names the requested mode, the effective mode, and the triggering bound", () => {
+  test("names the requested mode and the triggering bound", () => {
     const cwd = fixtureRepo();
     const g = graphOn(cwd, 4);
     const d = decideGate(cwd, g, nodes(4), "auto", 3, scopesOverlap);
     expect(d.ok).toBe(false);
     expect(d.requestedMode).toBe("auto");
-    expect(d.mode).toBe("human");
-    expect(d.degradedReason).toContain("auto_max_tasks");
+    // the mode is not rewritten to "human" — nothing degraded
+    expect(d.mode).toBe("auto");
+    expect(d.refusal).toContain("auto_max_tasks");
     expect(d.nodeCount).toBe(4);
   });
 
@@ -239,9 +253,8 @@ describe("decideGate records degradation", () => {
       scopesOverlap,
     );
     expect(d.ok).toBe(false);
-    expect(d.mode).toBe("human");
-    expect(d.degradedReason).toContain("n1");
-    for (const glob of SELF_MODIFYING_GLOBS) expect(d.degradedReason).toContain(glob);
+    expect(d.refusal).toContain("n1");
+    for (const glob of SELF_MODIFYING_GLOBS) expect(d.refusal).toContain(glob);
   });
 
   test("self-modification outranks the ceiling when both apply", () => {
@@ -255,13 +268,13 @@ describe("decideGate records degradation", () => {
       1,
       scopesOverlap,
     );
-    expect(d.degradedReason).toContain("enforcement paths");
+    expect(d.refusal).toContain("enforcement paths");
   });
 
-  test("an UNSCOPED node trips the self-modification check — empty scope is unconfined", () => {
-    // An empty scope means the task may write anywhere, which includes hooks/ and
-    // .claude-plugin/. Treating "no scope" as "no reach" penalized honest scope
-    // declarations and made omitting `scope` a bypass.
+  test("an UNSCOPED node is refused — empty scope is unconfined", () => {
+    // An empty scope means the task may write anywhere, which includes hooks/,
+    // .claude-plugin/, and every protected path. Treating "no scope" as "no
+    // reach" penalized honest scope declarations and made omitting `scope` a bypass.
     const cwd = fixtureRepo();
     const g = graphOn(cwd, 1);
     const d = decideGate(
@@ -273,8 +286,7 @@ describe("decideGate records degradation", () => {
       scopesOverlap,
     );
     expect(d.ok).toBe(false);
-    expect(d.mode).toBe("human");
-    expect(d.degradedReason).toContain("unconfined");
+    expect(d.refusal).toContain("unconfined");
   });
 
   test("an unhashable plan is never approved", () => {

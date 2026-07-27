@@ -26,9 +26,28 @@ export interface ReceiptEnv {
   dirty_tree: boolean;
 }
 
+/** Approval provenance, denormalized onto the receipt so it states the
+ * conditions it was produced under without needing the goal file to interpret
+ * it. Absent for a task created outside any goal. */
+export interface ReceiptApproval {
+  /** The mode that actually applied. */
+  mode: "human" | "auto";
+  /** Set when `auto` was requested but a blast-radius bound armed the gate. */
+  requested_mode?: "human" | "auto";
+  degraded_reason?: string;
+  /** The plan this work descends from — what an auditor checks it against. */
+  plan_sha256: string;
+  at?: string;
+  /** Decisions resolved without asking, carried from the task's spec. */
+  assumptions: string[];
+  /** Reserved for per-node spec revisions approved mid-run; always empty here. */
+  amendments: never[];
+}
+
 export interface Receipt {
-  /** 1 = M1 schema; 2 adds `allow`; 3 replaces the single run with `runs[]` + `env`. */
-  version: 1 | 2 | 3;
+  /** 1 = M1 schema; 2 adds `allow`; 3 replaces the single run with `runs[]` +
+   * `env`; 4 adds `approval` (present only for a task belonging to a goal). */
+  version: 1 | 2 | 3 | 4;
   task_id: string;
   seq: number;
   prev: string;
@@ -54,6 +73,8 @@ export interface Receipt {
   /** v3 optional, both-or-neither: SSH signature over the unsigned receipt's sha256. */
   signature?: string;
   signer?: string;
+  /** v4 only, and only for a task belonging to a goal. */
+  approval?: ReceiptApproval;
 }
 
 export const sha256 = (data: string | Uint8Array): string =>
@@ -108,7 +129,7 @@ export function validateReceipt(raw: unknown): string[] {
   const need = (field: string, ok: boolean) => {
     if (!ok) errors.push(`${field}: missing or invalid`);
   };
-  need("version", r.version === 1 || r.version === 2 || r.version === 3);
+  need("version", r.version === 1 || r.version === 2 || r.version === 3 || r.version === 4);
   const version = typeof r.version === "number" ? r.version : 0;
   if (version >= 2) {
     need(
@@ -117,6 +138,30 @@ export function validateReceipt(raw: unknown): string[] {
     );
   } else {
     need("allow", r.allow === undefined);
+  }
+  // `approval` only exists from v4; an older receipt carrying one is a forgery
+  // or a corruption, not a newer reader's problem.
+  if (version >= 4) {
+    if (r.approval !== undefined) {
+      const a = r.approval as Record<string, unknown>;
+      need(
+        "approval",
+        typeof a === "object" &&
+          a !== null &&
+          (a.mode === "human" || a.mode === "auto") &&
+          typeof a.plan_sha256 === "string" &&
+          HEX64.test(a.plan_sha256) &&
+          (a.requested_mode === undefined ||
+            a.requested_mode === "human" ||
+            a.requested_mode === "auto") &&
+          Array.isArray(a.assumptions) &&
+          (a.assumptions as unknown[]).every((x) => typeof x === "string") &&
+          Array.isArray(a.amendments) &&
+          (a.amendments as unknown[]).length === 0,
+      );
+    }
+  } else {
+    need("approval", r.approval === undefined);
   }
   if (version <= 2) {
     need("exit_code", typeof r.exit_code === "number");

@@ -8,7 +8,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
-const NAMESPACE = "sddx-receipt";
+/** ssh-keygen signature namespaces. Separation is what stops a signature made
+ * for one purpose being replayed as another: a receipt sig can't stand in for
+ * an approval sig, and neither can stand in for a git commit sig ("git"). */
+export type SignNamespace = "sddx-receipt" | "sddx-approval";
+
+const DEFAULT_NAMESPACE: SignNamespace = "sddx-receipt";
 
 export interface ReceiptSignature {
   signature: string;
@@ -32,14 +37,18 @@ function gitConfig(cwd: string, key: string): string | null {
 
 const expandHome = (p: string): string => (p.startsWith("~/") ? join(homedir(), p.slice(2)) : p);
 
-export function signPayload(cwd: string, payload: string): ReceiptSignature | null {
+export function signPayload(
+  cwd: string,
+  payload: string,
+  namespace: SignNamespace = DEFAULT_NAMESPACE,
+): ReceiptSignature | null {
   if (gitConfig(cwd, "gpg.format") !== "ssh") return null;
   const key = gitConfig(cwd, "user.signingkey");
   // literal "ssh-ed25519 AAAA..." keys need an ssh-agent round-trip — unsupported, stay unsigned
   if (!key || key.startsWith("ssh-")) return null;
   const signer = gitConfig(cwd, "user.email");
   if (!signer) return null;
-  const r = spawnSync("ssh-keygen", ["-Y", "sign", "-n", NAMESPACE, "-f", expandHome(key)], {
+  const r = spawnSync("ssh-keygen", ["-Y", "sign", "-n", namespace, "-f", expandHome(key)], {
     cwd,
     input: payload,
     encoding: "utf8",
@@ -53,6 +62,7 @@ export function verifySignature(
   cwd: string,
   payload: string,
   sig: ReceiptSignature,
+  namespace: SignNamespace = DEFAULT_NAMESPACE,
 ): "valid" | "invalid" | "unverifiable" {
   const allowed = gitConfig(cwd, "gpg.ssh.allowedSignersFile");
   if (!allowed) return "unverifiable";
@@ -62,7 +72,7 @@ export function verifySignature(
     writeFileSync(sigFile, `${sig.signature}\n`);
     const r = spawnSync(
       "ssh-keygen",
-      ["-Y", "verify", "-f", expandHome(allowed), "-I", sig.signer, "-n", NAMESPACE, "-s", sigFile],
+      ["-Y", "verify", "-f", expandHome(allowed), "-I", sig.signer, "-n", namespace, "-s", sigFile],
       { cwd, input: payload, encoding: "utf8" },
     );
     return r.status === 0 ? "valid" : "invalid";

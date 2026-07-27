@@ -13,6 +13,7 @@ const SPEC = {
   stop_rules: [],
   out_of_scope: [],
   scope: [],
+  assumptions: [],
 };
 
 function redTask(repo: string): TaskState {
@@ -196,5 +197,67 @@ describe("blockMessage", () => {
     expect(msg).toContain("failing test");
     expect(msg).toContain(`sddx task allow ${t.id} src/api.ts`);
     expect(readTask(repo, t.id).phase).toBe("RED");
+  });
+});
+
+describe("approval tokens are not writable by hand", () => {
+  test("a direct write to .sddx/approvals/ is blocked, task or no task", () => {
+    const cwd = fixtureRepo();
+    // No task exists at all — the state a plan sits in before `graph create`.
+    // `.sddx/**` is an EXEMPT glob for the TDD gate, so nothing else stops this.
+    const d = tddGate({ filePath: ".sddx/approvals/deadbeef.json", cwd });
+    expect(d.allow).toBe(false);
+    if (d.allow) return;
+    expect(d.reason).toContain("approval tokens are not editable");
+    expect(d.reason).toContain("graph approve");
+  });
+
+  test("blocked via an absolute path too", () => {
+    const cwd = fixtureRepo();
+    const d = tddGate({ filePath: join(cwd, ".sddx", "approvals", "x.json"), cwd });
+    expect(d.allow).toBe(false);
+  });
+
+  test("a `..` segment does not smuggle a write past the guard", () => {
+    const cwd = fixtureRepo();
+    // Built by CONCATENATION, not path.join — join() collapses the `..` itself,
+    // so a joined path never reproduces the bug: the gate would receive an
+    // already-clean path and block it even before the fix. The literal `..` has
+    // to survive into the gate, which is what an absolute filePath passed
+    // through un-normalized used to do.
+    for (const p of [
+      `${cwd}/.sddx/tasks/../approvals/x.json`,
+      // the relative spelling is a genuine, non-collapsing case in its own right:
+      // a refactor that normalized only absolute paths would mirror the original
+      // bug and pass a suite that covered just the absolute form
+      ".sddx/tasks/../approvals/x.json",
+    ]) {
+      const d = tddGate({ filePath: p, cwd });
+      expect(d.allow).toBe(false);
+      if (!d.allow) expect(d.reason).toContain("approval tokens are not editable");
+    }
+
+    for (const p of [`${cwd}/.sddx/tasks/../config.json`, ".sddx/tasks/../config.json"]) {
+      const c = tddGate({ filePath: p, cwd });
+      expect(c.allow).toBe(false);
+      if (!c.allow) expect(c.reason).toContain("execution_mode");
+    }
+  });
+
+  test(".sddx/config.json is not tool-editable — it is the only source of execution_mode", () => {
+    const cwd = fixtureRepo();
+    for (const p of [".sddx/config.json", join(cwd, ".sddx", "config.json")]) {
+      const d = tddGate({ filePath: p, cwd });
+      expect(d.allow).toBe(false);
+      if (d.allow) continue;
+      expect(d.reason).toContain("execution_mode");
+    }
+  });
+
+  test("other .sddx paths stay writable", () => {
+    const cwd = fixtureRepo();
+    for (const p of [".sddx/drafts/plan.yaml", ".sddx/context/notes.md", ".sddx/tasks/t.json"]) {
+      expect(tddGate({ filePath: p, cwd }).allow).toBe(true);
+    }
   });
 });

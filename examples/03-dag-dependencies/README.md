@@ -131,6 +131,7 @@ EOF
 because `c depends_on: a` orders them.
 
 ```sh
+./sddx graph approve --graph graph.yaml
 OUT=$(./sddx graph create --graph graph.yaml)
 echo "$OUT"
 A_ID=$(echo "$OUT" | grep -E '^ *a →' | awk '{print $3}')

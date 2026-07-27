@@ -53,6 +53,7 @@ tasks:
   - alias: b
     spec: specs/b.yaml
 EOF
+./sddx graph approve --graph graph.yaml
 OUT=$(./sddx graph create --graph graph.yaml)
 echo "$OUT"
 GOAL_ID=$(echo "$OUT" | grep -o 'created goal [^ ]*' | awk '{print $3}')

@@ -7,7 +7,7 @@ writes nothing; there are no failure receipts, so `verdict` is always
 
 | Field            | Type              | Meaning                                                                  |
 | ---------------- | ----------------- | ------------------------------------------------------------------------ |
-| `version`        | `1 \| 2 \| 3`     | Receipt schema; v2 added `allow`, v3 added `runs`/`env`                  |
+| `version`        | `1 \| 2 \| 3 \| 4` | Receipt schema; v2 added `allow`, v3 added `runs`/`env`, v4 added `approval` |
 | `task_id`        | string            | The task this receipt settles                                            |
 | `seq`            | number            | Position in the chain; strictly greater than the parent's                |
 | `prev`           | string            | sha256 of the parent receipt *file*, or `"genesis"` for the first        |
@@ -86,3 +86,36 @@ Exit 1 on any finding, 0 on a clean chain — safe to wire into CI (see
 
 If a finding survives restoration attempts, treat the receipt as untrusted and
 re-verify the task: the code may be fine, but its proof is gone.
+
+## v4 — approval provenance
+
+Version 4 adds an optional `approval` object, present for any task belonging to
+a goal and absent for a standalone task:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `mode` | `human \| auto` | The mode that actually applied |
+| `requested_mode` | `human \| auto` | Set only when `auto` degraded to `human` |
+| `degraded_reason` | string | The blast-radius bound that forced the degradation |
+| `plan_sha256` | hex64 | The approved plan this work descends from |
+| `at` | ISO-8601 | When the plan was approved |
+| `assumptions` | string[] | Decisions resolved without asking, from the spec |
+| `amendments` | `[]` | Reserved; always empty in this version |
+
+`assumptions` is denormalized onto the receipt deliberately — a receipt that
+needs another file to be interpreted stops being a receipt.
+
+Versions 1–3 remain valid and MUST NOT carry an `approval` block; a pre-v4
+receipt containing one is a finding.
+
+`sddx audit` cross-checks a receipt's `approval` against its goal and reports any
+disagreement in `mode` or `plan_sha256` — **but only where the goal file is
+present.** `.sddx/goals/` is local-only and never committed, so in a fresh clone
+or CI there is nothing to compare against; the audit then emits a note saying
+the provenance was *not* cross-checked rather than passing silently. Treat a
+receipt's `approval` block as self-reported unless you see that cross-check
+confirmed.
+
+**What this proves:** which plan a receipt descends from and which mode it ran
+under. **Not** who approved it — see
+[execution-modes.md](../explanation/execution-modes.md#what-sddx-can-and-cannot-prove).

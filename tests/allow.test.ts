@@ -13,6 +13,7 @@ const SPEC = {
   stop_rules: [],
   out_of_scope: [],
   scope: [],
+  assumptions: [],
 };
 
 const makeTask = (repo: string) =>

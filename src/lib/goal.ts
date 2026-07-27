@@ -15,6 +15,18 @@ export interface MergeEntry {
   reverts?: string;
 }
 
+/** Approval provenance for the whole goal, written once by `graph create` and
+ * denormalized onto every receipt the goal produces. */
+export interface GoalApproval {
+  mode: "human" | "auto";
+  requested_mode?: "human" | "auto";
+  degraded_reason?: string;
+  plan_sha256: string;
+  at: string;
+  /** Reserved for mid-run per-node spec revisions; always empty in this version. */
+  amendments?: never[];
+}
+
 export interface Goal {
   id: string;
   goal: string;
@@ -35,6 +47,9 @@ export interface Goal {
   updated_at: string;
   /** Set once by `sddx pr create` after a successful PR/MR open from the run branch. */
   shipped?: { pr_url: string; at: string };
+  /** How this goal's plan was approved. Absent for a goal created before
+   * approval provenance existed, or via the standalone `goal create`. */
+  approval?: GoalApproval;
 }
 
 /** Normalizes a `Goal.deps` entry to a list, same read-compat as `dependsOnList`. */
@@ -66,6 +81,8 @@ export interface CreateGoalOptions {
   id?: string;
   runBranch: string;
   baseSha: string;
+  /** Approval provenance, when the goal came from an approved plan. */
+  approval?: GoalApproval;
 }
 
 export function createGoal(
@@ -94,6 +111,7 @@ export function createGoal(
     run_branch: opts.runBranch,
     base_sha: opts.baseSha,
     merges: [],
+    ...(opts.approval ? { approval: { amendments: [] as never[], ...opts.approval } } : {}),
     created_at: now,
     updated_at: now,
   };

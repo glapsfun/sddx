@@ -1,8 +1,30 @@
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { auditReceipts } from "./audit";
 import { computeBoard } from "./board";
-import { readConfig, resolveConfig, validateConfigObject } from "./lib/config";
+import {
+  approvalPath,
+  decideGate,
+  type GateDecision,
+  type GateNode,
+  mergeAssumptions,
+  planHash,
+  writeApproval,
+} from "./lib/approval";
+import {
+  autoMaxTasks,
+  gateExecutionMode,
+  readConfig,
+  resolveConfig,
+  validateConfigObject,
+} from "./lib/config";
 import {
   branchExists,
   createBranch,
@@ -14,6 +36,7 @@ import {
   headSha,
   isMerged,
 } from "./lib/git";
+import { scopesOverlap } from "./lib/glob-overlap";
 import {
   createGoal,
   currentlyMergedTaskIds,
@@ -23,7 +46,7 @@ import {
   readGoal,
   runBranchName,
 } from "./lib/goal";
-import { type GraphNode, parseGraph, validateSchedule } from "./lib/graph";
+import { type Graph, type GraphNode, parseGraph, validateSchedule } from "./lib/graph";
 import {
   detectRunState,
   detectState,
@@ -34,6 +57,7 @@ import {
 } from "./lib/next-actions";
 import { type OutputFormat, parseOutputFlag, printError, printLine, Reporter } from "./lib/output";
 import { createGoalPr } from "./lib/pr";
+import { sha256 } from "./lib/receipt";
 import { redCheck } from "./lib/redcheck";
 import { generateRunReport, renderRunReport } from "./lib/runreport";
 import { parseSpec, type Spec } from "./lib/spec";
@@ -58,6 +82,7 @@ import {
   materializeDependent,
   removeWorktree,
   resolveBaseRef,
+  resolveMainRepoRoot,
   retryWorkspace,
   sweep,
   worktreeAvailable,
@@ -74,7 +99,8 @@ const USAGE = `usage:
   sddx verify <id> [--model <m>] [--harness <h>]
   sddx goal create --goal <sentence> --tasks <id1,id2,...>
   sddx goal show <id>
-  sddx graph create --graph <path> [--workspace auto|worktree|branch|none]
+  sddx graph create --graph <path> [--workspace auto|worktree|branch|none] [--dry-run]
+  sddx graph approve --graph <path> [--workspace auto|worktree|branch|none]
   sddx pr create --goal <goal-id> [--title <title>]
   sddx run report --goal <goal-id>
   sddx board
@@ -101,7 +127,7 @@ let currentCommand = "sddx";
 /** Fatal error exit, format-aware: plain stderr text in terminal mode (as
  * before), or a proper `status: "error"` envelope in json/markdown mode so
  * automation parsing `--output json` never has to handle unstructured text. */
-function failWith(messages: string[], code: 1 | 2 = 1): never {
+function failWith(messages: string[], code: 1 | 2 | 3 = 1): never {
   if (currentFormat === "terminal") {
     for (const m of messages) printError(m);
   } else {
@@ -112,7 +138,7 @@ function failWith(messages: string[], code: 1 | 2 = 1): never {
   process.exit(code);
 }
 
-function fail(message: string, code: 1 | 2 = 1): never {
+function fail(message: string, code: 1 | 2 | 3 = 1): never {
   failWith([message], code);
 }
 
@@ -178,22 +204,36 @@ function packageVersion(): string {
 const WORKSPACE_MODES = ["auto", "worktree", "branch", "none"] as const;
 type WorkspaceFlag = (typeof WORKSPACE_MODES)[number];
 
+/** Workspace selection, with any auto-downgrade recorded into `notices` rather
+ * than printed directly — so a dry run can report the same downgrade a real
+ * create would apply, from the same code. */
+function pickWorkspaceMode(
+  cwd: string,
+  requested: WorkspaceFlag,
+  notices: string[],
+): "worktree" | "branch" | "none" {
+  if (requested !== "auto") return requested;
+  if (!worktreeAvailable(cwd)) {
+    notices.push("git worktree unavailable → branch mode");
+    return "branch";
+  }
+  const base = resolveBaseRef(cwd);
+  if (hasSubmodules(cwd, base.sha)) {
+    notices.push("submodules detected → branch mode");
+    return "branch";
+  }
+  return "worktree";
+}
+
 function pickWorkspace(
   cwd: string,
   requested: WorkspaceFlag,
   reporter: Reporter,
 ): "worktree" | "branch" | "none" {
-  if (requested !== "auto") return requested;
-  if (!worktreeAvailable(cwd)) {
-    reporter.success("git worktree unavailable → branch mode");
-    return "branch";
-  }
-  const base = resolveBaseRef(cwd);
-  if (hasSubmodules(cwd, base.sha)) {
-    reporter.success("submodules detected → branch mode");
-    return "branch";
-  }
-  return "worktree";
+  const notices: string[] = [];
+  const mode = pickWorkspaceMode(cwd, requested, notices);
+  for (const n of notices) reporter.success(n);
+  return mode;
 }
 
 /** Create a root task with a real workspace (worktree/branch/none). `specSrc` is
@@ -358,12 +398,27 @@ function topoOrder(nodes: GraphNode[]): GraphNode[] {
   return out;
 }
 
-function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
-  const reporter = makeReporter("graph create", format, noColor);
-  const graphArg = flag(args, "--graph");
-  if (!graphArg) fail(USAGE, 2);
-  const requested = (flag(args, "--workspace") ?? "auto") as WorkspaceFlag;
-  if (!WORKSPACE_MODES.includes(requested)) fail(USAGE, 2);
+/**
+ * Everything `graph create` resolves and validates before it is entitled to
+ * write anything. `--dry-run` and a real create both go through this and only
+ * this, so the facts a human approves (workspace mode, base SHA, node set)
+ * cannot drift from the facts creation acts on.
+ */
+interface ResolvedPlan {
+  graph: Graph;
+  /** Per-alias parsed spec plus the absolute path it was read from. */
+  loaded: Map<string, { spec: Spec; src: string }>;
+  idByAlias: Map<string, string>;
+  goalId: string;
+  base: ReturnType<typeof resolveBaseRef>;
+  /** The workspace mode creation would actually use, downgrades applied. */
+  mode: "worktree" | "branch" | "none";
+  /** Notices produced while resolving (e.g. "submodules detected → branch mode"). */
+  notices: string[];
+  errors: string[];
+}
+
+function resolvePlan(cwd: string, graphArg: string, requested: WorkspaceFlag): ResolvedPlan {
   let graphText: string;
   try {
     graphText = readFileSync(join(cwd, graphArg), "utf8");
@@ -408,7 +463,13 @@ function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noCol
       if (otherId === id) errs.push(`${node.alias}: task id ${id} collides with ${otherAlias}`);
     }
     idByAlias.set(node.alias, id);
-    loaded.set(node.alias, { spec, src });
+    // Cross-cutting assumptions are copied in here, before the spec is
+    // registered, so each receipt states its conditions without needing the
+    // goal file to interpret it.
+    loaded.set(node.alias, {
+      spec: { ...spec, assumptions: mergeAssumptions(graph.assumptions, spec.assumptions) },
+      src,
+    });
   }
   errs.push(
     ...validateSchedule(
@@ -421,22 +482,336 @@ function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noCol
   );
   const gid = goalId(graph.goal);
   if (existsSync(goalPath(cwd, gid))) errs.push(`goal error: goal ${gid} already exists`);
+
+  // Resolve the two facts a human needs but the drafts never carry: where this
+  // would fork from, and which workspace strategy would actually be used after
+  // any auto-downgrade. Both are recorded so the render and the real create
+  // report identically.
+  const notices: string[] = [];
+  const base = resolveBaseRef(cwd);
+  if (base.source === "HEAD") notices.push("no origin remote — forking from local HEAD");
+  const mode = pickWorkspaceMode(cwd, requested, notices);
+
+  return { graph, loaded, idByAlias, goalId: gid, base, mode, notices, errors: errs };
+}
+
+/**
+ * One node's approval-relevant facts — the unit a re-render diffs on.
+ *
+ * Every field of the spec is represented, not just the four a listing shows. A
+ * diff that covered only task/oracle/scope/depends_on would report "changes
+ * since last render: none" after `success_criteria` was rewritten, so a human
+ * re-reviewing would approve narrowed acceptance criteria believing nothing
+ * moved. `rest` is a digest over everything else, so no field can change
+ * silently — new spec fields are covered automatically.
+ */
+function planNodeSummary(plan: ResolvedPlan, alias: string): Record<string, string> {
+  const node = plan.graph.tasks.find((n) => n.alias === alias);
+  const spec = plan.loaded.get(alias)?.spec;
+  const shown = {
+    task: spec?.task ?? "(unreadable)",
+    oracle: spec ? `${spec.oracle.type}: ${spec.oracle.run} (expect ${spec.oracle.expect})` : "-",
+    scope: (spec?.scope ?? []).join(", ") || "(unscoped)",
+    depends_on: (node?.depends_on ?? []).join(", ") || "(root)",
+  };
+  return {
+    ...shown,
+    success_criteria: (spec?.success_criteria ?? []).join(" | ") || "(none)",
+    assumptions: (spec?.assumptions ?? []).join(" | ") || "(none)",
+    out_of_scope: (spec?.out_of_scope ?? []).join(" | ") || "(none)",
+    stop_rules: JSON.stringify(spec?.stop_rules ?? []),
+    // catch-all so a field added to Spec later cannot slip past this diff
+    rest: spec
+      ? sha256(
+          JSON.stringify({
+            ...spec,
+            task: undefined,
+            oracle: undefined,
+            scope: undefined,
+            success_criteria: undefined,
+            assumptions: undefined,
+            out_of_scope: undefined,
+            stop_rules: undefined,
+          }),
+        ).slice(0, 12)
+      : "-",
+  };
+}
+
+/**
+ * The fork point the render must report. `createRootTask` honours the passed
+ * `forkSha` only on the worktree path; in branch and none mode it branches from
+ * local HEAD instead, and branch mode is auto-selected whenever submodules are
+ * present. Printing the run branch's `origin/HEAD` base as "the" base would then
+ * be a lie about where every task actually starts — so when the two differ, say
+ * both. (The divergence itself is pre-existing `createRootTask` behaviour, not
+ * something this render can fix.)
+ */
+function forkPointLines(cwd: string, plan: ResolvedPlan): string[] {
+  const runBranchBase = `run branch base: ${plan.base.sha} (${plan.base.source})`;
+  if (plan.mode === "worktree") {
+    return [`base: ${plan.base.sha} (${plan.base.source})`];
+  }
+  const taskBase = headSha(cwd);
+  if (taskBase === plan.base.sha) return [`base: ${plan.base.sha} (${plan.base.source})`];
+  return [
+    runBranchBase,
+    `task base: ${taskBase} (local HEAD — ${plan.mode} mode branches from your checkout)`,
+  ];
+}
+
+/** Where the last render of this plan was cached, so a re-render can show only
+ * what moved. Keyed by goal id — a revision that changes the goal sentence is a
+ * different plan and correctly renders in full. */
+const renderCachePath = (cwd: string, gid: string): string =>
+  join(sddxDir(cwd), "drafts", `.render-${gid}.json`);
+
+function renderPlan(cwd: string, graphArg: string, plan: ResolvedPlan, reporter: Reporter): void {
+  const order = topoOrder(plan.graph.tasks).map((n) => n.alias);
+  const current: Record<string, Record<string, string>> = {};
+  for (const alias of order) current[alias] = planNodeSummary(plan, alias);
+
+  const { hash } = planHash(join(cwd, graphArg));
+  const lines: string[] = [
+    `goal: ${plan.graph.goal}`,
+    `plan: ${hash.slice(0, 12)} (${order.length} node${order.length === 1 ? "" : "s"})`,
+    `workspace: ${plan.mode}`,
+    ...forkPointLines(cwd, plan),
+    "validation: passed",
+    "",
+  ];
+
+  // Diff against the previous render of this same plan, when there was one — a
+  // second read must cost only what changed, or the gate stops being read.
+  let previous: Record<string, Record<string, string>> | null = null;
+  try {
+    previous = JSON.parse(
+      readFileSync(renderCachePath(cwd, plan.goalId), "utf8"),
+    ) as typeof current;
+  } catch {
+    previous = null;
+  }
+
+  // The plan itself is ALWAYS rendered. The diff below is an addition to it, not
+  // a replacement: the cache is primed by any dry run — including the agent's own
+  // review render, which is ungated — so putting the listing in the `else` arm
+  // meant the human, following the approval dialog's own instruction to run
+  // `--dry-run`, saw a hash and "changes since last render: none" describing
+  // nothing. The one artifact the whole gate depends on rendered empty in the
+  // normal flow.
+  lines.push("execution order:");
+  for (const alias of order) {
+    const s = current[alias];
+    lines.push(`  ${alias}: ${s.task}`);
+    lines.push(`      criteria:   ${s.success_criteria}`);
+    lines.push(`      oracle:     ${s.oracle}`);
+    lines.push(`      scope:      ${s.scope}`);
+    lines.push(`      depends_on: ${s.depends_on}`);
+  }
+
+  if (previous) {
+    const changed: string[] = [];
+    for (const alias of order) {
+      const before = previous[alias];
+      const after = current[alias];
+      if (!before) {
+        changed.push(`  + ${alias} (new)`);
+        continue;
+      }
+      const fields = Object.keys(after).filter((k) => before[k] !== after[k]);
+      if (fields.length > 0) {
+        changed.push(`  ~ ${alias}`);
+        for (const f of fields) changed.push(`      ${f}: ${before[f]} → ${after[f]}`);
+      }
+    }
+    for (const alias of Object.keys(previous)) {
+      if (!current[alias]) changed.push(`  - ${alias} (removed)`);
+    }
+    lines.push(
+      "",
+      changed.length > 0 ? "changes since last render:" : "changes since last render: none",
+      ...changed,
+    );
+  }
+  lines.push("", "nothing written — this is a dry run");
+  reporter.success(lines.join("\n"));
+
+  try {
+    mkdirSync(dirname(renderCachePath(cwd, plan.goalId)), { recursive: true });
+    writeFileSync(renderCachePath(cwd, plan.goalId), JSON.stringify(current));
+  } catch {
+    // a cache we cannot write costs a full re-render, never a failed dry run
+  }
+
+  reporter.finish({
+    dryRun: true,
+    goal: plan.graph.goal,
+    goalId: plan.goalId,
+    planSha256: hash,
+    workspaceMode: plan.mode,
+    baseSha: plan.base.sha,
+    executionOrder: order,
+    nodes: current,
+  });
+}
+
+/** The gate inputs a resolved plan supplies, in the shape `decideGate` wants. */
+function gateNodes(plan: ResolvedPlan): GateNode[] {
+  return plan.graph.tasks.map((n) => ({
+    alias: n.alias,
+    scope: plan.loaded.get(n.alias)?.spec.scope ?? [],
+    oracleType: plan.loaded.get(n.alias)?.spec.oracle.type ?? "command",
+  }));
+}
+
+/**
+ * Mode for a gate decision comes from `.sddx/config.json` alone — never from a
+ * flag or the environment, both of which are part of the command line the agent
+ * composes (see `gateExecutionMode`). The token must also match the workspace
+ * strategy actually in play, since `--workspace none` abandons isolation.
+ */
+function resolveApproval(cwd: string, graphArg: string, plan: ResolvedPlan): GateDecision {
+  return decideGate(
+    cwd,
+    join(cwd, graphArg),
+    gateNodes(plan),
+    gateExecutionMode(cwd),
+    autoMaxTasks(cwd),
+    scopesOverlap,
+    // the RESOLVED mode, matching what the token recorded
+    plan.mode,
+  );
+}
+
+/** Which blast-radius bound (if any) would have armed the gate for this plan —
+ * recorded on the token so an approved-anyway `auto` plan says why it needed a
+ * human. Ignores any existing token by asking about the bounds directly. */
+function gateDegradation(cwd: string, graphArg: string, plan: ResolvedPlan): string | undefined {
+  return decideGate(
+    cwd,
+    join(cwd, graphArg),
+    gateNodes(plan),
+    "auto",
+    autoMaxTasks(cwd),
+    scopesOverlap,
+  ).degradedReason;
+}
+
+function cmdGraphApprove(
+  cwd: string,
+  args: string[],
+  format: OutputFormat,
+  noColor: boolean,
+): void {
+  const reporter = makeReporter("graph approve", format, noColor);
+  const graphArg = flag(args, "--graph");
+  if (!graphArg) fail(USAGE, 2);
+  const requested = (flag(args, "--workspace") ?? "auto") as WorkspaceFlag;
+  if (!WORKSPACE_MODES.includes(requested)) fail(USAGE, 2);
+
+  // Never approve a plan that would be rejected — the same validation creation
+  // runs, so approval can't be granted to something that cannot execute.
+  const plan = resolvePlan(cwd, graphArg, requested);
+  if (plan.errors.length > 0) {
+    failWith(plan.errors.map((e) => `graph approve: ${e}`));
+  }
+  const { hash, errors } = planHash(join(cwd, graphArg));
+  if (hash === "") failWith(errors.map((e) => `graph approve: ${e}`));
+
+  // Run the gate's HARD refusals here too. Without this, approving a plan whose
+  // node declares `oracle.type: manual` under `execution_mode: auto` reports
+  // success and writes a token, and the very next `graph create` refuses it —
+  // telling a human who just approved as a human to "run in human mode".
+  const refusal = decideGate(
+    cwd,
+    join(cwd, graphArg),
+    gateNodes(plan),
+    gateExecutionMode(cwd),
+    autoMaxTasks(cwd),
+    scopesOverlap,
+    plan.mode,
+  ).refusal;
+  if (refusal) failWith([`graph approve: ${refusal}`]);
+
+  // A token always records `mode: "human"`. Approving IS the deliberate act, so
+  // recording the *configured* mode here would let a `mode: auto` receipt mean
+  // "a human approved it after all" — destroying the one thing that marker is
+  // for: identifying plans no human ever saw. When config asked for `auto` and a
+  // blast-radius bound armed the gate anyway, that degradation is recorded as
+  // `requested_mode` rather than by weakening `mode`.
+  const configuredMode = gateExecutionMode(cwd);
+  const approval = writeApproval(cwd, {
+    plan_sha256: hash,
+    mode: "human",
+    workspace_mode: plan.mode,
+    ...(configuredMode === "auto"
+      ? {
+          requested_mode: "auto" as const,
+          degraded_reason: gateDegradation(cwd, graphArg, plan) ?? "approved explicitly",
+        }
+      : {}),
+  });
+  reporter.success(`approved plan ${hash} (mode ${approval.mode})`);
+  reporter.success(`token: ${approvalPath(cwd, hash)}`);
+  if (approval.signature) reporter.success(`signed by ${approval.signer}`);
+  reporter.finish({
+    planSha256: hash,
+    mode: approval.mode,
+    tokenPath: approvalPath(cwd, hash),
+    signed: Boolean(approval.signature),
+    nodes: plan.graph.tasks.length,
+  });
+}
+
+function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
+  const dryRun = args.includes("--dry-run");
+  const reporter = makeReporter(
+    dryRun ? "graph create --dry-run" : "graph create",
+    format,
+    noColor,
+  );
+  const graphArg = flag(args, "--graph");
+  if (!graphArg) fail(USAGE, 2);
+  const requested = (flag(args, "--workspace") ?? "auto") as WorkspaceFlag;
+  if (!WORKSPACE_MODES.includes(requested)) fail(USAGE, 2);
+
+  const plan = resolvePlan(cwd, graphArg, requested);
+  const { graph, loaded, base, mode } = plan;
+  const gid = plan.goalId;
+  const errs = plan.errors;
   if (errs.length > 0) {
     failWith(errs.map((e) => `graph error: ${e}`));
+  }
+  for (const n of plan.notices) reporter.success(n);
+
+  if (dryRun) {
+    renderPlan(cwd, graphArg, plan, reporter);
+    return;
+  }
+
+  // The approval predicate, checked after validation (a plan that would be
+  // rejected must never reach a human) and before the first write. This is the
+  // CLI half of the gate — it holds when sddx is driven outside a hook-capable
+  // harness, but on its own it only proves the plan is the approved plan, not
+  // that a human approved it. The PreToolUse dialog is what a model can't
+  // self-grant. Exit 3 marks "approval required", distinct from 1 and 2.
+  const gate = resolveApproval(cwd, graphArg, plan);
+  // A hard refusal fails (exit 1) rather than arming the gate — asking a human
+  // to approve an incoherent plan is worse than refusing it outright.
+  if (gate.refusal) failWith([`graph create: ${gate.refusal}`]);
+  if (!gate.ok) {
+    failWith([`graph create: ${gate.reason}`], 3);
   }
 
   // Gate passed. Create the run branch first — before any task worktree —
   // from the same base every root task would otherwise resolve independently
   // (run-branch-integration): one fork point for the whole run, not one per task.
-  const base = resolveBaseRef(cwd);
-  if (base.source === "HEAD") reporter.success("no origin remote — forking from local HEAD");
   const runBranch = runBranchName(gid);
   createBranchAt(cwd, runBranch, base.sha);
   reporter.success(`created run branch ${runBranch} at ${base.sha}`);
 
   // Now create tasks in dependency order (roots fork from the run branch's
   // tip; dependents are deferred), then register the goal with its edges.
-  const mode = pickWorkspace(cwd, requested, reporter);
   const aliasToId = new Map<string, string>();
   const deps: Record<string, string[]> = {};
   const created: string[] = [];
@@ -468,6 +843,13 @@ function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noCol
     id: gid,
     runBranch,
     baseSha: base.sha,
+    approval: {
+      mode: gate.mode,
+      ...(gate.requestedMode !== gate.mode ? { requested_mode: gate.requestedMode } : {}),
+      ...(gate.degradedReason ? { degraded_reason: gate.degradedReason } : {}),
+      plan_sha256: gate.hash,
+      at: new Date().toISOString(),
+    },
   });
   reporter.success(`created goal ${g.id} tasks=[${g.task_ids.join(", ")}] run_branch=${runBranch}`);
   for (const [alias, id] of aliasToId) reporter.success(`  ${alias} → ${id}`);
@@ -862,6 +1244,8 @@ function cmdConfigShow(cwd: string, args: string[], format: OutputFormat, noColo
     `agent_model: ${agentModel}`,
     `prefer_solo: ${cfg.prefer_solo}`,
     `verbose: ${cfg.verbose}`,
+    `execution_mode: ${cfg.execution_mode}`,
+    `auto_max_tasks: ${cfg.auto_max_tasks}`,
   ];
   reporter.success(lines.join("\n"));
 
@@ -937,6 +1321,22 @@ function main(argv: string[]): void {
       currentCommand = "task allow";
       const [id, path] = rest.slice(1);
       if (!id || !path) fail(USAGE, 2);
+      // Absolute invariant, not a configurable threshold: the allow-list is the
+      // only escape hatch from the TDD gate, so an unattended run that could
+      // widen it would have no gate at all. Granting one needs a human in both
+      // modes — auto mode has no way to ask, so it is simply refused.
+      // Resolved through the git common dir, not the process cwd: `task allow`
+      // is run BY the executor, from inside its own worktree, and
+      // `.sddx/config.json` is not committed — so a worktree forked from
+      // origin/HEAD has no copy of it. Reading it from there returned `{}`,
+      // which resolves to `human`, which silently granted the exemption on
+      // exactly the unattended runs this refusal exists to stop. Same fix
+      // verify.ts already needed for reading the goal file.
+      if (gateExecutionMode(resolveMainRepoRoot(cwd)) === "auto") {
+        fail(
+          `task allow: refused in auto mode — a TDD-gate exemption always requires a human. Re-run in human mode (--mode human, or SDDX_EXECUTION_MODE=human) to grant "${path}" on ${id}.`,
+        );
+      }
       const task = readTask(cwd, id);
       allowPath(task, path);
       writeTask(cwd, task);
@@ -1020,6 +1420,10 @@ function main(argv: string[]): void {
       if (format === "terminal") printLine(JSON.stringify(goal, null, 2));
       else reporter.success(`goal ${rest[1]}`);
       reporter.finish(goal);
+      return;
+    }
+    if (cmd === "graph" && rest[0] === "approve") {
+      cmdGraphApprove(cwd, rest.slice(1), format, noColor);
       return;
     }
     if (cmd === "graph" && rest[0] === "create") {

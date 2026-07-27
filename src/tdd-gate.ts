@@ -1,7 +1,7 @@
 // The TDD gate: pure decision logic for the PreToolUse hook on Edit/Write-family
 // tools. Hard-block, no soft mode — in RED, implementation paths are denied until
 // a failing test has been observed. The entrypoint I/O lives in src/hooks.ts.
-import { isAbsolute, relative, resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import {
   BUILTIN_TEST_GLOBS,
   type ClassifyConfig,
@@ -68,12 +68,59 @@ export function scopeBlockMessage(
   ].join("\n");
 }
 
+/**
+ * The two files the approval gate trusts, neither of which may be written by a
+ * tool call. Both are inside `.sddx/**`, which is an EXEMPT glob for the TDD
+ * gate, so nothing else here would stop a write to either. Blocked
+ * unconditionally, in every phase, task or no task.
+ *
+ * - `approvals/**` holds tokens that record that a human approved a plan; a
+ *   direct write forges that approval.
+ * - `config.json` is the ONLY source of `execution_mode` — read from neither
+ *   flag nor environment precisely so the agent cannot choose it. Leaving the
+ *   file writable would hand back the same choice one indirection later: flip
+ *   `human` to `auto` and the plan self-approves with no dialog.
+ */
+const APPROVALS_PATH = /(^|\/)\.sddx\/approvals\//;
+const CONFIG_PATH = /(^|\/)\.sddx\/config\.json$/;
+
+function approvalWriteBlock(relOrAbs: string): string | null {
+  const path = normalizeRelPath(relOrAbs);
+  if (APPROVALS_PATH.test(path)) {
+    return [
+      `sddx approval gate: blocked write to ${relOrAbs} — approval tokens are not editable.`,
+      "A token records that a human approved a plan, so writing one directly would forge that.",
+      "Approve a plan the only way that counts (it raises your own permission dialog):",
+      "  sddx graph create --graph <path> --dry-run   # review it first",
+      "  sddx graph approve --graph <path>",
+    ].join("\n");
+  }
+  if (CONFIG_PATH.test(path)) {
+    return [
+      `sddx approval gate: blocked write to ${relOrAbs} — sddx configuration is not tool-editable.`,
+      "It carries execution_mode, which decides whether a plan needs your approval at all,",
+      "so a tool that could rewrite it could switch off the gate that constrains it.",
+      "Edit it yourself, or inspect the effective values with: sddx config show",
+    ].join("\n");
+  }
+  return null;
+}
+
 export function tddGate(input: GateInput, env = process.env): GateDecision {
+  // `resolve` NORMALIZES, which an absolute path needs just as much as a
+  // relative one: `.sddx/tasks/../approvals/x.json` reaches the approvals
+  // directory while containing none of the substrings the guard below matches.
+  // Passing an absolute path through untouched made that a working bypass.
   const anchor = input.filePath
-    ? isAbsolute(input.filePath)
-      ? input.filePath
-      : resolve(input.cwd ?? process.cwd(), input.filePath)
+    ? resolve(input.cwd ?? process.cwd(), input.filePath)
     : (input.cwd ?? process.cwd());
+
+  // Checked before task resolution: this holds with no task in play at all,
+  // which is exactly the state a plan sits in before `graph create`.
+  if (input.filePath) {
+    const forged = approvalWriteBlock(input.filePath) ?? approvalWriteBlock(anchor);
+    if (forged) return { allow: false, reason: forged };
+  }
 
   const res = resolveTask(anchor);
   if (res.kind === "none") return { allow: true };

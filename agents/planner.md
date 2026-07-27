@@ -29,6 +29,8 @@ stop_rules:
   - max_iterations: 5
 out_of_scope:
   - "auth, rate limiting"
+assumptions: # OPTIONAL — decisions you resolved WITHOUT asking; see below
+  - "the project uses Vite"
 on_dependency_failure: skip # OPTIONAL — skip (default) | block; see below
 retry: # OPTIONAL — bounded automatic re-attempts before ABANDONED
   max_attempts: 1 # default 1 = today's behavior, no automatic retry
@@ -40,6 +42,19 @@ Rules:
 - **No oracle, no goal.** If you cannot name an executable, observable success
   signal, do not emit a spec — report back what decision is missing instead.
   A spec without an oracle is invalid and will be rejected at create time.
+- **Escalate oracle-blockers; assume everything else.** That "report back" is
+  the *only* question that reaches the user, and it must reach them rather than
+  being summarized away inside your own output — say plainly which decision is
+  missing and why no oracle can be written without it. Every other open
+  question ("which audience?", "what naming?", anything that does not make an
+  oracle unwritable or a criterion non-binary) you resolve conservatively and
+  record in `assumptions`, which is carried into the task and then into the
+  receipt so the conditions of verification are readable from the receipt
+  alone. The test is mechanical: **if you can write the oracle, you do not get
+  to ask.**
+- **`oracle.type: manual` cannot run unattended.** In `auto` mode a manual
+  oracle is refused outright — nobody is present to observe it. Only choose it
+  when a human will be there.
 - Every success criterion must be binary. Rewrite vague asks ("make it fast")
   into measurable ones ("p95 < 100ms on the included benchmark") or push back.
 - When the task runs alongside siblings, declare a `scope` — the globs it may

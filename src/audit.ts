@@ -6,6 +6,8 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { approvalsDir, readApproval } from "./lib/approval";
+import { findGoalForTask } from "./lib/goal";
 import { receiptsDir, sha256, verifyChain } from "./lib/receipt";
 import { verifySignature } from "./lib/sign";
 
@@ -20,6 +22,100 @@ function gitLines(cwd: string, ...args: string[]): { ok: boolean; lines: string[
   const r = spawnSync("git", args, { cwd, encoding: "utf8" });
   if (r.status !== 0) return { ok: false, lines: [], err: (r.stderr ?? "").trim() };
   return { ok: true, lines: (r.stdout ?? "").split("\n").filter(Boolean), err: "" };
+}
+
+/**
+ * Approval provenance: every receipt carrying an `approval` block must agree
+ * with its goal on both `mode` and `plan_sha256`, and every signed approval
+ * token must verify under the `sddx-approval` namespace.
+ *
+ * What a clean result establishes: which plan this work descends from, which
+ * mode it ran under, and — where a signature is present and valid — that it was
+ * produced by the named signer's key. It does NOT establish that a particular
+ * human approved anything; any caller can write an unsigned token, and only a
+ * touch-required key makes signing an act a model's own shell cannot perform.
+ * Findings are worded to stay inside that claim.
+ */
+function auditApprovals(cwd: string, findings: string[], notes: string[]): void {
+  const receipts = receiptsDir(cwd);
+  if (existsSync(receipts)) {
+    for (const file of readdirSync(receipts).filter((f) => f.endsWith(".json"))) {
+      const rel = join(".sddx", "receipts", file);
+      let r: Record<string, unknown>;
+      try {
+        r = JSON.parse(readFileSync(join(receipts, file), "utf8")) as Record<string, unknown>;
+      } catch {
+        continue; // chain verification already reports unparseable receipts
+      }
+      const a = r.approval as Record<string, unknown> | undefined;
+      // pre-v4 receipts predate provenance — skipped, never a finding
+      if (!a) continue;
+      const goal = findGoalForTask(cwd, String(r.task_id));
+      // `.sddx/goals/` is deliberately never committed, so in a fresh clone or
+      // CI — exactly where audits run — there is nothing to compare against.
+      // That cannot be a finding (the receipt isn't wrong), but it MUST NOT be
+      // silent either: a silent skip reads as "provenance checked, all good"
+      // when nothing was checked at all.
+      if (!goal?.approval) {
+        notes.push(
+          `${rel}: approval records mode "${String(a.mode)}" / plan ${String(a.plan_sha256).slice(0, 12)} — NOT cross-checked (its goal file is absent; goal state is local-only and never committed)`,
+        );
+        continue;
+      }
+      // Goal files are parsed with a bare cast and no schema check, so the goal
+      // side of this comparison is untrusted input exactly like the receipt
+      // side — which is already defensively stringified. A hand-edited or
+      // half-written `approval` block used to throw a TypeError out of here and
+      // out of `auditReceipts`, killing the whole report: the one command whose
+      // job is to detect tampering, disabled by the tampering.
+      const goalMode = goal.approval.mode;
+      const goalPlan = goal.approval.plan_sha256;
+      if (typeof goalMode !== "string" || typeof goalPlan !== "string") {
+        findings.push(
+          `${rel}: goal ${goal.id} has a malformed approval block (mode/plan_sha256 missing or not a string) — provenance cannot be cross-checked`,
+        );
+        continue;
+      }
+      if (a.mode !== goalMode) {
+        findings.push(
+          `${rel}: approval mode disagrees with its goal — receipt says "${String(a.mode)}", goal ${goal.id} says "${goalMode}"`,
+        );
+      }
+      if (a.plan_sha256 !== goalPlan) {
+        findings.push(
+          `${rel}: approval plan hash disagrees with its goal — receipt says ${String(a.plan_sha256).slice(0, 12)}, goal ${goal.id} says ${goalPlan.slice(0, 12)}`,
+        );
+      }
+    }
+  }
+
+  const tokens = approvalsDir(cwd);
+  if (!existsSync(tokens)) return;
+  for (const file of readdirSync(tokens).filter((f) => f.endsWith(".json"))) {
+    const rel = join(".sddx", "approvals", file);
+    const hash = file.slice(0, -".json".length);
+    const token = readApproval(cwd, hash);
+    if (!token) {
+      findings.push(`${rel}: approval token is unreadable or its recorded hash does not match`);
+      continue;
+    }
+    if (!token.signature || !token.signer) continue; // unsigned is not a finding
+    const verdict = verifySignature(
+      cwd,
+      token.plan_sha256,
+      { signature: token.signature, signer: token.signer },
+      "sddx-approval",
+    );
+    if (verdict === "invalid") {
+      findings.push(`${rel}: approval signature is invalid`);
+    } else if (verdict === "unverifiable") {
+      notes.push(
+        `${rel}: approval signed by ${token.signer} — set gpg.ssh.allowedSignersFile to verify`,
+      );
+    } else {
+      notes.push(`${rel}: approval signature valid (signer ${token.signer})`);
+    }
+  }
 }
 
 export function auditReceipts(
@@ -102,6 +198,8 @@ export function auditReceipts(
       }
     }
   }
+  auditApprovals(cwd, findings, notes);
+
   if (opts.ci) {
     const tasksDir = join(cwd, ".sddx", "tasks");
     if (existsSync(tasksDir)) {

@@ -54,9 +54,25 @@ tasks:
 EOF
 ```
 
-## Register the graph
+## Review the plan, then register it
+
+`human` mode (the default) refuses to create anything until the plan is
+approved. Render it first — this writes nothing at all:
 
 ```sh
+"$ROOT/sddx" graph create --graph graph.yaml --dry-run
+```
+
+Nothing exists yet, so cancelling here would cost one `rm`:
+
+```sh
+test ! -d "$ROOT/.sddx-worktrees"
+```
+
+Approve it, then create:
+
+```sh
+"$ROOT/sddx" graph approve --graph graph.yaml
 OUT=$("$ROOT/sddx" graph create --graph graph.yaml)
 echo "$OUT"
 ALPHA_ID=$(echo "$OUT" | grep -E '^ *alpha →' | awk '{print $3}')

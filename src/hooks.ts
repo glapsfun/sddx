@@ -7,6 +7,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { writeBoard } from "./board";
+import { approvalGate } from "./lib/approvalgate";
 import { bashGate } from "./lib/bashgate";
 import { boardEnabled } from "./lib/config";
 import { recordTestRun } from "./lib/recorder";
@@ -57,6 +58,29 @@ function cmdTddGate(event: HookEvent): void {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
+      permissionDecisionReason: decision.reason,
+    },
+  });
+}
+
+/**
+ * The plan-approval gate. Unlike `cmdTddGate`/`cmdBashGate` above — prohibition
+ * gates that deny or stay silent, and must NEVER emit "allow" — this is a
+ * permission gate: it emits `"ask"` to raise the user's own permission dialog,
+ * which is the only signal in this system a model cannot produce for itself.
+ * Do not "harmonize" this with the prohibition gates; a silent approval gate is
+ * a disabled one. See src/lib/approvalgate.ts and its regression test.
+ */
+function cmdApprovalGate(event: HookEvent): void {
+  const decision = approvalGate({ command: event.tool_input?.command, cwd: event.cwd });
+  if (decision.decision === "pass") {
+    emit({});
+    return;
+  }
+  emit({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "ask",
       permissionDecisionReason: decision.reason,
     },
   });
@@ -172,6 +196,7 @@ function main(): void {
   try {
     if (sub === "tdd-gate") cmdTddGate(event);
     else if (sub === "bash-gate") cmdBashGate(event);
+    else if (sub === "approval-gate") cmdApprovalGate(event);
     else if (sub === "record-test") cmdRecordTest(event);
     else if (sub === "stop-gate") cmdStopGate(event);
     else if (sub === "session-start") cmdSessionStart(event);

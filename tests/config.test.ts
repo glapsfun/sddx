@@ -2,11 +2,16 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  autoMaxTasks,
   boardEnabled,
+  executionMode,
+  gateExecutionMode,
   oracleRuns,
   parseAgentModel,
+  resolveConfig,
   resolveValue,
   stuckThreshold,
+  validateConfigObject,
 } from "../src/lib/config";
 import { fixtureRepo } from "./fixtures";
 
@@ -101,5 +106,82 @@ describe("parseAgentModel", () => {
   test("empty/undefined input yields no models, no warnings", () => {
     expect(parseAgentModel(undefined)).toEqual({ models: {}, warnings: [] });
     expect(parseAgentModel("")).toEqual({ models: {}, warnings: [] });
+  });
+});
+
+describe("execution mode config", () => {
+  test("executionMode reads .sddx/config.json only — config > default human", () => {
+    const cwd = fixtureRepo();
+    expect(executionMode(cwd)).toBe("human");
+    withConfig(cwd, { execution_mode: "auto" });
+    expect(executionMode(cwd)).toBe("auto");
+  });
+
+  test("SECURITY: the environment cannot switch the mode", () => {
+    // An inline `SDDX_EXECUTION_MODE=auto sddx …` is part of the command line the
+    // agent composes, so honoring it would let the thing the gate constrains
+    // switch the gate off. Config — a committed file a human edits — is the only
+    // trusted source. Same for the ceiling: raising it buys blast radius.
+    const cwd = fixtureRepo();
+    withConfig(cwd, { execution_mode: "human", auto_max_tasks: 2 });
+    process.env.SDDX_EXECUTION_MODE = "auto";
+    process.env.SDDX_AUTO_MAX_TASKS = "999";
+    try {
+      expect(executionMode(cwd)).toBe("human");
+      expect(autoMaxTasks(cwd)).toBe(2);
+      expect(gateExecutionMode(cwd)).toBe("human");
+    } finally {
+      delete process.env.SDDX_EXECUTION_MODE;
+      delete process.env.SDDX_AUTO_MAX_TASKS;
+    }
+  });
+
+  test("an unrecognized mode resolves to human, never auto", () => {
+    const cwd = fixtureRepo();
+    withConfig(cwd, { execution_mode: "yolo" });
+    expect(executionMode(cwd)).toBe("human");
+  });
+
+  test("an absent value never yields auto", () => {
+    const cwd = fixtureRepo();
+    expect(executionMode(cwd)).toBe("human");
+    withConfig(cwd, {});
+    expect(executionMode(cwd)).toBe("human");
+  });
+
+  test("an unrecognized mode is reported by config validation", () => {
+    expect(validateConfigObject({ execution_mode: "yolo" }).join("\n")).toContain("execution_mode");
+    expect(validateConfigObject({ execution_mode: "auto" })).toHaveLength(0);
+    expect(validateConfigObject({ execution_mode: "human" })).toHaveLength(0);
+  });
+
+  test("autoMaxTasks: config > default, positive integers only", () => {
+    const cwd = fixtureRepo();
+    expect(autoMaxTasks(cwd)).toBe(6);
+    withConfig(cwd, { auto_max_tasks: 3 });
+    expect(autoMaxTasks(cwd)).toBe(3);
+    // out-of-domain values fall through rather than throwing
+    withConfig(cwd, { auto_max_tasks: 0 });
+    expect(autoMaxTasks(cwd)).toBe(6);
+    withConfig(cwd, { auto_max_tasks: -2 });
+    expect(autoMaxTasks(cwd)).toBe(6);
+  });
+
+  test("auto_max_tasks domain reported by config validation", () => {
+    expect(validateConfigObject({ auto_max_tasks: 0 }).join("\n")).toContain("auto_max_tasks");
+    expect(validateConfigObject({ auto_max_tasks: -1 }).join("\n")).toContain("auto_max_tasks");
+    expect(validateConfigObject({ auto_max_tasks: 4 })).toHaveLength(0);
+  });
+
+  test("both keys appear fully resolved in resolveConfig", () => {
+    const cwd = fixtureRepo();
+    expect(resolveConfig(cwd, {}).execution_mode).toBe("human");
+    expect(resolveConfig(cwd, {}).auto_max_tasks).toBe(6);
+    // config show must display what the gate actually uses
+    withConfig(cwd, { execution_mode: "human" });
+    expect(resolveConfig(cwd, { SDDX_EXECUTION_MODE: "auto" }).execution_mode).toBe("human");
+    withConfig(cwd, { execution_mode: "auto", auto_max_tasks: 2 });
+    expect(resolveConfig(cwd, {}).execution_mode).toBe("auto");
+    expect(resolveConfig(cwd, {}).auto_max_tasks).toBe(2);
   });
 });

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { createWorktree, resolveBaseRef, sweep } from "../src/lib/worktree";
 import { fixtureClone } from "./fixtures";
@@ -85,7 +85,9 @@ test("sweep skips worktrees without readable task state and ignores foreign work
 
   const res = sweep(clone);
   expect(res.removed).toEqual([]);
-  expect(res.skipped).toEqual([{ path: orphan, reason: "no readable task state" }]);
+  expect(res.skipped.map((s) => ({ ...s, path: realpathSync(s.path) }))).toEqual([
+    { path: realpathSync(orphan), reason: "no readable task state" },
+  ]);
   expect(existsSync(orphan)).toBe(true);
   expect(existsSync(join(clone, "..", "foreign"))).toBe(true);
 });

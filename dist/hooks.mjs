@@ -7223,6 +7223,12 @@ var TRANSITIONS = {
   DONE: [],
   ABANDONED: []
 };
+var isDeferred = (t) => {
+  const w = t.workspace;
+  if (!w || typeof w !== "object")
+    return false;
+  return w.mode === "deferred" || typeof w.base_sha === "string" && w.base_sha.startsWith("pending:");
+};
 var DEFAULT_RETRY = { max_attempts: 1, workspace: "fresh" };
 function dependsOnList(t) {
   const d = t.depends_on;
@@ -7491,6 +7497,76 @@ function commit(cwd, message) {
   return headSha(cwd);
 }
 
+// src/lib/glob-overlap.ts
+function segments(glob) {
+  return glob.replace(/\\/g, "/").replace(/^(\.\/)+/, "").split("/").filter((s) => s !== "");
+}
+function segmentsOverlap(a, b) {
+  const memo = new Map;
+  const go = (i, j) => {
+    const key = i * (b.length + 1) + j;
+    const cached = memo.get(key);
+    if (cached !== undefined)
+      return cached;
+    let res;
+    if (i === a.length && j === b.length)
+      res = true;
+    else if (i < a.length && a[i] === "*")
+      res = go(i + 1, j) || j < b.length && go(i, j + 1);
+    else if (j < b.length && b[j] === "*")
+      res = go(i, j + 1) || i < a.length && go(i + 1, j);
+    else if (i === a.length || j === b.length)
+      res = false;
+    else {
+      const ca = a[i];
+      const cb = b[j];
+      res = ca === "?" || cb === "?" || ca === cb ? go(i + 1, j + 1) : false;
+    }
+    memo.set(key, res);
+    return res;
+  };
+  return go(0, 0);
+}
+function listsOverlap(a, b) {
+  const memo = new Map;
+  const go = (i, j) => {
+    const key = i * (b.length + 1) + j;
+    const cached = memo.get(key);
+    if (cached !== undefined)
+      return cached;
+    let res;
+    if (i === a.length && j === b.length)
+      res = true;
+    else if (i < a.length && a[i] === "**")
+      res = go(i + 1, j) || j < b.length && go(i, j + 1);
+    else if (j < b.length && b[j] === "**")
+      res = go(i, j + 1) || i < a.length && go(i + 1, j);
+    else if (i === a.length || j === b.length)
+      res = false;
+    else
+      res = segmentsOverlap(a[i], b[j]) && go(i + 1, j + 1);
+    memo.set(key, res);
+    return res;
+  };
+  return go(0, 0);
+}
+function overlaps(a, b) {
+  return listsOverlap(segments(a), segments(b));
+}
+function scopesOverlap(a, b) {
+  if (a.length === 0 && b.length === 0)
+    return false;
+  if (a.length === 0 || b.length === 0)
+    return true;
+  for (const ga of a) {
+    for (const gb of b) {
+      if (overlaps(ga, gb))
+        return true;
+    }
+  }
+  return false;
+}
+
 // src/lib/worktree.ts
 var worktreesDir = (cwd) => join3(cwd, ".sddx-worktrees");
 function tryRev(cwd, ref) {
@@ -7524,7 +7600,17 @@ var gitCommonDir = (cwd) => {
   const dir = git(cwd, "rev-parse", "--git-common-dir");
   return isAbsolute(dir) ? dir : join3(cwd, dir);
 };
-var resolveMainRepoRoot = (cwd) => dirname(gitCommonDir(cwd));
+function resolveMainRepoRoot(cwd) {
+  const r = spawnSync3("git", ["worktree", "list", "--porcelain"], { cwd, encoding: "utf8" });
+  const first = (r.stdout ?? "").split(`
+`).find((l) => l.startsWith("worktree "));
+  if (r.status === 0 && first)
+    return first.slice("worktree ".length).trim();
+  const top = spawnSync3("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8" });
+  if (top.status === 0 && (top.stdout ?? "").trim())
+    return (top.stdout ?? "").trim();
+  return dirname(gitCommonDir(cwd));
+}
 var EXCLUDE_LINE = ".sddx-worktrees/";
 function ensureExcluded(cwd) {
   const infoDir = join3(gitCommonDir(cwd), "info");
@@ -7541,18 +7627,20 @@ function ensureExcluded(cwd) {
 `);
 }
 function worktreeAvailable(cwd) {
-  const r = spawnSync3("git", ["worktree", "list"], { cwd });
-  if (r.status !== 0)
+  let root;
+  try {
+    root = resolveMainRepoRoot(cwd);
+  } catch {
     return false;
-  const gitDir = git(cwd, "rev-parse", "--git-dir");
-  const common = git(cwd, "rev-parse", "--git-common-dir");
-  return gitDir === common;
+  }
+  return spawnSync3("git", ["worktree", "list"], { cwd: root }).status === 0;
 }
 function createWorktree(cwd, id, baseSha) {
-  ensureExcluded(cwd);
-  mkdirSync2(worktreesDir(cwd), { recursive: true });
-  const path = join3(worktreesDir(cwd), id);
-  git(cwd, "worktree", "add", "-q", path, "-b", `sddx/${id}`, baseSha);
+  const root = resolveMainRepoRoot(cwd);
+  ensureExcluded(root);
+  mkdirSync2(worktreesDir(root), { recursive: true });
+  const path = join3(worktreesDir(root), id);
+  git(root, "worktree", "add", "-q", path, "-b", `sddx/${id}`, baseSha);
   return path;
 }
 function mergeParentsSequential(worktreePath, remaining) {
@@ -7601,7 +7689,8 @@ function materializeDependent(cwd, taskId2) {
   }
   const forkSha = parentShas[0];
   const rest = parentShas.slice(1);
-  if (task.workspace.mode === "branch") {
+  const targetMode = task.workspace.materialize_as ?? task.workspace.mode;
+  if (targetMode === "branch") {
     git(cwd, "branch", `sddx/${taskId2}`, forkSha);
     let finalSha2 = forkSha;
     if (rest.length > 0) {
@@ -7684,7 +7773,7 @@ var allKnownTaskIds = (cwd) => {
     ids.add(id);
   return [...ids];
 };
-var isMaterialized = (t) => !t.workspace.base_sha.startsWith("pending:");
+var isMaterialized = (t) => !isDeferred(t);
 function rematerializeStaleDependents(cwd, retriedTaskId) {
   const rebuilt = [];
   for (const id of allKnownTaskIds(cwd)) {
@@ -7709,7 +7798,8 @@ function rematerializeStaleDependents(cwd, retriedTaskId) {
     if (branchExists(cwd, staleBranch))
       forceDeleteBranch(cwd, staleBranch);
     t.workspace = {
-      mode: t.workspace.mode,
+      mode: "deferred",
+      materialize_as: t.workspace.mode === "branch" ? "branch" : "worktree",
       branch: null,
       base_sha: `pending:${dependsOnList(t).join(",")}`
     };
@@ -7761,6 +7851,39 @@ function listSddxWorktrees(cwd) {
 function hasSubmodules(cwd, baseSha) {
   const r = spawnSync3("git", ["cat-file", "-e", `${baseSha}:.gitmodules`], { cwd });
   return r.status === 0;
+}
+function submodulePaths(cwd, baseSha) {
+  const r = spawnSync3("git", ["show", `${baseSha}:.gitmodules`], { cwd, encoding: "utf8" });
+  if (r.status !== 0 || typeof r.stdout !== "string")
+    return [];
+  const paths = [];
+  for (const line of r.stdout.split(`
+`)) {
+    const m = /^\s*path\s*=\s*(.+?)\s*$/.exec(line);
+    if (m?.[1])
+      paths.push(m[1].replace(/\\/g, "/").replace(/\/+$/, ""));
+  }
+  return paths;
+}
+function submoduleScopeConflicts(cwd, baseSha, nodes) {
+  const submodules = submodulePaths(cwd, baseSha);
+  if (submodules.length === 0)
+    return [];
+  const conflicts = [];
+  for (const node of nodes) {
+    if (node.scope.length === 0) {
+      conflicts.push({ alias: node.alias, submodule: submodules[0] });
+      continue;
+    }
+    for (const sub of submodules) {
+      const hit = node.scope.find((s) => scopesOverlap([s], [`${sub}/**`]) || s === sub);
+      if (hit) {
+        conflicts.push({ alias: node.alias, submodule: sub, scope: hit });
+        break;
+      }
+    }
+  }
+  return conflicts;
 }
 var LOCK_STALE_MS = 10 * 60000;
 function acquireLock(lockPath, now) {
@@ -8037,7 +8160,7 @@ function computeBoard(cwd) {
 
 // src/lib/approvalgate.ts
 import { existsSync as existsSync8, readFileSync as readFileSync8 } from "node:fs";
-import { dirname as dirname3, isAbsolute as isAbsolute2, join as join9, resolve as resolve2 } from "node:path";
+import { dirname as dirname3, isAbsolute as isAbsolute3, join as join9, resolve as resolve2 } from "node:path";
 
 // src/lib/approval.ts
 import { existsSync as existsSync7, mkdirSync as mkdirSync6, readdirSync as readdirSync5, readFileSync as readFileSync7, writeFileSync as writeFileSync7 } from "node:fs";
@@ -8088,76 +8211,6 @@ var $parseDocument = publicApi.parseDocument;
 var $stringify = publicApi.stringify;
 var $visit = visit.visit;
 var $visitAsync = visit.visitAsync;
-
-// src/lib/glob-overlap.ts
-function segments(glob) {
-  return glob.replace(/\\/g, "/").replace(/^(\.\/)+/, "").split("/").filter((s) => s !== "");
-}
-function segmentsOverlap(a, b) {
-  const memo = new Map;
-  const go = (i, j) => {
-    const key = i * (b.length + 1) + j;
-    const cached = memo.get(key);
-    if (cached !== undefined)
-      return cached;
-    let res;
-    if (i === a.length && j === b.length)
-      res = true;
-    else if (i < a.length && a[i] === "*")
-      res = go(i + 1, j) || j < b.length && go(i, j + 1);
-    else if (j < b.length && b[j] === "*")
-      res = go(i, j + 1) || i < a.length && go(i + 1, j);
-    else if (i === a.length || j === b.length)
-      res = false;
-    else {
-      const ca = a[i];
-      const cb = b[j];
-      res = ca === "?" || cb === "?" || ca === cb ? go(i + 1, j + 1) : false;
-    }
-    memo.set(key, res);
-    return res;
-  };
-  return go(0, 0);
-}
-function listsOverlap(a, b) {
-  const memo = new Map;
-  const go = (i, j) => {
-    const key = i * (b.length + 1) + j;
-    const cached = memo.get(key);
-    if (cached !== undefined)
-      return cached;
-    let res;
-    if (i === a.length && j === b.length)
-      res = true;
-    else if (i < a.length && a[i] === "**")
-      res = go(i + 1, j) || j < b.length && go(i, j + 1);
-    else if (j < b.length && b[j] === "**")
-      res = go(i, j + 1) || i < a.length && go(i + 1, j);
-    else if (i === a.length || j === b.length)
-      res = false;
-    else
-      res = segmentsOverlap(a[i], b[j]) && go(i + 1, j + 1);
-    memo.set(key, res);
-    return res;
-  };
-  return go(0, 0);
-}
-function overlaps(a, b) {
-  return listsOverlap(segments(a), segments(b));
-}
-function scopesOverlap(a, b) {
-  if (a.length === 0 && b.length === 0)
-    return false;
-  if (a.length === 0 || b.length === 0)
-    return true;
-  for (const ga of a) {
-    for (const gb of b) {
-      if (overlaps(ga, gb))
-        return true;
-    }
-  }
-  return false;
-}
 
 // src/lib/graph.ts
 var ALIAS_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -8296,7 +8349,7 @@ function validateSchedule(nodes) {
 var dedupe = (xs) => [...new Set(xs)];
 
 // src/lib/receipt.ts
-import { spawnSync as spawnSync4 } from "node:child_process";
+import { spawnSync as spawnSync5 } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -8309,10 +8362,56 @@ import {
 import { join as join6 } from "node:path";
 
 // src/lib/goal.ts
+import { spawnSync as spawnSync4 } from "node:child_process";
 import { existsSync as existsSync5, mkdirSync as mkdirSync4, readdirSync as readdirSync3, readFileSync as readFileSync5, writeFileSync as writeFileSync4 } from "node:fs";
-import { join as join5 } from "node:path";
+import { isAbsolute as isAbsolute2, join as join5 } from "node:path";
 var goalsDir = (cwd) => join5(sddxDir(cwd), "goals");
 var goalPath = (cwd, id) => join5(goalsDir(cwd), `${id}.json`);
+var goalRef = (id) => `refs/sddx/goals/${id}`;
+var sh = (cwd, args, env) => spawnSync4("git", args, { cwd, encoding: "utf8", env: { ...process.env, ...env } });
+function mainRoot(cwd) {
+  const r = sh(cwd, ["rev-parse", "--git-common-dir"]);
+  if (r.status !== 0)
+    return cwd;
+  const dir = (r.stdout ?? "").trim();
+  const abs = isAbsolute2(dir) ? dir : join5(cwd, dir);
+  return abs.replace(/\/\.git\/?$/, "").replace(/\/\.git$/, "") || cwd;
+}
+function writeGoalBlob(root, id, content, expected) {
+  const blob = spawnSync4("git", ["hash-object", "-w", "--stdin"], {
+    cwd: root,
+    input: content,
+    encoding: "utf8"
+  });
+  if (blob.status !== 0)
+    throw new Error(`git hash-object failed: ${blob.stderr}`);
+  const blobSha = (blob.stdout ?? "").trim();
+  const ref = goalRef(id);
+  const cas = expected ? sh(root, ["update-ref", ref, blobSha, expected]) : sh(root, ["update-ref", ref, blobSha, ""]);
+  if (cas.status !== 0) {
+    throw new Error(`goal ${id} was modified concurrently — re-read it and reapply the change ` + `(${(cas.stderr ?? "").trim()})`);
+  }
+}
+var isGitRepo = (root) => sh(root, ["rev-parse", "--git-dir"]).status === 0;
+function goalBlobSha(root, id) {
+  const r = sh(root, ["rev-parse", "--verify", "--quiet", goalRef(id)]);
+  return r.status === 0 ? (r.stdout ?? "").trim() : null;
+}
+function pushGoalRef(cwd, id) {
+  const root = mainRoot(cwd);
+  const ref = goalRef(id);
+  return sh(root, ["push", "origin", `${ref}:${ref}`]).status === 0;
+}
+function readGoalFromBranch(root, id) {
+  const r = sh(root, ["cat-file", "-p", goalRef(id)]);
+  if (r.status !== 0)
+    return null;
+  try {
+    return JSON.parse(r.stdout ?? "");
+  } catch {
+    return null;
+  }
+}
 var goalId = (sentence, date = new Date) => taskId(sentence, date);
 var runBranchName = (id) => `sddx/run-${id}`;
 function createGoal(cwd, goalSentence, taskIds, opts) {
@@ -8321,9 +8420,13 @@ function createGoal(cwd, goalSentence, taskIds, opts) {
   }
   const now = new Date().toISOString();
   const id = opts.id ?? goalId(goalSentence);
-  const path = goalPath(cwd, id);
+  const root = mainRoot(cwd);
+  const path = goalPath(root, id);
   if (existsSync5(path))
     throw new Error(`goal ${id} already exists at ${path}`);
+  if (goalBlobSha(root, id) !== null) {
+    throw new Error(`goal ${id} already exists at ${goalRef(id)}`);
+  }
   for (const tid of taskIds) {
     if (!resolveTaskState(cwd, tid)) {
       throw new Error(`task ${tid} does not exist — cannot register it in a goal`);
@@ -8341,40 +8444,64 @@ function createGoal(cwd, goalSentence, taskIds, opts) {
     created_at: now,
     updated_at: now
   };
-  mkdirSync4(goalsDir(cwd), { recursive: true });
-  writeFileSync4(path, `${JSON.stringify(g, null, 2)}
+  if (isGitRepo(root)) {
+    writeGoalBlob(root, id, `${JSON.stringify(g, null, 2)}
+`, null);
+  } else {
+    mkdirSync4(goalsDir(root), { recursive: true });
+    writeFileSync4(path, `${JSON.stringify(g, null, 2)}
 `);
+  }
   return g;
 }
 function readGoal(cwd, id) {
-  const path = goalPath(cwd, id);
-  if (!existsSync5(path))
-    throw new Error(`no such goal: ${id} (${path})`);
-  const g = JSON.parse(readFileSync5(path, "utf8"));
+  const root = mainRoot(cwd);
+  const path = goalPath(root, id);
+  const g = readGoalFromBranch(root, id) ?? (existsSync5(path) ? JSON.parse(readFileSync5(path, "utf8")) : null);
+  if (!g)
+    throw new Error(`no such goal: ${id} (${goalRef(id)} or ${path})`);
   if (typeof g.run_branch !== "string" || typeof g.base_sha !== "string" || !g.merges) {
     throw new Error(`goal ${id} (${path}) is missing run_branch/base_sha/merges — written by an ` + "incompatible sddx version; recreate it with the current graph/goal create");
   }
   return g;
 }
 function writeGoal(cwd, g) {
+  const root = mainRoot(cwd);
   g.updated_at = new Date().toISOString();
-  writeFileSync4(goalPath(cwd, g.id), `${JSON.stringify(g, null, 2)}
-`);
+  const content = `${JSON.stringify(g, null, 2)}
+`;
+  const current = goalBlobSha(root, g.id);
+  if (current === null) {
+    const legacy = goalPath(root, g.id);
+    if (existsSync5(legacy)) {
+      writeFileSync4(legacy, content);
+      return;
+    }
+    throw new Error(`no such goal: ${g.id} (${goalRef(g.id)})`);
+  }
+  writeGoalBlob(root, g.id, content, current);
 }
 function findGoalForTask(cwd, id) {
-  const dir = goalsDir(cwd);
-  if (!existsSync5(dir))
-    return null;
-  for (const f of readdirSync3(dir)) {
-    if (!f.endsWith(".json"))
-      continue;
-    let g;
-    try {
-      g = JSON.parse(readFileSync5(join5(dir, f), "utf8"));
-    } catch {
-      continue;
+  const root = mainRoot(cwd);
+  const dir = goalsDir(root);
+  if (existsSync5(dir)) {
+    for (const f of readdirSync3(dir)) {
+      if (!f.endsWith(".json"))
+        continue;
+      try {
+        const g = JSON.parse(readFileSync5(join5(dir, f), "utf8"));
+        if (g.task_ids.includes(id))
+          return g;
+      } catch {}
     }
-    if (g.task_ids.includes(id))
+  }
+  const refs = sh(root, ["for-each-ref", "--format=%(refname)", "refs/sddx/goals/"]);
+  for (const ref of (refs.stdout ?? "").split(`
+`).map((s) => s.trim())) {
+    if (!ref.startsWith("refs/sddx/goals/"))
+      continue;
+    const g = readGoalFromBranch(root, ref.slice("refs/sddx/goals/".length));
+    if (g?.task_ids.includes(id))
       return g;
   }
   return null;
@@ -8492,7 +8619,7 @@ function readReceiptRawFrom(dir, id) {
   }
 }
 function readReceiptRawFromRef(cwd, ref, id) {
-  const r = spawnSync4("git", ["show", `${ref}:.sddx/receipts/${id}.json`], { cwd });
+  const r = spawnSync5("git", ["show", `${ref}:.sddx/receipts/${id}.json`], { cwd });
   return r.status === 0 ? r.stdout : null;
 }
 function resolveReceiptRaw(cwd, id) {
@@ -8539,7 +8666,7 @@ function verifyChain(cwd) {
 }
 
 // src/lib/sign.ts
-import { spawnSync as spawnSync5 } from "node:child_process";
+import { spawnSync as spawnSync6 } from "node:child_process";
 import { mkdtempSync, rmSync as rmSync2, writeFileSync as writeFileSync6 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join as join7 } from "node:path";
@@ -8550,7 +8677,7 @@ function gitConfig(cwd, key) {
   const cached = gitConfigCache.get(cacheKey);
   if (cached !== undefined)
     return cached;
-  const r = spawnSync5("git", ["config", "--get", key], { cwd, encoding: "utf8" });
+  const r = spawnSync6("git", ["config", "--get", key], { cwd, encoding: "utf8" });
   const v = r.status === 0 ? (r.stdout ?? "").trim() : "";
   const result = v === "" ? null : v;
   gitConfigCache.set(cacheKey, result);
@@ -8566,7 +8693,7 @@ function signPayload(cwd, payload, namespace = DEFAULT_NAMESPACE) {
   const signer = gitConfig(cwd, "user.email");
   if (!signer)
     return null;
-  const r = spawnSync5("ssh-keygen", ["-Y", "sign", "-n", namespace, "-f", expandHome(key)], {
+  const r = spawnSync6("ssh-keygen", ["-Y", "sign", "-n", namespace, "-f", expandHome(key)], {
     cwd,
     input: payload,
     encoding: "utf8"
@@ -8585,7 +8712,7 @@ function verifySignature(cwd, payload, sig, namespace = DEFAULT_NAMESPACE) {
     const sigFile = join7(tmp, "receipt.sig");
     writeFileSync6(sigFile, `${sig.signature}
 `);
-    const r = spawnSync5("ssh-keygen", ["-Y", "verify", "-f", expandHome(allowed), "-I", sig.signer, "-n", namespace, "-s", sigFile], { cwd, input: payload, encoding: "utf8" });
+    const r = spawnSync6("ssh-keygen", ["-Y", "verify", "-f", expandHome(allowed), "-I", sig.signer, "-n", namespace, "-s", sigFile], { cwd, input: payload, encoding: "utf8" });
     return r.status === 0 ? "valid" : "invalid";
   } finally {
     rmSync2(tmp, { recursive: true, force: true });
@@ -8681,20 +8808,19 @@ var SENSITIVE_SEGMENTS = [
   "credentials",
   "billing"
 ];
-var SENSITIVE_GLOBS = [
-  "infra/**",
-  "terraform/**",
-  "k8s/**",
-  "Dockerfile*",
-  ".env*"
-];
+var SENSITIVE_GLOBS = ["infra/**", "terraform/**", "k8s/**"];
+var SENSITIVE_FILENAMES = [/^Dockerfile/i, /^\.env/i, /^docker-compose/i];
 function namesSensitiveArea(scope) {
   for (const glob of scope) {
-    for (const seg of glob.replace(/\\/g, "/").split("/")) {
+    const segments2 = glob.replace(/\\/g, "/").split("/");
+    for (const seg of segments2) {
       const s = seg.toLowerCase();
       if (SENSITIVE_SEGMENTS.includes(s))
         return s;
     }
+    const last = segments2[segments2.length - 1] ?? "";
+    if (!/^[*?]+$/.test(last) && SENSITIVE_FILENAMES.some((re) => re.test(last)))
+      return last;
   }
   return;
 }
@@ -9072,7 +9198,7 @@ function approvalGate(event) {
     const tokens = allSegments(command).find(owns) ?? [];
     const graphArg = tokenValue(tokens, "--graph");
     if (action === "approve") {
-      const plan = graphArg ? planHash(isAbsolute2(graphArg) ? graphArg : join9(cwd, graphArg)) : null;
+      const plan = graphArg ? planHash(isAbsolute3(graphArg) ? graphArg : join9(cwd, graphArg)) : null;
       return ask([
         `sddx: this records YOUR approval of plan ${plan?.hash ? plan.hash.slice(0, 12) : "(unreadable)"}.`,
         "Approve only if you have reviewed it:",
@@ -9083,7 +9209,7 @@ function approvalGate(event) {
     if (!graphArg) {
       return ask("sddx: plan creation without a --graph argument — cannot verify what would run");
     }
-    const graphPath = isAbsolute2(graphArg) ? graphArg : join9(cwd, graphArg);
+    const graphPath = isAbsolute3(graphArg) ? graphArg : join9(cwd, graphArg);
     const nodes = readNodes(graphPath);
     if (!nodes) {
       return ask(`sddx: plan at ${graphArg} could not be read — approval cannot be verified`);
@@ -9188,7 +9314,7 @@ function resolveTask(startPath) {
     } catch (e) {
       return { kind: "corrupt", root, path, error: e.message };
     }
-    if (!isTerminal(task.phase))
+    if (!isTerminal(task.phase) && !isDeferred(task))
       candidates.push(task);
   }
   if (candidates.length === 0)

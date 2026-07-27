@@ -255,26 +255,30 @@ export const SENSITIVE_SEGMENTS = [
   "billing",
 ] as const;
 
-/** Root-anchored protected locations, matched by ordinary scope overlap. These
- * are files and top-level directories rather than nameable areas, so the
- * segment rule above cannot express them. */
-export const SENSITIVE_GLOBS = [
-  "infra/**",
-  "terraform/**",
-  "k8s/**",
-  "Dockerfile*",
-  ".env*",
-] as const;
+/** Root-anchored protected locations, matched by ordinary scope overlap. */
+export const SENSITIVE_GLOBS = ["infra/**", "terraform/**", "k8s/**"] as const;
+
+/** Protected FILE names, matched against a scope's last literal segment at any
+ * depth. Listing these as root-anchored globs meant `services/api/Dockerfile`
+ * and `services/api/.env.production` sailed past the bound while the identical
+ * change at the repo root was refused — and making them any-depth globs is the
+ * wildcard blowup SENSITIVE_SEGMENTS exists to avoid. */
+export const SENSITIVE_FILENAMES = [/^Dockerfile/i, /^\.env/i, /^docker-compose/i] as const;
 
 /** Does this scope glob name a protected area at any depth? Compares literal
  * segments only — a wildcard segment names nothing, which is what keeps
  * `src/**` out of this and `src/auth/**` in it. */
 export function namesSensitiveArea(scope: string[]): string | undefined {
   for (const glob of scope) {
-    for (const seg of glob.replace(/\\/g, "/").split("/")) {
+    const segments = glob.replace(/\\/g, "/").split("/");
+    for (const seg of segments) {
       const s = seg.toLowerCase();
       if ((SENSITIVE_SEGMENTS as readonly string[]).includes(s)) return s;
     }
+    // The last segment names a file. Wildcard-only segments (`**`, `*`) name
+    // nothing, which is what keeps `src/**` out of this.
+    const last = segments[segments.length - 1] ?? "";
+    if (!/^[*?]+$/.test(last) && SENSITIVE_FILENAMES.some((re) => re.test(last))) return last;
   }
   return undefined;
 }

@@ -19,16 +19,50 @@ export const TRANSITIONS: Record<Phase, Phase[]> = {
 };
 
 export interface Workspace {
-  mode: "worktree" | "branch" | "none";
+  /**
+   * `deferred` means the task has no workspace YET — a dependent whose parents
+   * are not all DONE. It is a distinct mode rather than an inference from
+   * `base_sha` because the inference was load-bearing and invisible: a deferred
+   * task's state lives in the main checkout (it has nowhere else to go), and
+   * anything scanning for "the active task here" counted it, so a single
+   * deferred dependent claimed the user's own checkout and blocked their edits.
+   */
+  mode: "worktree" | "branch" | "none" | "deferred";
   branch: string | null;
-  /** Fork point once resolved. For a dependent task not yet materialized this is
-   * `pending:<parent-id>` — the real SHA is filled in when its worktree is created
-   * from the parent's DONE commit (see materializeDependent in worktree.ts). */
+  /** Fork point once resolved. While deferred this is `pending:<parent-id>[,...]`,
+   * which names the parents; the real SHA replaces it when the workspace is built
+   * from their DONE commits (see materializeDependent in worktree.ts). */
   base_sha: string;
-  /** Worktree path relative to the main repo root; absent for branch/none, or for a
-   * dependent task whose worktree has not been materialized yet. */
+  /** What `mode` becomes on materialization. Set only while deferred. */
+  materialize_as?: "worktree" | "branch";
+  /** Worktree path relative to the main repo root; absent for branch/none/deferred,
+   * or for a dependent task whose worktree has not been materialized yet. */
   path?: string;
 }
+
+/**
+ * Has this task no workspace yet?
+ *
+ * Reads the typed mode first, then falls back to the `pending:` base that older
+ * state used. The fallback is not optional: a repository upgraded mid-run has
+ * deferred tasks on disk written under the previous shape, and reading those as
+ * active would reintroduce the checkout block on exactly the users who already
+ * had a run going.
+ */
+export const isDeferred = (t: TaskState): boolean => {
+  // Defensive on purpose. This runs on the PreToolUse hot path via
+  // `resolveTask`, OUTSIDE the try/catch that turns unreadable state into
+  // `{kind: "corrupt"}`. A task file that parses as JSON but has no
+  // `workspace` — written by an older sddx, or hand-edited — would throw from
+  // here, the hook would catch it and emit a message with no permission
+  // decision, and the TDD gate would silently stop denying. A broken state
+  // file must not disable the gate.
+  const w = t.workspace as Workspace | undefined;
+  if (!w || typeof w !== "object") return false;
+  return (
+    w.mode === "deferred" || (typeof w.base_sha === "string" && w.base_sha.startsWith("pending:"))
+  );
+};
 
 export type DependencyFailurePolicy = "skip" | "block";
 

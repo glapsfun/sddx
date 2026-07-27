@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { decideGate, SELF_MODIFYING_GLOBS } from "../src/lib/approval";
 import { scopesOverlap } from "../src/lib/glob-overlap";
 import { fixtureClone, fixtureRepo } from "./fixtures";
-import { repoRoot } from "./helpers";
+import { goalIds, repoRoot } from "./helpers";
 
 const CLI_SRC = join(repoRoot, "src/cli.ts");
 function cli(cwd: string, env: NodeJS.ProcessEnv, ...args: string[]) {
@@ -58,7 +58,7 @@ function planRepo(
 function created(cwd: string) {
   const dir = (p: string) => (existsSync(join(cwd, p)) ? readdirSync(join(cwd, p)) : []);
   const branches = spawnSync("git", ["branch", "--list", "sddx/*"], { cwd, encoding: "utf8" });
-  return { goals: dir(join(".sddx", "goals")), branches: (branches.stdout ?? "").trim() };
+  return { goals: goalIds(cwd), branches: (branches.stdout ?? "").trim() };
 }
 
 describe("auto mode refuses a manual oracle", () => {

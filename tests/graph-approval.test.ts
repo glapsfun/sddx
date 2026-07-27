@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { approvalPath, planHash } from "../src/lib/approval";
 import { fixtureClone, fixtureRepo } from "./fixtures";
-import { repoRoot } from "./helpers";
+import { goalIds, readGoalAnywhere, repoRoot } from "./helpers";
 
 const CLI_SRC = join(repoRoot, "src/cli.ts");
 
@@ -47,7 +47,7 @@ function created(cwd: string) {
   const branches = spawnSync("git", ["branch", "--list", "sddx/*"], { cwd, encoding: "utf8" });
   return {
     tasks: dir(join(".sddx", "tasks")),
-    goals: dir(join(".sddx", "goals")),
+    goals: goalIds(cwd),
     specs: dir(join(".sddx", "specs")),
     branches: (branches.stdout ?? "").trim(),
   };

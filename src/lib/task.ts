@@ -49,8 +49,20 @@ export interface Workspace {
  * active would reintroduce the checkout block on exactly the users who already
  * had a run going.
  */
-export const isDeferred = (t: TaskState): boolean =>
-  t.workspace.mode === "deferred" || t.workspace.base_sha.startsWith("pending:");
+export const isDeferred = (t: TaskState): boolean => {
+  // Defensive on purpose. This runs on the PreToolUse hot path via
+  // `resolveTask`, OUTSIDE the try/catch that turns unreadable state into
+  // `{kind: "corrupt"}`. A task file that parses as JSON but has no
+  // `workspace` — written by an older sddx, or hand-edited — would throw from
+  // here, the hook would catch it and emit a message with no permission
+  // decision, and the TDD gate would silently stop denying. A broken state
+  // file must not disable the gate.
+  const w = t.workspace as Workspace | undefined;
+  if (!w || typeof w !== "object") return false;
+  return (
+    w.mode === "deferred" || (typeof w.base_sha === "string" && w.base_sha.startsWith("pending:"))
+  );
+};
 
 export type DependencyFailurePolicy = "skip" | "block";
 

@@ -1,4 +1,4 @@
-// The goal record lives on its run branch.
+// The goal record lives in its own ref, `refs/sddx/goals/<id>`.
 //
 // It holds `merges`, declared the single source of truth for integration state
 // — yet as uncommitted local state in the main checkout it was the one run
@@ -6,10 +6,10 @@
 // pushed, and vanished if `.sddx/` was cleaned, while the receipts it gives
 // context to survived. That contradicts "state is files in git".
 //
-// The older reasoning against committing it — that it would bind the record to
-// whatever branch happened to be checked out — predates run branches. This one
-// is sddx-owned, created before any task workspace, and lives exactly as long
-// as the goal does.
+// A ref rather than a file in the run branch's tree, because a tree path
+// travels with the branch and both directions of that were wrong: merging the
+// run branch landed a frozen snapshot on the default branch that shadowed the
+// live record forever, and deleting the merged branch destroyed it outright.
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
@@ -81,12 +81,22 @@ describe("the merge log is durable", () => {
     complete(cwd, ids[0] as string, "part0");
 
     expect(g(cwd, "push", "-q", "origin", `sddx/run-${goalId}`).status).toBe(0);
+    // the record is not in the branch's tree, so it needs its own push — the
+    // same one `sddx pr create` performs
+    expect(
+      g(cwd, "push", "-q", "origin", `refs/sddx/goals/${goalId}:refs/sddx/goals/${goalId}`).status,
+    ).toBe(0);
     const second = join(cwd, "..", `second-${goalId}`);
     expect(g(cwd, "clone", "-q", join(cwd, "..", "origin.git"), second).status).toBe(0);
     expect(g(second, "checkout", "-q", `sddx/run-${goalId}`).status).toBe(0);
 
-    // read straight out of the fresh clone — no .sddx/goals/ was ever copied
-    expect(existsSync(join(second, ".sddx", "goals", `${goalId}.json`))).toBe(true);
+    // the fresh clone needs the ref fetched; a clone does not take custom refs
+    expect(
+      g(second, "fetch", "-q", "origin", `refs/sddx/goals/${goalId}:refs/sddx/goals/${goalId}`)
+        .status,
+    ).toBe(0);
+    // and nothing loose was ever copied — the record is object-store content
+    expect(existsSync(join(second, ".sddx", "goals", `${goalId}.json`))).toBe(false);
     const goal = readGoal(second, goalId);
     expect(goal.id).toBe(goalId);
     expect(goal.merges).toHaveLength(1);
@@ -122,29 +132,49 @@ describe("the merge log is durable", () => {
 });
 
 describe("legacy loose goal records", () => {
-  test("a record in the main checkout still reads, reports, and updates in place", () => {
+  test("a loose record is used only when no ref exists, and stays loose when written", () => {
     const { clone: cwd } = fixtureClone();
     const rel = plan(cwd, 1);
     const { goalId } = create(cwd, rel);
 
-    // Simulate a goal written before records moved: copy it loose and drop it
-    // from the branch's future reads by writing the legacy location.
-    const onBranch = readGoal(cwd, goalId);
+    // Simulate a goal written before refs existed: copy it loose, drop the ref.
+    const record = readGoal(cwd, goalId);
     mkdirSync(join(cwd, ".sddx", "goals"), { recursive: true });
     writeFileSync(
       join(cwd, ".sddx", "goals", `${goalId}.json`),
-      `${JSON.stringify({ ...onBranch, merges: [] }, null, 2)}\n`,
+      `${JSON.stringify(record, null, 2)}\n`,
     );
+    expect(g(cwd, "update-ref", "-d", `refs/sddx/goals/${goalId}`).status).toBe(0);
 
-    // the loose record wins, and stays loose when written
     const goal = readGoal(cwd, goalId);
-    expect(goal.merges).toEqual([]);
+    expect(goal.id).toBe(goalId);
     goal.shipped = { pr_url: "https://example.invalid/pr/1", at: new Date(0).toISOString() };
     writeGoal(cwd, goal);
     expect(readGoal(cwd, goalId).shipped?.pr_url).toBe("https://example.invalid/pr/1");
     expect(existsSync(join(cwd, ".sddx", "goals", `${goalId}.json`))).toBe(true);
 
     expect(cli(cwd, "run", "report", "--goal", goalId).status).toBe(0);
+  }, 60_000);
+
+  test("a stale loose snapshot never shadows the live ref", () => {
+    // Merging a run branch used to land a point-in-time copy of the record at
+    // `.sddx/goals/<id>.json` on the default branch, and the read path
+    // preferred it — freezing the merge log at whatever it held on merge day.
+    const { clone: cwd } = fixtureClone();
+    const rel = plan(cwd, 1);
+    const { goalId, ids } = create(cwd, rel);
+
+    const stale = readGoal(cwd, goalId);
+    mkdirSync(join(cwd, ".sddx", "goals"), { recursive: true });
+    writeFileSync(
+      join(cwd, ".sddx", "goals", `${goalId}.json`),
+      `${JSON.stringify({ ...stale, merges: [] }, null, 2)}\n`,
+    );
+
+    complete(cwd, ids[0] as string, "part0");
+
+    // the later merge is visible despite the frozen file sitting next to it
+    expect(readGoal(cwd, goalId).merges).toHaveLength(1);
   }, 60_000);
 
   test("findGoalForTask sees goals in both locations", () => {

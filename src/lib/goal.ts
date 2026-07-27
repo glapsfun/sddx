@@ -1,14 +1,5 @@
 import { spawnSync } from "node:child_process";
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { dependsOnList, resolveTaskState, sddxDir, taskId } from "./task";
 
@@ -75,8 +66,23 @@ export function depsList(
 export const goalsDir = (cwd: string): string => join(sddxDir(cwd), "goals");
 export const goalPath = (cwd: string, id: string): string => join(goalsDir(cwd), `${id}.json`);
 
-/** Path of the goal record INSIDE its run branch's tree. */
-const goalBlobPath = (id: string): string => `.sddx/goals/${id}.json`;
+/**
+ * The ref holding a goal record's blob.
+ *
+ * Deliberately a ref of its own rather than a file in the run branch's tree.
+ * A tree path travels with the branch, and both directions of that were wrong:
+ * merging the run branch landed a point-in-time snapshot of the record on the
+ * default branch, where it shadowed the live one forever; and deleting the run
+ * branch after the PR merged destroyed the record — including the merge log,
+ * the declared source of truth for integration state — while the receipts it
+ * gives context to survived.
+ *
+ * A ref outside `refs/heads` is carried by neither merge nor branch deletion,
+ * is still committed content in the object store (auditable, survives a clean
+ * checkout, immune to `.sddx/` being wiped), and `update-ref` gives it
+ * compare-and-swap for free.
+ */
+const goalRef = (id: string): string => `refs/sddx/goals/${id}`;
 
 const sh = (cwd: string, args: string[], env?: NodeJS.ProcessEnv) =>
   spawnSync("git", args, { cwd, encoding: "utf8", env: { ...process.env, ...env } });
@@ -92,77 +98,66 @@ function mainRoot(cwd: string): string {
 }
 
 /**
- * Commits `content` to `path` on `branch` without checking anything out.
+ * Writes `content` as the goal's blob, compare-and-swap against `expected`.
  *
- * A temporary index plus `commit-tree` avoids adding a worktree for every write
- * — integration already pays for one, but `graph create` and `pr create` would
- * each need their own, and a worktree add/remove per goal update is a lot of
- * churn for one JSON file.
+ * Not a commit and not a tree: `update-ref` can point a ref straight at a blob,
+ * which is all a single JSON record needs. That removes the temporary index,
+ * the tree rebuild, and the commit per update entirely.
  *
- * `update-ref` is given the expected old value, so it is a compare-and-swap: if
- * a concurrent verifier advanced the branch between our read and our write, the
- * update fails rather than discarding their commit. The caller re-reads and
- * retries. The goal lock already serializes sibling verifiers, but the lock is
- * per-goal-per-machine and the ref is the actual shared resource.
+ * `expected` is the blob sha the caller read (or `null` for a create), so a
+ * concurrent writer is DETECTED rather than overwritten. The previous version
+ * retried internally, but a retry re-sent the caller's already-stale `content`
+ * — so the loser's write silently clobbered the winner's `merges` entry, which
+ * is exactly the data loss the CAS was there to prevent. There is nothing this
+ * layer can merge on the caller's behalf, so a conflict throws and the caller,
+ * which holds the goal lock and re-reads inside it, is the one that recovers.
  */
-function commitToBranch(
-  root: string,
-  branch: string,
-  path: string,
-  content: string,
-  message: string,
-): void {
-  const ref = `refs/heads/${branch}`;
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const oldSha = sh(root, ["rev-parse", "--verify", "--quiet", ref]).stdout?.trim();
-    if (!oldSha) throw new Error(`run branch ${branch} does not exist`);
+function writeGoalBlob(root: string, id: string, content: string, expected: string | null): void {
+  const blob = spawnSync("git", ["hash-object", "-w", "--stdin"], {
+    cwd: root,
+    input: content,
+    encoding: "utf8",
+  });
+  if (blob.status !== 0) throw new Error(`git hash-object failed: ${blob.stderr}`);
+  const blobSha = (blob.stdout ?? "").trim();
 
-    const blob = spawnSync("git", ["hash-object", "-w", "--stdin"], {
-      cwd: root,
-      input: content,
-      encoding: "utf8",
-    });
-    if (blob.status !== 0) throw new Error(`git hash-object failed: ${blob.stderr}`);
-    const blobSha = (blob.stdout ?? "").trim();
-
-    const indexDir = mkdtempSync(join(tmpdir(), "sddx-idx-"));
-    const env = { GIT_INDEX_FILE: join(indexDir, "index") };
-    try {
-      const read = sh(root, ["read-tree", oldSha], env);
-      if (read.status !== 0) throw new Error(`git read-tree failed: ${read.stderr}`);
-      const upd = sh(
-        root,
-        ["update-index", "--add", "--cacheinfo", `100644,${blobSha},${path}`],
-        env,
-      );
-      if (upd.status !== 0) throw new Error(`git update-index failed: ${upd.stderr}`);
-      const tree = sh(root, ["write-tree"], env);
-      if (tree.status !== 0) throw new Error(`git write-tree failed: ${tree.stderr}`);
-      const treeSha = (tree.stdout ?? "").trim();
-
-      const commit = spawnSync("git", ["commit-tree", treeSha, "-p", oldSha, "-m", message], {
-        cwd: root,
-        encoding: "utf8",
-      });
-      if (commit.status !== 0) throw new Error(`git commit-tree failed: ${commit.stderr}`);
-      const commitSha = (commit.stdout ?? "").trim();
-
-      const cas = sh(root, ["update-ref", ref, commitSha, oldSha]);
-      if (cas.status === 0) return;
-      // lost the race — re-read and rebuild on the new tip
-    } finally {
-      rmSync(indexDir, { recursive: true, force: true });
-    }
+  const ref = goalRef(id);
+  const cas = expected
+    ? sh(root, ["update-ref", ref, blobSha, expected])
+    : sh(root, ["update-ref", ref, blobSha, ""]);
+  if (cas.status !== 0) {
+    throw new Error(
+      `goal ${id} was modified concurrently — re-read it and reapply the change ` +
+        `(${(cas.stderr ?? "").trim()})`,
+    );
   }
-  throw new Error(`could not update ${branch} after repeated concurrent modification`);
 }
 
-const branchExistsAt = (root: string, branch: string): boolean =>
-  sh(root, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]).status === 0;
+const isGitRepo = (root: string): boolean => sh(root, ["rev-parse", "--git-dir"]).status === 0;
 
-/** The goal record as committed on its run branch, or null when absent. */
+/** The blob sha the goal ref currently points at, or null when unset. */
+function goalBlobSha(root: string, id: string): string | null {
+  const r = sh(root, ["rev-parse", "--verify", "--quiet", goalRef(id)]);
+  return r.status === 0 ? (r.stdout ?? "").trim() : null;
+}
+
+/**
+ * Pushes a goal's ref to `origin`, best-effort.
+ *
+ * The record is not in any branch's tree, so it does not travel with a branch
+ * push — and a reviewer on another clone would otherwise have the run branch
+ * without the merge log the PR body is derived from. Failure is not fatal: a
+ * remote that refuses non-standard refs must not fail a PR whose branch landed.
+ */
+export function pushGoalRef(cwd: string, id: string): boolean {
+  const root = mainRoot(cwd);
+  const ref = goalRef(id);
+  return sh(root, ["push", "origin", `${ref}:${ref}`]).status === 0;
+}
+
+/** The goal record from its own ref, or null when absent. */
 function readGoalFromBranch(root: string, id: string): Goal | null {
-  const r = sh(root, ["show", `${runBranchName(id)}:${goalBlobPath(id)}`]);
+  const r = sh(root, ["cat-file", "-p", goalRef(id)]);
   if (r.status !== 0) return null;
   try {
     return JSON.parse(r.stdout ?? "") as Goal;
@@ -205,8 +200,8 @@ export function createGoal(
   const root = mainRoot(cwd);
   const path = goalPath(root, id);
   if (existsSync(path)) throw new Error(`goal ${id} already exists at ${path}`);
-  if (readGoalFromBranch(root, id)) {
-    throw new Error(`goal ${id} already exists on ${runBranchName(id)}`);
+  if (goalBlobSha(root, id) !== null) {
+    throw new Error(`goal ${id} already exists at ${goalRef(id)}`);
   }
   for (const tid of taskIds) {
     if (!resolveTaskState(cwd, tid)) {
@@ -232,23 +227,13 @@ export function createGoal(
   // if `.sddx/` was cleaned, while the receipts it contextualizes survived.
   //
   // The older reasoning against committing it (that it would bind the record to
-  // whatever branch happened to be checked out) predates run branches: this one
-  // is sddx-owned, created before any task workspace, and lives exactly as long
-  // as the goal does.
-  //
-  // Only when the run branch exists, which the canonical initializer guarantees
-  // by creating it first. The legacy standalone `goal create` assembles a goal
-  // with no run branch of its own; it keeps the loose file until
-  // `retire-alternate-flows` removes that path. The invariant binds the
-  // canonical initializer, not every caller.
-  if (branchExistsAt(root, opts.runBranch)) {
-    commitToBranch(
-      root,
-      opts.runBranch,
-      goalBlobPath(id),
-      `${JSON.stringify(g, null, 2)}\n`,
-      `sddx(${id}): create goal`,
-    );
+  // whatever branch happened to be checked out) predates run branches. It is
+  // now bound to no branch at all: `refs/sddx/goals/<id>` outlives the run
+  // branch and is not carried into the default branch by merging it.
+  // Outside a git repository there is no ref to write, so the record stays a
+  // loose file — the same place it lived before refs existed.
+  if (isGitRepo(root)) {
+    writeGoalBlob(root, id, `${JSON.stringify(g, null, 2)}\n`, null);
   } else {
     mkdirSync(goalsDir(root), { recursive: true });
     writeFileSync(path, `${JSON.stringify(g, null, 2)}\n`);
@@ -258,13 +243,16 @@ export function createGoal(
 
 export function readGoal(cwd: string, id: string): Goal {
   const root = mainRoot(cwd);
-  // Legacy first: a goal written before records moved onto the run branch lives
-  // uncommitted in the main checkout, and must keep reading and reporting.
+  // The ref wins. A `.sddx/goals/<id>.json` in the working tree is only ever a
+  // fallback for records written before the ref existed — and it can also be a
+  // snapshot that arrived by merging a run branch back when the record lived in
+  // the tree. Preferring the file let such a snapshot shadow the live record
+  // permanently, freezing the merge log at whatever it held on merge day.
   const path = goalPath(root, id);
-  const g = existsSync(path)
-    ? (JSON.parse(readFileSync(path, "utf8")) as Goal)
-    : readGoalFromBranch(root, id);
-  if (!g) throw new Error(`no such goal: ${id} (${path} or ${runBranchName(id)})`);
+  const g =
+    readGoalFromBranch(root, id) ??
+    (existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Goal) : null);
+  if (!g) throw new Error(`no such goal: ${id} (${goalRef(id)} or ${path})`);
   if (typeof g.run_branch !== "string" || typeof g.base_sha !== "string" || !g.merges) {
     throw new Error(
       `goal ${id} (${path}) is missing run_branch/base_sha/merges — written by an ` +
@@ -278,14 +266,19 @@ export function writeGoal(cwd: string, g: Goal): void {
   const root = mainRoot(cwd);
   g.updated_at = new Date().toISOString();
   const content = `${JSON.stringify(g, null, 2)}\n`;
-  // A legacy goal stays where it is. Migrating it onto the run branch mid-run
-  // would move the merge log out from under anything already reading it.
-  const legacy = goalPath(root, g.id);
-  if (existsSync(legacy)) {
-    writeFileSync(legacy, content);
-    return;
+  const current = goalBlobSha(root, g.id);
+  if (current === null) {
+    // No ref: a record written before refs existed. It stays a loose file —
+    // migrating it mid-run would move the merge log out from under anything
+    // already reading it.
+    const legacy = goalPath(root, g.id);
+    if (existsSync(legacy)) {
+      writeFileSync(legacy, content);
+      return;
+    }
+    throw new Error(`no such goal: ${g.id} (${goalRef(g.id)})`);
   }
-  commitToBranch(root, g.run_branch, goalBlobPath(g.id), content, `sddx(${g.id}): update goal`);
+  writeGoalBlob(root, g.id, content, current);
 }
 
 /** Scans every goal file in `cwd` for one whose `task_ids` includes `taskId` —
@@ -309,10 +302,10 @@ export function findGoalForTask(cwd: string, id: string): Goal | null {
       }
     }
   }
-  const branches = sh(root, ["branch", "--list", "sddx/run-*", "--format=%(refname:short)"]);
-  for (const branch of (branches.stdout ?? "").split("\n").map((s) => s.trim())) {
-    if (!branch.startsWith("sddx/run-")) continue;
-    const g = readGoalFromBranch(root, branch.slice("sddx/run-".length));
+  const refs = sh(root, ["for-each-ref", "--format=%(refname)", "refs/sddx/goals/"]);
+  for (const ref of (refs.stdout ?? "").split("\n").map((s) => s.trim())) {
+    if (!ref.startsWith("refs/sddx/goals/")) continue;
+    const g = readGoalFromBranch(root, ref.slice("refs/sddx/goals/".length));
     if (g?.task_ids.includes(id)) return g;
   }
   return null;

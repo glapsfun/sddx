@@ -599,7 +599,7 @@ function resolvePlan(cwd: string, graphArg: string, requested: WorkspaceFlag): R
     if (branchExists(cwd, `sddx/${id}`)) {
       errs.push(`${alias}: task branch sddx/${id} already exists`);
     }
-    if (mode === "worktree" && existsSync(join(worktreesDir(cwd), id))) {
+    if (mode === "worktree" && existsSync(join(worktreesDir(resolveMainRepoRoot(cwd)), id))) {
       errs.push(`${alias}: worktree destination .sddx-worktrees/${id} already exists`);
     }
   }
@@ -906,6 +906,10 @@ function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noCol
   // a failure partway through must not leave a half-run behind, whose goal id
   // would then collide on the retry the user is about to attempt.
   const undo = new Rollback();
+  // Worktrees are created against the main repo root, so preflight and rollback
+  // must use the same anchor — resolving them from `cwd` made both blind to a
+  // worktree created anywhere but the repo root.
+  const mainRepoRoot = resolveMainRepoRoot(cwd);
   const aliasToId = new Map<string, string>();
   const deps: Record<string, string[]> = {};
   const created: string[] = [];
@@ -924,23 +928,32 @@ function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noCol
     for (const node of topoOrder(graph.tasks)) {
       const { spec, src } = loaded.get(node.alias) as { spec: Spec; src: string };
       if (node.depends_on.length === 0) {
-        const { id, line } = createRootTask(cwd, spec, src, mode, reporter, base.sha);
-        aliasToId.set(node.alias, id);
-        created.push(id);
-        // Registration order matters: replay is reverse, and a branch cannot be
-        // deleted while a worktree still has it checked out. Branch first here
-        // means worktree first on the way back out.
+        // Registered BEFORE creation, not after. createRootTask creates the
+        // worktree and branch first and only then copies the spec and writes
+        // task state, so a throw in that tail used to escape with nothing
+        // recorded — and the CLI would then report a complete rollback while
+        // the worktree and branch survived. Every undo step is existence-
+        // checked, so registering an artifact that was never created is a no-op.
+        //
+        // Order matters too: replay is reverse, and a branch cannot be deleted
+        // while a worktree still has it checked out, so branch is registered
+        // first to be undone last.
+        const id = plan.idByAlias.get(node.alias) as string;
         undo.branch(`sddx/${id}`);
-        if (mode === "worktree") undo.worktree(join(worktreesDir(cwd), id));
+        if (mode === "worktree") undo.worktree(join(worktreesDir(mainRepoRoot), id));
         undo.taskState(id);
-        reporter.success(line);
+        const created0 = createRootTask(cwd, spec, src, mode, reporter, base.sha);
+        aliasToId.set(node.alias, created0.id);
+        created.push(created0.id);
+        reporter.success(created0.line);
       } else {
         const parentIds = node.depends_on.map((alias) => aliasToId.get(alias) as string);
-        const id = createDeferredTask(cwd, spec, src, mode, parentIds);
+        const id = plan.idByAlias.get(node.alias) as string;
+        undo.taskState(id);
+        createDeferredTask(cwd, spec, src, mode, parentIds);
         aliasToId.set(node.alias, id);
         created.push(id);
         deps[id] = parentIds;
-        undo.taskState(id);
         reporter.success(
           `created ${id} phase=PLAN depends_on=${parentIds.join(",")} workspace=deferred(${mode})`,
         );
@@ -963,7 +976,7 @@ function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noCol
       },
     });
   } catch (e) {
-    const stuck = undo.run(cwd);
+    const stuck = undo.run(mainRepoRoot);
     failWith([
       `graph create: initialization failed — ${(e as Error).message}`,
       ...(stuck.length > 0

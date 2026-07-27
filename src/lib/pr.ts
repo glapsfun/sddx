@@ -1,5 +1,12 @@
 import { push } from "./git";
-import { currentlyMergedTaskIds, type Goal, goalCounts, readGoal, writeGoal } from "./goal";
+import {
+  currentlyMergedTaskIds,
+  type Goal,
+  goalCounts,
+  pushGoalRef,
+  readGoal,
+  writeGoal,
+} from "./goal";
 import { resolveBackend } from "./prhost";
 import { resolveReceipt, resolveReceiptRaw, sha256 } from "./receipt";
 
@@ -79,6 +86,11 @@ export function createGoalPr(cwd: string, id: string, opts: CreatePrOptions = {}
   }
 
   push(cwd, goal.run_branch);
+  // The goal record lives in its own ref, not in the branch's tree, so pushing
+  // the branch alone would leave a reviewer on another clone without the merge
+  // log the PR body is derived from. Best-effort: a remote that refuses the ref
+  // must not fail a PR whose branch already landed.
+  pushGoalRef(cwd, goal.id);
   const body = renderPrBody(cwd, goal);
   const title = opts.title ?? goal.goal;
   const prUrl = backend.openPr(cwd, { branch: goal.run_branch, title, body });

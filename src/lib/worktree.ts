@@ -68,10 +68,27 @@ const gitCommonDir = (cwd: string): string => {
   return isAbsolute(dir) ? dir : join(cwd, dir);
 };
 
-/** The main repo root, resolvable from anywhere in the repo — including from
+/**
+ * The main repo root, resolvable from anywhere in the repo — including from
  * inside a linked worktree, whose own directory a retry may be about to
- * discard (see `retryWorkspace`). */
-export const resolveMainRepoRoot = (cwd: string): string => dirname(gitCommonDir(cwd));
+ * discard (see `retryWorkspace`).
+ *
+ * `git worktree list` names the main worktree first, which is the answer
+ * directly. Deriving it as `dirname(--git-common-dir)` instead was wrong for a
+ * repository that is itself a submodule: there the common dir is
+ * `<super>/.git/modules/<name>`, so the "root" came out as `<super>/.git/modules`
+ * and worktree creation targeted the superproject's git directory.
+ */
+export function resolveMainRepoRoot(cwd: string): string {
+  const r = spawnSync("git", ["worktree", "list", "--porcelain"], { cwd, encoding: "utf8" });
+  const first = (r.stdout ?? "").split("\n").find((l) => l.startsWith("worktree "));
+  if (r.status === 0 && first) return first.slice("worktree ".length).trim();
+  // Older git without --porcelain, or a repo state that cannot list worktrees:
+  // fall back to the toplevel, then to the previous derivation.
+  const top = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8" });
+  if (top.status === 0 && (top.stdout ?? "").trim()) return (top.stdout ?? "").trim();
+  return dirname(gitCommonDir(cwd));
+}
 
 const EXCLUDE_LINE = ".sddx-worktrees/";
 

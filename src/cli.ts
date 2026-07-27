@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -81,6 +82,7 @@ import {
   isDirty,
   materializeDependent,
   removeWorktree,
+  removeWorktreeForced,
   resolveBaseRef,
   resolveMainRepoRoot,
   retryWorkspace,
@@ -235,6 +237,66 @@ function pickWorkspace(
   const mode = pickWorkspaceMode(cwd, requested, notices);
   for (const n of notices) reporter.success(n);
   return mode;
+}
+
+/**
+ * Undo log for a partially completed initialization.
+ *
+ * Recorded as each artifact is created and replayed in REVERSE order, because
+ * the dependencies run that way: a worktree holds a checkout of its branch, so
+ * the branch cannot be deleted until the worktree is gone.
+ *
+ * Every step is best-effort and independently reported. A rollback that threw
+ * on the first stubborn artifact would leave the rest behind while claiming to
+ * have cleaned up, which is worse than the partial run it was fixing.
+ */
+class Rollback {
+  private steps: Array<{ describe: string; undo: (cwd: string) => void }> = [];
+
+  branch(name: string): void {
+    this.steps.push({
+      describe: `branch ${name}`,
+      undo: (cwd) => {
+        if (branchExists(cwd, name)) forceDeleteBranch(cwd, name);
+      },
+    });
+  }
+
+  worktree(absPath: string): void {
+    this.steps.push({
+      describe: `worktree ${absPath}`,
+      undo: (cwd) => {
+        if (existsSync(absPath)) removeWorktreeForced(cwd, absPath);
+      },
+    });
+  }
+
+  taskState(id: string): void {
+    this.steps.push({
+      describe: `task state ${id}`,
+      undo: (cwd) => {
+        for (const p of [
+          join(sddxDir(cwd), "tasks", `${id}.json`),
+          join(sddxDir(cwd), "specs", `${id}.yaml`),
+        ]) {
+          if (existsSync(p)) rmSync(p, { force: true });
+        }
+      },
+    });
+  }
+
+  /** Replays every step newest-first. Returns what could not be removed. */
+  run(cwd: string): string[] {
+    const stuck: string[] = [];
+    for (const step of [...this.steps].reverse()) {
+      try {
+        step.undo(cwd);
+      } catch (e) {
+        stuck.push(`${step.describe} (${(e as Error).message})`);
+      }
+    }
+    return stuck;
+  }
 }
 
 /** Create a root task with a real workspace (worktree/branch/none). `specSrc` is
@@ -496,7 +558,12 @@ function resolvePlan(cwd: string, graphArg: string, requested: WorkspaceFlag): R
   const notices: string[] = [];
   const base = resolveBaseRef(cwd);
   if (base.source === "HEAD") notices.push("no origin remote — forking from local HEAD");
-  const mode = pickWorkspaceMode(cwd, requested, notices);
+  // The canonical path does NOT downgrade. `auto` means worktree; when a
+  // worktree precondition fails the run is refused, not quietly moved into a
+  // weaker isolation model the user never asked for. `pickWorkspaceMode` stays
+  // for the legacy `task create` entry point, which `retire-alternate-flows`
+  // removes — the invariant binds this initializer, not the binary.
+  const mode: "worktree" | "branch" | "none" = requested === "auto" ? "worktree" : requested;
 
   // Worktree preconditions, checked here so a dry run reports exactly what a
   // real create would refuse. Scope-scoped rather than repository-wide: a
@@ -517,6 +584,23 @@ function resolvePlan(cwd: string, graphArg: string, requested: WorkspaceFlag): R
           ? `unsupported layout: task "${c.alias}" declares scope ${c.scope}, which reaches the submodule ${c.submodule}. A worktree crossing a submodule boundary is unsafe, and no run was started.`
           : `unsupported layout: task "${c.alias}" declares no scope, so it cannot be proven disjoint from the submodule ${c.submodule}. Declare a scope, or use a checkout without submodules. No run was started.`,
       );
+    }
+  }
+
+  // Name and destination availability. These used to surface DURING creation —
+  // a collision on the third task appeared after the run branch and two
+  // worktrees already existed — so they belong in preflight, before any
+  // mutation, together with everything else above.
+  const runBranch = runBranchName(gid);
+  if (branchExists(cwd, runBranch)) {
+    errs.push(`run branch ${runBranch} already exists — remove it or choose a different goal`);
+  }
+  for (const [alias, id] of idByAlias) {
+    if (branchExists(cwd, `sddx/${id}`)) {
+      errs.push(`${alias}: task branch sddx/${id} already exists`);
+    }
+    if (mode === "worktree" && existsSync(join(worktreesDir(cwd), id))) {
+      errs.push(`${alias}: worktree destination .sddx-worktrees/${id} already exists`);
     }
   }
 
@@ -678,6 +762,12 @@ function renderPlan(cwd: string, graphArg: string, plan: ResolvedPlan, reporter:
     planSha256: hash,
     workspaceMode: plan.mode,
     baseSha: plan.base.sha,
+    // The task ids and run branch a real create WOULD produce. Both are
+    // resolved during preflight already; omitting them left the dry run unable
+    // to answer "what will this create", which is the question it exists for.
+    runBranch: runBranchName(plan.goalId),
+    aliasToId: Object.fromEntries(plan.idByAlias),
+    taskIds: [...plan.idByAlias.values()],
     executionOrder: order,
     nodes: current,
   });
@@ -812,52 +902,78 @@ function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noCol
     failWith([`graph create: ${gate.reason}`], 3);
   }
 
-  // Gate passed. Create the run branch first — before any task worktree —
-  // from the same base every root task would otherwise resolve independently
-  // (run-branch-integration): one fork point for the whole run, not one per task.
-  const runBranch = runBranchName(gid);
-  createBranchAt(cwd, runBranch, base.sha);
-  reporter.success(`created run branch ${runBranch} at ${base.sha}`);
-
-  // Now create tasks in dependency order (roots fork from the run branch's
-  // tip; dependents are deferred), then register the goal with its edges.
+  // Gate passed. Everything from here mutates the repository, so it is wrapped:
+  // a failure partway through must not leave a half-run behind, whose goal id
+  // would then collide on the retry the user is about to attempt.
+  const undo = new Rollback();
   const aliasToId = new Map<string, string>();
   const deps: Record<string, string[]> = {};
   const created: string[] = [];
-  for (const node of topoOrder(graph.tasks)) {
-    const { spec, src } = loaded.get(node.alias) as { spec: Spec; src: string };
-    if (node.depends_on.length === 0) {
-      const { id, line } = createRootTask(cwd, spec, src, mode, reporter, base.sha);
-      aliasToId.set(node.alias, id);
-      created.push(id);
-      reporter.success(line);
-    } else {
-      const parentIds = node.depends_on.map((alias) => aliasToId.get(alias) as string);
-      const id = createDeferredTask(cwd, spec, src, mode, parentIds);
-      aliasToId.set(node.alias, id);
-      created.push(id);
-      deps[id] = parentIds;
-      reporter.success(
-        `created ${id} phase=PLAN depends_on=${parentIds.join(",")} workspace=deferred(${mode})`,
-      );
+  let g: ReturnType<typeof createGoal>;
+  // Create the run branch first — before any task worktree — from the same base
+  // every root task would otherwise resolve independently
+  // (run-branch-integration): one fork point for the whole run, not one per task.
+  const runBranch = runBranchName(gid);
+  try {
+    createBranchAt(cwd, runBranch, base.sha);
+    undo.branch(runBranch);
+    reporter.success(`created run branch ${runBranch} at ${base.sha}`);
+
+    // Now create tasks in dependency order (roots fork from the run branch's
+    // tip; dependents are deferred), then register the goal with its edges.
+    for (const node of topoOrder(graph.tasks)) {
+      const { spec, src } = loaded.get(node.alias) as { spec: Spec; src: string };
+      if (node.depends_on.length === 0) {
+        const { id, line } = createRootTask(cwd, spec, src, mode, reporter, base.sha);
+        aliasToId.set(node.alias, id);
+        created.push(id);
+        // Registration order matters: replay is reverse, and a branch cannot be
+        // deleted while a worktree still has it checked out. Branch first here
+        // means worktree first on the way back out.
+        undo.branch(`sddx/${id}`);
+        if (mode === "worktree") undo.worktree(join(worktreesDir(cwd), id));
+        undo.taskState(id);
+        reporter.success(line);
+      } else {
+        const parentIds = node.depends_on.map((alias) => aliasToId.get(alias) as string);
+        const id = createDeferredTask(cwd, spec, src, mode, parentIds);
+        aliasToId.set(node.alias, id);
+        created.push(id);
+        deps[id] = parentIds;
+        undo.taskState(id);
+        reporter.success(
+          `created ${id} phase=PLAN depends_on=${parentIds.join(",")} workspace=deferred(${mode})`,
+        );
+      }
     }
+    // `.sddx/goals/<id>.json` is deliberately plain, never-committed local
+    // coordination state (like `.sddx/sweep.json`) — see the matching comment
+    // in `runbranch.ts`. Committing it would tie it to whatever branch happens
+    // to be checked out when that commit lands, breaking every later
+    // `readGoal`/`findGoalForTask` call once anything switches away from it.
+    g = createGoal(cwd, graph.goal, created, {
+      deps,
+      id: gid,
+      runBranch,
+      baseSha: base.sha,
+      approval: {
+        mode: gate.mode,
+        plan_sha256: gate.hash,
+        at: new Date().toISOString(),
+      },
+    });
+  } catch (e) {
+    const stuck = undo.run(cwd);
+    failWith([
+      `graph create: initialization failed — ${(e as Error).message}`,
+      ...(stuck.length > 0
+        ? [
+            "graph create: rollback could not remove the following; remove them by hand before retrying:",
+            ...stuck.map((s) => `  ${s}`),
+          ]
+        : ["graph create: everything this attempt created was rolled back; no run was started."]),
+    ]);
   }
-  // `.sddx/goals/<id>.json` is deliberately plain, never-committed local
-  // coordination state (like `.sddx/sweep.json`) — see the matching comment
-  // in `runbranch.ts`. Committing it would tie it to whatever branch happens
-  // to be checked out when that commit lands, breaking every later
-  // `readGoal`/`findGoalForTask` call once anything switches away from it.
-  const g = createGoal(cwd, graph.goal, created, {
-    deps,
-    id: gid,
-    runBranch,
-    baseSha: base.sha,
-    approval: {
-      mode: gate.mode,
-      plan_sha256: gate.hash,
-      at: new Date().toISOString(),
-    },
-  });
   reporter.success(`created goal ${g.id} tasks=[${g.task_ids.join(", ")}] run_branch=${runBranch}`);
   for (const [alias, id] of aliasToId) reporter.success(`  ${alias} → ${id}`);
   reporter.finish({

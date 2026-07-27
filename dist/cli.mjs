@@ -6950,6 +6950,7 @@ import {
   mkdirSync as mkdirSync8,
   readdirSync as readdirSync7,
   readFileSync as readFileSync10,
+  rmSync as rmSync3,
   writeFileSync as writeFileSync9
 } from "node:fs";
 import { dirname as dirname3, join as join13, relative as relative2, resolve as resolve2 } from "node:path";
@@ -10364,6 +10365,53 @@ function pickWorkspace(cwd, requested, reporter) {
     reporter.success(n);
   return mode;
 }
+
+class Rollback {
+  steps = [];
+  branch(name) {
+    this.steps.push({
+      describe: `branch ${name}`,
+      undo: (cwd) => {
+        if (branchExists(cwd, name))
+          forceDeleteBranch(cwd, name);
+      }
+    });
+  }
+  worktree(absPath) {
+    this.steps.push({
+      describe: `worktree ${absPath}`,
+      undo: (cwd) => {
+        if (existsSync12(absPath))
+          removeWorktreeForced(cwd, absPath);
+      }
+    });
+  }
+  taskState(id) {
+    this.steps.push({
+      describe: `task state ${id}`,
+      undo: (cwd) => {
+        for (const p of [
+          join13(sddxDir(cwd), "tasks", `${id}.json`),
+          join13(sddxDir(cwd), "specs", `${id}.yaml`)
+        ]) {
+          if (existsSync12(p))
+            rmSync3(p, { force: true });
+        }
+      }
+    });
+  }
+  run(cwd) {
+    const stuck = [];
+    for (const step of [...this.steps].reverse()) {
+      try {
+        step.undo(cwd);
+      } catch (e) {
+        stuck.push(`${step.describe} (${e.message})`);
+      }
+    }
+    return stuck;
+  }
+}
 function createRootTask(cwd, spec, specSrc, mode, reporter, forkSha) {
   const id = taskId(spec.task);
   if (mode === "worktree") {
@@ -10545,13 +10593,25 @@ function resolvePlan(cwd, graphArg, requested) {
   const base = resolveBaseRef(cwd);
   if (base.source === "HEAD")
     notices.push("no origin remote — forking from local HEAD");
-  const mode = pickWorkspaceMode(cwd, requested, notices);
+  const mode = requested === "auto" ? "worktree" : requested;
   if (mode === "worktree") {
     if (!worktreeAvailable(cwd)) {
       errs.push("worktree unavailable: git cannot create worktrees for this repository. No run was started. Use a checkout where `git worktree list` succeeds.");
     }
     for (const c of submoduleScopeConflicts(cwd, base.sha, graph.tasks.map((n) => ({ alias: n.alias, scope: loaded.get(n.alias)?.spec.scope ?? [] })))) {
       errs.push(c.scope ? `unsupported layout: task "${c.alias}" declares scope ${c.scope}, which reaches the submodule ${c.submodule}. A worktree crossing a submodule boundary is unsafe, and no run was started.` : `unsupported layout: task "${c.alias}" declares no scope, so it cannot be proven disjoint from the submodule ${c.submodule}. Declare a scope, or use a checkout without submodules. No run was started.`);
+    }
+  }
+  const runBranch = runBranchName(gid);
+  if (branchExists(cwd, runBranch)) {
+    errs.push(`run branch ${runBranch} already exists — remove it or choose a different goal`);
+  }
+  for (const [alias, id] of idByAlias) {
+    if (branchExists(cwd, `sddx/${id}`)) {
+      errs.push(`${alias}: task branch sddx/${id} already exists`);
+    }
+    if (mode === "worktree" && existsSync12(join13(worktreesDir(cwd), id))) {
+      errs.push(`${alias}: worktree destination .sddx-worktrees/${id} already exists`);
     }
   }
   return { graph, loaded, idByAlias, goalId: gid, base, mode, notices, errors: errs };
@@ -10662,6 +10722,9 @@ function renderPlan(cwd, graphArg, plan, reporter) {
     planSha256: hash,
     workspaceMode: plan.mode,
     baseSha: plan.base.sha,
+    runBranch: runBranchName(plan.goalId),
+    aliasToId: Object.fromEntries(plan.idByAlias),
+    taskIds: [...plan.idByAlias.values()],
     executionOrder: order,
     nodes: current
   });
@@ -10739,39 +10802,58 @@ function cmdGraphCreate(cwd, args, format, noColor) {
   if (!gate.ok) {
     failWith([`graph create: ${gate.reason}`], 3);
   }
-  const runBranch = runBranchName(gid);
-  createBranchAt(cwd, runBranch, base.sha);
-  reporter.success(`created run branch ${runBranch} at ${base.sha}`);
+  const undo = new Rollback;
   const aliasToId = new Map;
   const deps = {};
   const created = [];
-  for (const node of topoOrder(graph.tasks)) {
-    const { spec, src } = loaded.get(node.alias);
-    if (node.depends_on.length === 0) {
-      const { id, line } = createRootTask(cwd, spec, src, mode, reporter, base.sha);
-      aliasToId.set(node.alias, id);
-      created.push(id);
-      reporter.success(line);
-    } else {
-      const parentIds = node.depends_on.map((alias) => aliasToId.get(alias));
-      const id = createDeferredTask(cwd, spec, src, mode, parentIds);
-      aliasToId.set(node.alias, id);
-      created.push(id);
-      deps[id] = parentIds;
-      reporter.success(`created ${id} phase=PLAN depends_on=${parentIds.join(",")} workspace=deferred(${mode})`);
+  let g;
+  const runBranch = runBranchName(gid);
+  try {
+    createBranchAt(cwd, runBranch, base.sha);
+    undo.branch(runBranch);
+    reporter.success(`created run branch ${runBranch} at ${base.sha}`);
+    for (const node of topoOrder(graph.tasks)) {
+      const { spec, src } = loaded.get(node.alias);
+      if (node.depends_on.length === 0) {
+        const { id, line } = createRootTask(cwd, spec, src, mode, reporter, base.sha);
+        aliasToId.set(node.alias, id);
+        created.push(id);
+        undo.branch(`sddx/${id}`);
+        if (mode === "worktree")
+          undo.worktree(join13(worktreesDir(cwd), id));
+        undo.taskState(id);
+        reporter.success(line);
+      } else {
+        const parentIds = node.depends_on.map((alias) => aliasToId.get(alias));
+        const id = createDeferredTask(cwd, spec, src, mode, parentIds);
+        aliasToId.set(node.alias, id);
+        created.push(id);
+        deps[id] = parentIds;
+        undo.taskState(id);
+        reporter.success(`created ${id} phase=PLAN depends_on=${parentIds.join(",")} workspace=deferred(${mode})`);
+      }
     }
+    g = createGoal(cwd, graph.goal, created, {
+      deps,
+      id: gid,
+      runBranch,
+      baseSha: base.sha,
+      approval: {
+        mode: gate.mode,
+        plan_sha256: gate.hash,
+        at: new Date().toISOString()
+      }
+    });
+  } catch (e) {
+    const stuck = undo.run(cwd);
+    failWith([
+      `graph create: initialization failed — ${e.message}`,
+      ...stuck.length > 0 ? [
+        "graph create: rollback could not remove the following; remove them by hand before retrying:",
+        ...stuck.map((s) => `  ${s}`)
+      ] : ["graph create: everything this attempt created was rolled back; no run was started."]
+    ]);
   }
-  const g = createGoal(cwd, graph.goal, created, {
-    deps,
-    id: gid,
-    runBranch,
-    baseSha: base.sha,
-    approval: {
-      mode: gate.mode,
-      plan_sha256: gate.hash,
-      at: new Date().toISOString()
-    }
-  });
   reporter.success(`created goal ${g.id} tasks=[${g.task_ids.join(", ")}] run_branch=${runBranch}`);
   for (const [alias, id] of aliasToId)
     reporter.success(`  ${alias} → ${id}`);

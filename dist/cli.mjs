@@ -6950,13 +6950,13 @@ import {
   mkdirSync as mkdirSync8,
   readdirSync as readdirSync7,
   readFileSync as readFileSync10,
-  rmSync as rmSync3,
+  rmSync as rmSync4,
   writeFileSync as writeFileSync9
 } from "node:fs";
 import { dirname as dirname3, join as join13, relative as relative2, resolve as resolve2 } from "node:path";
 
 // src/audit.ts
-import { spawnSync as spawnSync4 } from "node:child_process";
+import { spawnSync as spawnSync5 } from "node:child_process";
 import { existsSync as existsSync5, readdirSync as readdirSync4, readFileSync as readFileSync5 } from "node:fs";
 import { join as join6 } from "node:path";
 
@@ -7217,7 +7217,7 @@ function validateSchedule(nodes) {
 var dedupe = (xs) => [...new Set(xs)];
 
 // src/lib/receipt.ts
-import { spawnSync as spawnSync2 } from "node:child_process";
+import { spawnSync as spawnSync3 } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
@@ -7230,8 +7230,18 @@ import {
 import { join as join3 } from "node:path";
 
 // src/lib/goal.ts
-import { existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
-import { join as join2 } from "node:path";
+import { spawnSync as spawnSync2 } from "node:child_process";
+import {
+  existsSync as existsSync2,
+  mkdirSync as mkdirSync2,
+  mkdtempSync,
+  readdirSync,
+  readFileSync as readFileSync2,
+  rmSync,
+  writeFileSync as writeFileSync2
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { isAbsolute, join as join2 } from "node:path";
 
 // src/lib/task.ts
 import { spawnSync } from "node:child_process";
@@ -7494,6 +7504,70 @@ function resolveTaskState(cwd, id) {
 // src/lib/goal.ts
 var goalsDir = (cwd) => join2(sddxDir(cwd), "goals");
 var goalPath = (cwd, id) => join2(goalsDir(cwd), `${id}.json`);
+var goalBlobPath = (id) => `.sddx/goals/${id}.json`;
+var sh = (cwd, args, env) => spawnSync2("git", args, { cwd, encoding: "utf8", env: { ...process.env, ...env } });
+function mainRoot(cwd) {
+  const r = sh(cwd, ["rev-parse", "--git-common-dir"]);
+  if (r.status !== 0)
+    return cwd;
+  const dir = (r.stdout ?? "").trim();
+  const abs = isAbsolute(dir) ? dir : join2(cwd, dir);
+  return abs.replace(/\/\.git\/?$/, "").replace(/\/\.git$/, "") || cwd;
+}
+function commitToBranch(root, branch, path, content, message) {
+  const ref = `refs/heads/${branch}`;
+  for (let attempt = 0;attempt < 5; attempt++) {
+    const oldSha = sh(root, ["rev-parse", "--verify", "--quiet", ref]).stdout?.trim();
+    if (!oldSha)
+      throw new Error(`run branch ${branch} does not exist`);
+    const blob = spawnSync2("git", ["hash-object", "-w", "--stdin"], {
+      cwd: root,
+      input: content,
+      encoding: "utf8"
+    });
+    if (blob.status !== 0)
+      throw new Error(`git hash-object failed: ${blob.stderr}`);
+    const blobSha = (blob.stdout ?? "").trim();
+    const indexDir = mkdtempSync(join2(tmpdir(), "sddx-idx-"));
+    const env = { GIT_INDEX_FILE: join2(indexDir, "index") };
+    try {
+      const read = sh(root, ["read-tree", oldSha], env);
+      if (read.status !== 0)
+        throw new Error(`git read-tree failed: ${read.stderr}`);
+      const upd = sh(root, ["update-index", "--add", "--cacheinfo", `100644,${blobSha},${path}`], env);
+      if (upd.status !== 0)
+        throw new Error(`git update-index failed: ${upd.stderr}`);
+      const tree = sh(root, ["write-tree"], env);
+      if (tree.status !== 0)
+        throw new Error(`git write-tree failed: ${tree.stderr}`);
+      const treeSha = (tree.stdout ?? "").trim();
+      const commit = spawnSync2("git", ["commit-tree", treeSha, "-p", oldSha, "-m", message], {
+        cwd: root,
+        encoding: "utf8"
+      });
+      if (commit.status !== 0)
+        throw new Error(`git commit-tree failed: ${commit.stderr}`);
+      const commitSha = (commit.stdout ?? "").trim();
+      const cas = sh(root, ["update-ref", ref, commitSha, oldSha]);
+      if (cas.status === 0)
+        return;
+    } finally {
+      rmSync(indexDir, { recursive: true, force: true });
+    }
+  }
+  throw new Error(`could not update ${branch} after repeated concurrent modification`);
+}
+var branchExistsAt = (root, branch) => sh(root, ["rev-parse", "--verify", "--quiet", `refs/heads/${branch}`]).status === 0;
+function readGoalFromBranch(root, id) {
+  const r = sh(root, ["show", `${runBranchName(id)}:${goalBlobPath(id)}`]);
+  if (r.status !== 0)
+    return null;
+  try {
+    return JSON.parse(r.stdout ?? "");
+  } catch {
+    return null;
+  }
+}
 var goalId = (sentence, date = new Date) => taskId(sentence, date);
 var runBranchName = (id) => `sddx/run-${id}`;
 function createGoal(cwd, goalSentence, taskIds, opts) {
@@ -7502,9 +7576,13 @@ function createGoal(cwd, goalSentence, taskIds, opts) {
   }
   const now = new Date().toISOString();
   const id = opts.id ?? goalId(goalSentence);
-  const path = goalPath(cwd, id);
+  const root = mainRoot(cwd);
+  const path = goalPath(root, id);
   if (existsSync2(path))
     throw new Error(`goal ${id} already exists at ${path}`);
+  if (readGoalFromBranch(root, id)) {
+    throw new Error(`goal ${id} already exists on ${runBranchName(id)}`);
+  }
   for (const tid of taskIds) {
     if (!resolveTaskState(cwd, tid)) {
       throw new Error(`task ${tid} does not exist — cannot register it in a goal`);
@@ -7522,40 +7600,60 @@ function createGoal(cwd, goalSentence, taskIds, opts) {
     created_at: now,
     updated_at: now
   };
-  mkdirSync2(goalsDir(cwd), { recursive: true });
-  writeFileSync2(path, `${JSON.stringify(g, null, 2)}
+  if (branchExistsAt(root, opts.runBranch)) {
+    commitToBranch(root, opts.runBranch, goalBlobPath(id), `${JSON.stringify(g, null, 2)}
+`, `sddx(${id}): create goal`);
+  } else {
+    mkdirSync2(goalsDir(root), { recursive: true });
+    writeFileSync2(path, `${JSON.stringify(g, null, 2)}
 `);
+  }
   return g;
 }
 function readGoal(cwd, id) {
-  const path = goalPath(cwd, id);
-  if (!existsSync2(path))
-    throw new Error(`no such goal: ${id} (${path})`);
-  const g = JSON.parse(readFileSync2(path, "utf8"));
+  const root = mainRoot(cwd);
+  const path = goalPath(root, id);
+  const g = existsSync2(path) ? JSON.parse(readFileSync2(path, "utf8")) : readGoalFromBranch(root, id);
+  if (!g)
+    throw new Error(`no such goal: ${id} (${path} or ${runBranchName(id)})`);
   if (typeof g.run_branch !== "string" || typeof g.base_sha !== "string" || !g.merges) {
     throw new Error(`goal ${id} (${path}) is missing run_branch/base_sha/merges — written by an ` + "incompatible sddx version; recreate it with the current graph/goal create");
   }
   return g;
 }
 function writeGoal(cwd, g) {
+  const root = mainRoot(cwd);
   g.updated_at = new Date().toISOString();
-  writeFileSync2(goalPath(cwd, g.id), `${JSON.stringify(g, null, 2)}
-`);
+  const content = `${JSON.stringify(g, null, 2)}
+`;
+  const legacy = goalPath(root, g.id);
+  if (existsSync2(legacy)) {
+    writeFileSync2(legacy, content);
+    return;
+  }
+  commitToBranch(root, g.run_branch, goalBlobPath(g.id), content, `sddx(${g.id}): update goal`);
 }
 function findGoalForTask(cwd, id) {
-  const dir = goalsDir(cwd);
-  if (!existsSync2(dir))
-    return null;
-  for (const f of readdirSync(dir)) {
-    if (!f.endsWith(".json"))
-      continue;
-    let g;
-    try {
-      g = JSON.parse(readFileSync2(join2(dir, f), "utf8"));
-    } catch {
-      continue;
+  const root = mainRoot(cwd);
+  const dir = goalsDir(root);
+  if (existsSync2(dir)) {
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith(".json"))
+        continue;
+      try {
+        const g = JSON.parse(readFileSync2(join2(dir, f), "utf8"));
+        if (g.task_ids.includes(id))
+          return g;
+      } catch {}
     }
-    if (g.task_ids.includes(id))
+  }
+  const branches = sh(root, ["branch", "--list", "sddx/run-*", "--format=%(refname:short)"]);
+  for (const branch of (branches.stdout ?? "").split(`
+`).map((s) => s.trim())) {
+    if (!branch.startsWith("sddx/run-"))
+      continue;
+    const g = readGoalFromBranch(root, branch.slice("sddx/run-".length));
+    if (g?.task_ids.includes(id))
       return g;
   }
   return null;
@@ -7673,7 +7771,7 @@ function readReceiptRawFrom(dir, id) {
   }
 }
 function readReceiptRawFromRef(cwd, ref, id) {
-  const r = spawnSync2("git", ["show", `${ref}:.sddx/receipts/${id}.json`], { cwd });
+  const r = spawnSync3("git", ["show", `${ref}:.sddx/receipts/${id}.json`], { cwd });
   return r.status === 0 ? r.stdout : null;
 }
 function resolveReceiptRaw(cwd, id) {
@@ -7720,9 +7818,9 @@ function verifyChain(cwd) {
 }
 
 // src/lib/sign.ts
-import { spawnSync as spawnSync3 } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync as writeFileSync4 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { spawnSync as spawnSync4 } from "node:child_process";
+import { mkdtempSync as mkdtempSync2, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
+import { homedir, tmpdir as tmpdir2 } from "node:os";
 import { join as join4 } from "node:path";
 var DEFAULT_NAMESPACE = "sddx-receipt";
 var gitConfigCache = new Map;
@@ -7731,7 +7829,7 @@ function gitConfig(cwd, key) {
   const cached = gitConfigCache.get(cacheKey);
   if (cached !== undefined)
     return cached;
-  const r = spawnSync3("git", ["config", "--get", key], { cwd, encoding: "utf8" });
+  const r = spawnSync4("git", ["config", "--get", key], { cwd, encoding: "utf8" });
   const v = r.status === 0 ? (r.stdout ?? "").trim() : "";
   const result = v === "" ? null : v;
   gitConfigCache.set(cacheKey, result);
@@ -7747,7 +7845,7 @@ function signPayload(cwd, payload, namespace = DEFAULT_NAMESPACE) {
   const signer = gitConfig(cwd, "user.email");
   if (!signer)
     return null;
-  const r = spawnSync3("ssh-keygen", ["-Y", "sign", "-n", namespace, "-f", expandHome(key)], {
+  const r = spawnSync4("ssh-keygen", ["-Y", "sign", "-n", namespace, "-f", expandHome(key)], {
     cwd,
     input: payload,
     encoding: "utf8"
@@ -7761,15 +7859,15 @@ function verifySignature(cwd, payload, sig, namespace = DEFAULT_NAMESPACE) {
   const allowed = gitConfig(cwd, "gpg.ssh.allowedSignersFile");
   if (!allowed)
     return "unverifiable";
-  const tmp = mkdtempSync(join4(tmpdir(), "sddx-sig-"));
+  const tmp = mkdtempSync2(join4(tmpdir2(), "sddx-sig-"));
   try {
     const sigFile = join4(tmp, "receipt.sig");
     writeFileSync4(sigFile, `${sig.signature}
 `);
-    const r = spawnSync3("ssh-keygen", ["-Y", "verify", "-f", expandHome(allowed), "-I", sig.signer, "-n", namespace, "-s", sigFile], { cwd, input: payload, encoding: "utf8" });
+    const r = spawnSync4("ssh-keygen", ["-Y", "verify", "-f", expandHome(allowed), "-I", sig.signer, "-n", namespace, "-s", sigFile], { cwd, input: payload, encoding: "utf8" });
     return r.status === 0 ? "valid" : "invalid";
   } finally {
-    rmSync(tmp, { recursive: true, force: true });
+    rmSync2(tmp, { recursive: true, force: true });
   }
 }
 
@@ -7947,7 +8045,7 @@ function autoRefusal(nodes, ceiling, overlaps2, workspaceMode) {
 
 // src/audit.ts
 function gitLines(cwd, ...args) {
-  const r = spawnSync4("git", args, { cwd, encoding: "utf8" });
+  const r = spawnSync5("git", args, { cwd, encoding: "utf8" });
   if (r.status !== 0)
     return { ok: false, lines: [], err: (r.stderr ?? "").trim() };
   return { ok: true, lines: (r.stdout ?? "").split(`
@@ -8066,7 +8164,7 @@ function auditReceipts(cwd, opts = {}) {
       findings.push(`${rel}: working tree differs from committed state — receipt bytes tampered`);
     }
     if (opts.signatures) {
-      const v = spawnSync4("git", ["verify-commit", introducing], { cwd });
+      const v = spawnSync5("git", ["verify-commit", introducing], { cwd });
       if (v.status !== 0) {
         findings.push(`${rel}: binding commit ${introducing.slice(0, 12)} has no valid signature`);
       }
@@ -8286,7 +8384,7 @@ function validateConfigObject(obj) {
 }
 
 // src/lib/worktree.ts
-import { spawnSync as spawnSync6 } from "node:child_process";
+import { spawnSync as spawnSync7 } from "node:child_process";
 import {
   appendFileSync,
   copyFileSync,
@@ -8296,16 +8394,16 @@ import {
   readFileSync as readFileSync7,
   realpathSync,
   rmdirSync,
-  rmSync as rmSync2,
+  rmSync as rmSync3,
   statSync,
   writeFileSync as writeFileSync6
 } from "node:fs";
-import { dirname as dirname2, isAbsolute, join as join8, relative } from "node:path";
+import { dirname as dirname2, isAbsolute as isAbsolute2, join as join8, relative } from "node:path";
 
 // src/lib/git.ts
-import { spawnSync as spawnSync5 } from "node:child_process";
+import { spawnSync as spawnSync6 } from "node:child_process";
 function git(cwd, ...args) {
-  const r = spawnSync5("git", args, { cwd, encoding: "utf8" });
+  const r = spawnSync6("git", args, { cwd, encoding: "utf8" });
   if (r.error)
     throw new Error(`git not runnable: ${r.error.message}`);
   if (r.status !== 0) {
@@ -8322,7 +8420,7 @@ var createBranchAt = (cwd, name, sha) => {
   git(cwd, "branch", name, sha);
 };
 function branchExists(cwd, name) {
-  const r = spawnSync5("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${name}`], {
+  const r = spawnSync6("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${name}`], {
     cwd
   });
   return r.status === 0;
@@ -8338,22 +8436,22 @@ var forceDeleteBranch = (cwd, name) => {
   git(cwd, "branch", "-D", name);
 };
 function remoteUrl(cwd, remote) {
-  const r = spawnSync5("git", ["remote", "get-url", remote], { cwd, encoding: "utf8" });
+  const r = spawnSync6("git", ["remote", "get-url", remote], { cwd, encoding: "utf8" });
   return r.status === 0 ? r.stdout.trim() : null;
 }
 function upstreamBranch(cwd) {
-  const r = spawnSync5("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], {
+  const r = spawnSync6("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], {
     cwd,
     encoding: "utf8"
   });
   return r.status === 0 ? r.stdout.trim() : null;
 }
 function commitsAheadOfUpstream(cwd) {
-  const r = spawnSync5("git", ["rev-list", "--count", "@{u}..HEAD"], { cwd, encoding: "utf8" });
+  const r = spawnSync6("git", ["rev-list", "--count", "@{u}..HEAD"], { cwd, encoding: "utf8" });
   return r.status === 0 ? Number(r.stdout.trim()) : 0;
 }
 function defaultBranch(cwd) {
-  const r = spawnSync5("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], {
+  const r = spawnSync6("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], {
     cwd,
     encoding: "utf8"
   });
@@ -8382,14 +8480,14 @@ function commit(cwd, message) {
 // src/lib/worktree.ts
 var worktreesDir = (cwd) => join8(cwd, ".sddx-worktrees");
 function tryRev(cwd, ref) {
-  const r = spawnSync6("git", ["rev-parse", "--verify", "--quiet", ref], {
+  const r = spawnSync7("git", ["rev-parse", "--verify", "--quiet", ref], {
     cwd,
     encoding: "utf8"
   });
   return r.status === 0 ? r.stdout.trim() : null;
 }
 function resolveBaseRef(cwd) {
-  const symref = spawnSync6("git", ["symbolic-ref", "-q", "refs/remotes/origin/HEAD"], {
+  const symref = spawnSync7("git", ["symbolic-ref", "-q", "refs/remotes/origin/HEAD"], {
     cwd,
     encoding: "utf8"
   });
@@ -8410,7 +8508,7 @@ function resolveBaseRef(cwd) {
 }
 var gitCommonDir = (cwd) => {
   const dir = git(cwd, "rev-parse", "--git-common-dir");
-  return isAbsolute(dir) ? dir : join8(cwd, dir);
+  return isAbsolute2(dir) ? dir : join8(cwd, dir);
 };
 var resolveMainRepoRoot = (cwd) => dirname2(gitCommonDir(cwd));
 var EXCLUDE_LINE = ".sddx-worktrees/";
@@ -8435,7 +8533,7 @@ function worktreeAvailable(cwd) {
   } catch {
     return false;
   }
-  return spawnSync6("git", ["worktree", "list"], { cwd: root }).status === 0;
+  return spawnSync7("git", ["worktree", "list"], { cwd: root }).status === 0;
 }
 function createWorktree(cwd, id, baseSha) {
   const root = resolveMainRepoRoot(cwd);
@@ -8447,12 +8545,12 @@ function createWorktree(cwd, id, baseSha) {
 }
 function mergeParentsSequential(worktreePath, remaining) {
   for (const sha of remaining) {
-    const r = spawnSync6("git", ["merge", "--no-ff", "-m", `sddx: merge dependency ${sha}`, sha], {
+    const r = spawnSync7("git", ["merge", "--no-ff", "-m", `sddx: merge dependency ${sha}`, sha], {
       cwd: worktreePath,
       encoding: "utf8"
     });
     if (r.status !== 0) {
-      spawnSync6("git", ["merge", "--abort"], { cwd: worktreePath });
+      spawnSync7("git", ["merge", "--abort"], { cwd: worktreePath });
       throw new Error(`merge of ${sha} failed: ${(r.stderr ?? r.stdout ?? "").trim()}`);
     }
   }
@@ -8529,9 +8627,9 @@ function materializeDependent(cwd, taskId2) {
     path: join8(".sddx-worktrees", taskId2)
   };
   writeTask(path, task);
-  rmSync2(join8(cwd, ".sddx", "tasks", `${taskId2}.json`), { force: true });
+  rmSync3(join8(cwd, ".sddx", "tasks", `${taskId2}.json`), { force: true });
   if (existsSync7(specSrc))
-    rmSync2(specSrc, { force: true });
+    rmSync3(specSrc, { force: true });
   return { path, baseSha: finalSha, mode: "worktree" };
 }
 function retryWorkspace(cwd, task) {
@@ -8651,11 +8749,11 @@ function listSddxWorktrees(cwd) {
   return entries;
 }
 function hasSubmodules(cwd, baseSha) {
-  const r = spawnSync6("git", ["cat-file", "-e", `${baseSha}:.gitmodules`], { cwd });
+  const r = spawnSync7("git", ["cat-file", "-e", `${baseSha}:.gitmodules`], { cwd });
   return r.status === 0;
 }
 function submodulePaths(cwd, baseSha) {
-  const r = spawnSync6("git", ["show", `${baseSha}:.gitmodules`], { cwd, encoding: "utf8" });
+  const r = spawnSync7("git", ["show", `${baseSha}:.gitmodules`], { cwd, encoding: "utf8" });
   if (r.status !== 0 || typeof r.stdout !== "string")
     return [];
   const paths = [];
@@ -8961,14 +9059,14 @@ function computeBoard(cwd) {
 }
 
 // src/lib/next-actions.ts
-import { spawnSync as spawnSync9 } from "node:child_process";
+import { spawnSync as spawnSync10 } from "node:child_process";
 import { existsSync as existsSync10, readFileSync as readFileSync9 } from "node:fs";
 import { join as join11 } from "node:path";
 
 // src/lib/prhost.ts
-import { spawnSync as spawnSync7 } from "node:child_process";
+import { spawnSync as spawnSync8 } from "node:child_process";
 function run(cli, args, cwd) {
-  return spawnSync7(cli, args, { cwd, encoding: "utf8", env: process.env });
+  return spawnSync8(cli, args, { cwd, encoding: "utf8", env: process.env });
 }
 var ghBackend = {
   name: "gh",
@@ -9119,14 +9217,14 @@ function createGoalPr(cwd, id, opts = {}) {
 }
 
 // src/lib/runbranch.ts
-import { spawnSync as spawnSync8 } from "node:child_process";
+import { spawnSync as spawnSync9 } from "node:child_process";
 import { existsSync as existsSync9, mkdirSync as mkdirSync7, rmdirSync as rmdirSync2, statSync as statSync2 } from "node:fs";
-import { isAbsolute as isAbsolute2, join as join10 } from "node:path";
+import { isAbsolute as isAbsolute3, join as join10 } from "node:path";
 var LOCK_STALE_MS2 = 5 * 60000;
 var LOCK_TIMEOUT_MS = 30000;
 function gitCommonDir2(cwd) {
   const dir = git(cwd, "rev-parse", "--git-common-dir");
-  return isAbsolute2(dir) ? dir : join10(cwd, dir);
+  return isAbsolute3(dir) ? dir : join10(cwd, dir);
 }
 function withGoalLock(root, goalId2, fn) {
   const lockPath = join10(gitCommonDir2(root), `sddx-runbranch-${goalId2}.lock`);
@@ -9145,7 +9243,7 @@ function withGoalLock(root, goalId2, fn) {
       if (Date.now() > deadline) {
         throw new Error(`timed out waiting for run-branch integration lock on goal ${goalId2}`);
       }
-      spawnSync8("sleep", ["0.1"]);
+      spawnSync9("sleep", ["0.1"]);
     }
   }
   try {
@@ -9170,9 +9268,9 @@ function integrateTaskIntoRunBranch(taskCwd, id) {
     git(root, "worktree", "add", "-q", tmpPath, goal.run_branch);
     let result;
     try {
-      const r = spawnSync8("git", ["merge", "--no-ff", "-m", `sddx: merge ${id} into ${goal.run_branch}`, branch], { cwd: tmpPath, encoding: "utf8" });
+      const r = spawnSync9("git", ["merge", "--no-ff", "-m", `sddx: merge ${id} into ${goal.run_branch}`, branch], { cwd: tmpPath, encoding: "utf8" });
       if (r.status !== 0) {
-        spawnSync8("git", ["merge", "--abort"], { cwd: tmpPath });
+        spawnSync9("git", ["merge", "--abort"], { cwd: tmpPath });
         result = { result: "conflict", runBranch: goal.run_branch };
       } else {
         const mergeSha = git(tmpPath, "rev-parse", "HEAD");
@@ -9275,7 +9373,7 @@ function runTestsAction(cwd) {
   }
   if (!hasTestScript)
     return { ok: false, message: 'no "test" script in package.json' };
-  const r = spawnSync9("npm", ["test", "--silent"], { cwd, encoding: "utf8" });
+  const r = spawnSync10("npm", ["test", "--silent"], { cwd, encoding: "utf8" });
   const output = ((r.stdout ?? "") + (r.stderr ?? "")).trim();
   return { ok: r.status === 0, message: output || `exit ${r.status}` };
 }
@@ -9916,11 +10014,11 @@ class Reporter {
 }
 
 // src/lib/oracle.ts
-import { spawnSync as spawnSync10 } from "node:child_process";
+import { spawnSync as spawnSync11 } from "node:child_process";
 var ORACLE_TIMEOUT_MS = 10 * 60000;
 function runOracle(cwd, run2) {
   const started = Date.now();
-  const r = spawnSync10("sh", ["-c", run2], { cwd, timeout: ORACLE_TIMEOUT_MS });
+  const r = spawnSync11("sh", ["-c", run2], { cwd, timeout: ORACLE_TIMEOUT_MS });
   if (r.error)
     throw new Error(`oracle could not run: ${r.error.message}`);
   return {
@@ -9960,7 +10058,7 @@ function generateRunReport(cwd, goalId2, targetBranch) {
   const merged = currentlyMergedTaskIds(goal);
   const failed = goal.task_ids.filter((id) => !merged.includes(id) && resolveTaskState(cwd, id)?.phase === "ABANDONED");
   const outstanding = goal.task_ids.filter((id) => !merged.includes(id) && !failed.includes(id));
-  const diffStat = git(cwd, "diff", "--stat", `${goal.base_sha}...${goal.run_branch}`);
+  const diffStat = git(cwd, "diff", "--stat", `${goal.base_sha}...${goal.run_branch}`, "--", ".", ":(exclude).sddx/goals");
   const oracles = [];
   const assumptions = [];
   for (const id of goal.task_ids) {
@@ -10136,11 +10234,11 @@ function parseSpec(yamlText) {
 }
 
 // src/lib/envinfo.ts
-import { spawnSync as spawnSync11 } from "node:child_process";
+import { spawnSync as spawnSync12 } from "node:child_process";
 import { arch, platform } from "node:os";
 function captureEnv(cwd) {
   const bun = globalThis.Bun;
-  const status = spawnSync11("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
+  const status = spawnSync12("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
   return {
     os: platform(),
     arch: arch(),
@@ -10395,7 +10493,7 @@ class Rollback {
           join13(sddxDir(cwd), "specs", `${id}.yaml`)
         ]) {
           if (existsSync12(p))
-            rmSync3(p, { force: true });
+            rmSync4(p, { force: true });
         }
       }
     });

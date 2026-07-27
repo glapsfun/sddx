@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fixtureClone, fixtureRepo } from "./fixtures";
-import { fakeRedCheck, repoRoot } from "./helpers";
+import { fakeRedCheck, goalIds, readGoalAnywhere, repoRoot } from "./helpers";
 
 const PACKAGE_VERSION = (
   JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as { version: string }
@@ -299,7 +299,7 @@ describe("sddx cli", () => {
     );
     expect(r.status).toBe(0);
     const goalId = /created goal (\S+)/.exec(r.stdout)![1]!;
-    const goal = JSON.parse(readFileSync(join(cwd, ".sddx", "goals", `${goalId}.json`), "utf8"));
+    const goal = readGoalAnywhere(cwd, goalId) as any;
     expect(goal.task_ids.length).toBe(2);
     // the dependent records its parent as an edge and is deferred
     const [rootId, childId] = goal.task_ids as [string, string];
@@ -337,7 +337,7 @@ describe("sddx cli", () => {
     expect(r.stderr).toContain("scope overlap");
     // atomic: no task files, no goal directory
     expect(existsSync(join(cwd, ".sddx", "tasks"))).toBe(false);
-    expect(existsSync(join(cwd, ".sddx", "goals"))).toBe(false);
+    expect(goalIds(cwd)).toEqual([]);
   });
 
   test("graph create: a node whose spec lacks an oracle is refused, nothing written", () => {
@@ -440,7 +440,7 @@ describe("sddx cli", () => {
     );
     expect(r.status).toBe(0);
     const goalId = /created goal (\S+)/.exec(r.stdout)![1]!;
-    const goal = JSON.parse(readFileSync(join(cwd, ".sddx", "goals", `${goalId}.json`), "utf8"));
+    const goal = readGoalAnywhere(cwd, goalId) as any;
     const policyState = JSON.parse(
       readFileSync(join(cwd, ".sddx", "tasks", `${goal.task_ids[0]}.json`), "utf8"),
     );
@@ -473,7 +473,7 @@ describe("sddx cli", () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("on_dependency_failure");
     expect(existsSync(join(cwd, ".sddx", "tasks"))).toBe(false);
-    expect(existsSync(join(cwd, ".sddx", "goals"))).toBe(false);
+    expect(goalIds(cwd)).toEqual([]);
   });
 
   test("task create --depends-on refuses none mode and overlapping siblings", () => {

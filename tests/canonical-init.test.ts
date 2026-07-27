@@ -11,7 +11,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fixtureClone } from "./fixtures";
-import { repoRoot } from "./helpers";
+import { goalIds, repoRoot } from "./helpers";
 
 const CLI = join(repoRoot, "src/cli.ts");
 const cli = (cwd: string, ...args: string[]) =>
@@ -43,7 +43,7 @@ function approveAndCreate(cwd: string, rel: string) {
 function runState(cwd: string) {
   const dir = (p: string) => (existsSync(join(cwd, p)) ? readdirSync(join(cwd, p)) : []);
   return {
-    goals: dir(join(".sddx", "goals")),
+    goals: goalIds(cwd),
     tasks: dir(join(".sddx", "tasks")),
     worktrees: dir(".sddx-worktrees"),
     branches: g(cwd, "branch", "--list", "sddx/*").stdout.trim(),

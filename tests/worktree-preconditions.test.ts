@@ -25,6 +25,7 @@ import {
   worktreeAvailable,
 } from "../src/lib/worktree";
 import { fixtureRepo } from "./fixtures";
+import { goalIds } from "./helpers";
 
 const g = (cwd: string, ...args: string[]) => spawnSync("git", args, { cwd, encoding: "utf8" });
 const head = (cwd: string) => g(cwd, "rev-parse", "HEAD").stdout.trim();
@@ -170,7 +171,7 @@ describe("the canonical create path refuses rather than downgrading", () => {
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("vendor/lib");
     expect(r.stderr).toContain('task "a"');
-    expect(existsSync(join(repo, ".sddx", "goals"))).toBe(false);
+    expect(goalIds(repo)).toEqual([]);
   });
 
   test("a scopeless task in a submodule repository refuses", () => {
@@ -180,7 +181,7 @@ describe("the canonical create path refuses rather than downgrading", () => {
     const r = cli(repo, "graph", "create", "--graph", rel, "--workspace", "worktree");
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("no scope");
-    expect(existsSync(join(repo, ".sddx", "goals"))).toBe(false);
+    expect(goalIds(repo)).toEqual([]);
   });
 
   test("the dry run reports the same refusal a real create would", () => {

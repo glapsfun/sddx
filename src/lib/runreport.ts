@@ -49,7 +49,20 @@ export function generateRunReport(cwd: string, goalId: string, targetBranch: str
     (id) => !merged.includes(id) && resolveTaskState(cwd, id)?.phase === "ABANDONED",
   );
   const outstanding = goal.task_ids.filter((id) => !merged.includes(id) && !failed.includes(id));
-  const diffStat = git(cwd, "diff", "--stat", `${goal.base_sha}...${goal.run_branch}`);
+  // Excludes sddx's own bookkeeping. The goal record is committed to the run
+  // branch (it holds the merge log, the single source of truth for integration
+  // state, which as loose local state could not be audited and did not travel
+  // with a push) — but it is not work the user is reviewing, and a run where
+  // nothing merged must still report an empty diff.
+  const diffStat = git(
+    cwd,
+    "diff",
+    "--stat",
+    `${goal.base_sha}...${goal.run_branch}`,
+    "--",
+    ".",
+    ":(exclude).sddx/goals",
+  );
 
   const oracles: OracleOutcome[] = [];
   const assumptions: string[] = [];

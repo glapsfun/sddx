@@ -8633,8 +8633,6 @@ function writeApproval(cwd, input) {
   const approval = {
     plan_sha256: input.plan_sha256,
     mode: input.mode,
-    ...input.requested_mode ? { requested_mode: input.requested_mode } : {},
-    ...input.degraded_reason ? { degraded_reason: input.degraded_reason } : {},
     ...input.workspace_mode ? { workspace_mode: input.workspace_mode } : {},
     at: new Date().toISOString(),
     ...sig ? { signature: sig.signature, signer: sig.signer } : {},
@@ -8676,6 +8674,31 @@ var SELF_MODIFYING_GLOBS = [
   "bin/**",
   ".claude/**"
 ];
+var SENSITIVE_SEGMENTS = [
+  "auth",
+  "migrations",
+  "secrets",
+  "credentials",
+  "billing"
+];
+var SENSITIVE_GLOBS = [
+  "infra/**",
+  "terraform/**",
+  "k8s/**",
+  "Dockerfile*",
+  ".env*"
+];
+function namesSensitiveArea(scope) {
+  for (const glob of scope) {
+    for (const seg of glob.replace(/\\/g, "/").split("/")) {
+      const s = seg.toLowerCase();
+      if (SENSITIVE_SEGMENTS.includes(s))
+        return s;
+    }
+  }
+  return;
+}
+var REMEDY = 'To review and run this plan yourself, set "execution_mode": "human" in .sddx/config.json.';
 function decideGate(cwd, graphPath, nodes, requestedMode, ceiling, overlaps2, workspaceMode) {
   const { hash, errors: errors2 } = planHash(graphPath);
   const base = { hash, requestedMode, nodeCount: nodes.length };
@@ -8683,15 +8706,9 @@ function decideGate(cwd, graphPath, nodes, requestedMode, ceiling, overlaps2, wo
     return { ...base, ok: false, mode: "human", reason: errors2.join("; ") || "plan unreadable" };
   }
   if (requestedMode === "auto") {
-    const manual = nodes.find((n) => n.oracleType === "manual");
-    if (manual) {
-      return {
-        ...base,
-        ok: false,
-        mode: "auto",
-        refusal: `node "${manual.alias}" declares oracle.type: manual — an unattended run has nobody to observe it. Use an executable oracle, or run in human mode.`
-      };
-    }
+    const refusal = autoRefusal(nodes, ceiling, overlaps2, workspaceMode);
+    if (refusal)
+      return { ...base, ok: false, mode: "auto", refusal };
   }
   const approval = readApproval(cwd, hash);
   if (approval) {
@@ -8713,38 +8730,38 @@ function decideGate(cwd, graphPath, nodes, requestedMode, ceiling, overlaps2, wo
       reason: `no approval on file for plan ${hash.slice(0, 12)} — review it with: sddx graph create --graph <path> --dry-run, then approve with: sddx graph approve --graph <path>`
     };
   }
-  if (workspaceMode === "none") {
-    const why = 'workspace "none" runs every task directly in the working checkout instead of an isolated worktree';
-    return {
-      ...base,
-      ok: false,
-      mode: "human",
-      degradedReason: why,
-      reason: `auto mode degraded to human: ${why}`
-    };
-  }
-  const overCeiling = nodes.length > ceiling;
-  const selfModifying = nodes.find((n) => n.scope.length === 0 || overlaps2(n.scope, [...SELF_MODIFYING_GLOBS]));
-  if (selfModifying) {
-    const why = selfModifying.scope.length === 0 ? `node "${selfModifying.alias}" declares no scope, so it is unconfined and may write sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")})` : `node "${selfModifying.alias}" declares a scope reaching sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")})`;
-    return {
-      ...base,
-      ok: false,
-      mode: "human",
-      degradedReason: why,
-      reason: `auto mode degraded to human: ${why}`
-    };
-  }
-  if (overCeiling) {
-    return {
-      ...base,
-      ok: false,
-      mode: "human",
-      degradedReason: `plan has ${nodes.length} nodes, over the auto_max_tasks ceiling of ${ceiling}`,
-      reason: `auto mode degraded to human: ${nodes.length} nodes exceeds auto_max_tasks=${ceiling}`
-    };
-  }
   return { ...base, ok: true, mode: "auto" };
+}
+function autoRefusal(nodes, ceiling, overlaps2, workspaceMode) {
+  const manual = nodes.find((n) => n.oracleType === "manual");
+  if (manual) {
+    return `node "${manual.alias}" declares oracle.type: manual — an unattended run has nobody to observe it. Use an executable oracle, or run in human mode. ${REMEDY}`;
+  }
+  if (workspaceMode === "none") {
+    return `workspace "none" runs every task directly in the working checkout instead of an isolated worktree, which an unattended run must not do. ${REMEDY}`;
+  }
+  const unconfined = nodes.find((n) => n.scope.length === 0);
+  if (unconfined) {
+    return `node "${unconfined.alias}" declares no scope, so it is unconfined and may write sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")}) or protected paths (${SENSITIVE_SEGMENTS.join(", ")}, ${SENSITIVE_GLOBS.join(", ")}). ${REMEDY}`;
+  }
+  const selfModifying = nodes.find((n) => overlaps2(n.scope, [...SELF_MODIFYING_GLOBS]));
+  if (selfModifying) {
+    return `node "${selfModifying.alias}" declares a scope reaching sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")}). ${REMEDY}`;
+  }
+  for (const n of nodes) {
+    const named = namesSensitiveArea(n.scope);
+    if (named) {
+      return `node "${n.alias}" declares a scope naming the protected area "${named}" — a security, data, billing, or deployment decision is not one an unattended run may take. ${REMEDY}`;
+    }
+  }
+  const sensitive = nodes.find((n) => overlaps2(n.scope, [...SENSITIVE_GLOBS]));
+  if (sensitive) {
+    return `node "${sensitive.alias}" declares a scope reaching protected paths (${SENSITIVE_GLOBS.join(", ")}) — a security, data, billing, or deployment decision is not one an unattended run may take. ${REMEDY}`;
+  }
+  if (nodes.length > ceiling) {
+    return `plan has ${nodes.length} nodes, over the auto_max_tasks ceiling of ${ceiling}. ${REMEDY}`;
+  }
+  return;
 }
 
 // src/lib/spec.ts

@@ -210,25 +210,39 @@ describe("auto mode end-to-end", () => {
     expect(cli(cwd, auto, "audit").status).toBe(0);
   }, 60_000);
 
-  test("exceeding auto_max_tasks arms the gate and records the degradation", () => {
+  test("exceeding auto_max_tasks refuses terminally and cannot be approved away", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, 3);
     withMode(cwd, "auto", 2);
     const capped = auto;
 
-    const armed = cli(cwd, capped, "graph", "create", "--graph", rel);
-    expect(armed.status).toBe(3);
-    expect(armed.stderr).toContain("auto_max_tasks=2");
+    const refused = cli(cwd, capped, "graph", "create", "--graph", rel);
+    expect(refused.status).not.toBe(0);
+    // exit 3 is "approval required"; a bound refuses rather than arming the gate
+    expect(refused.status).not.toBe(3);
+    expect(refused.stderr).toContain("auto_max_tasks");
     expect(materialized(cwd)).toEqual({ goals: [], branches: "", worktrees: [] });
 
-    // approving lets it through, and the degradation is recorded on the goal
-    expect(cli(cwd, capped, "graph", "approve", "--graph", rel).status).toBe(0);
-    const created = cli(cwd, capped, "graph", "create", "--graph", rel, "--output", "json");
+    // No token can buy the run: approving is a human act, so it belongs to
+    // human mode. Previously this path produced a run recorded `auto` that a
+    // human had in fact approved — the hybrid this behavior removes.
+    expect(cli(cwd, capped, "graph", "approve", "--graph", rel).status).not.toBe(0);
+    expect(cli(cwd, capped, "graph", "create", "--graph", rel).status).not.toBe(0);
+    expect(materialized(cwd)).toEqual({ goals: [], branches: "", worktrees: [] });
+  }, 60_000);
+
+  test("the same plan runs once configuration selects human mode", () => {
+    const { clone: cwd } = fixtureClone();
+    const rel = planRepo(cwd, 3);
+    withMode(cwd, "human", 2);
+    expect(cli(cwd, human, "graph", "approve", "--graph", rel).status).toBe(0);
+    const created = cli(cwd, human, "graph", "create", "--graph", rel, "--output", "json");
     expect(created.status).toBe(0);
     const goalId = JSON.parse(created.stdout).data.goalId as string;
     const goal = JSON.parse(readFileSync(join(cwd, ".sddx", "goals", `${goalId}.json`), "utf8"));
-    // the token was written under human mode, which is what actually applied
     expect(goal.approval.mode).toBe("human");
+    expect(goal.approval.requested_mode).toBeUndefined();
+    expect(goal.approval.degraded_reason).toBeUndefined();
   }, 60_000);
 
   test("the completion summary has identical sections in both modes", () => {

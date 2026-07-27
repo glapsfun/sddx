@@ -21,9 +21,12 @@ export interface Approval {
   plan_sha256: string;
   /** The mode the plan was approved to run under. */
   mode: ExecutionMode;
-  /** Set only when `auto` was requested but a blast-radius bound armed the gate. */
+  /** READ-ONLY COMPATIBILITY. Written by versions in which an `auto` plan over a
+   * blast-radius bound degraded into `human` and was approved anyway. Bounds are
+   * hard refusals now, so no such hybrid exists and nothing writes these — but
+   * tokens on disk still carry them and must keep parsing for audit. */
   requested_mode?: ExecutionMode;
-  /** The bound that forced the degradation, when one did. */
+  /** READ-ONLY COMPATIBILITY — see `requested_mode`. */
   degraded_reason?: string;
   at: string;
   /** The `--workspace` strategy this plan was approved under. A token does not
@@ -104,17 +107,15 @@ export function writeApproval(
   input: {
     plan_sha256: string;
     mode: ExecutionMode;
-    requested_mode?: ExecutionMode;
-    degraded_reason?: string;
     workspace_mode?: string;
   },
 ): Approval {
   const sig = signPayload(cwd, input.plan_sha256, "sddx-approval");
+  // No `requested_mode`/`degraded_reason`: an `auto` plan over a bound is
+  // refused now, so a token can never describe a degraded-then-approved run.
   const approval: Approval = {
     plan_sha256: input.plan_sha256,
     mode: input.mode,
-    ...(input.requested_mode ? { requested_mode: input.requested_mode } : {}),
-    ...(input.degraded_reason ? { degraded_reason: input.degraded_reason } : {}),
     ...(input.workspace_mode ? { workspace_mode: input.workspace_mode } : {}),
     at: new Date().toISOString(),
     ...(sig ? { signature: sig.signature, signer: sig.signer } : {}),
@@ -188,13 +189,11 @@ export interface GateDecision {
   /** True when creation may proceed without asking a human. */
   ok: boolean;
   hash: string;
-  /** The mode that will actually apply. `auto` degrades to `human` when a
-   * blast-radius bound is exceeded — never a separate code path, just the gate
-   * arming as it always would. */
+  /** The mode that applies. Exceeding an autonomy bound no longer turns `auto`
+   * into `human` — it refuses — so this never reports a mode the caller did not
+   * configure. */
   mode: ExecutionMode;
   requestedMode: ExecutionMode;
-  /** Set when `auto` degraded; names the bound that forced it. */
-  degradedReason?: string;
   /** Why approval is still required, when `ok` is false. */
   reason?: string;
   /** A hard refusal — not a gate arming. Creation must fail, not ask. */
@@ -218,6 +217,73 @@ export const SELF_MODIFYING_GLOBS = [
   // Where a downstream repo declares its own hooks and permissions.
   ".claude/**",
 ] as const;
+
+/**
+ * The DETERMINISTIC half of the autonomous blocker rule, and the half that
+ * matters. The other half — an intake role reporting its own `unresolved`
+ * decisions — is a model claim, and a model that assumes its way past an auth
+ * change reports nothing unresolved. Everywhere else this project replaced a
+ * model claim with an exit code; here it is replaced with constants that fire
+ * whether or not anything self-reported a problem.
+ *
+ * TWO mechanisms, because one does not work. `scopesOverlap` asks "could any
+ * path match both", which is right for the disjointness gate (uncertainty →
+ * force an order, costing only time) and wrong here: against a doubled-star
+ * pattern such as "any-depth / auth / any-depth", EVERY scope ending in a
+ * doubled star overlaps, since `src/widget/...` could write
+ * `src/widget/auth/x`. That refuses every realistic plan and turns auto mode
+ * off rather than bounding it.
+ *
+ * So a scope is protected when it NAMES a protected area — a literal segment
+ * below — or when it overlaps a root-anchored location. Naming catches nesting
+ * at any depth (`services/api/auth/...`) without the wildcard blowup.
+ *
+ * Known gap, accepted deliberately: a broad scope naming nothing protected
+ * (`src/**`) passes, even though it could write `src/auth/session.ts`. Closing
+ * it means refusing every broad scope, which is the failure mode above. The
+ * unconfined-scope bound catches the extreme case (no scope at all), and human
+ * mode reviews the rest.
+ *
+ * Human mode does NOT consult either list — explicit approval is already
+ * required there, so applying this twice would only block work under review.
+ */
+export const SENSITIVE_SEGMENTS = [
+  "auth",
+  "migrations",
+  "secrets",
+  "credentials",
+  "billing",
+] as const;
+
+/** Root-anchored protected locations, matched by ordinary scope overlap. These
+ * are files and top-level directories rather than nameable areas, so the
+ * segment rule above cannot express them. */
+export const SENSITIVE_GLOBS = [
+  "infra/**",
+  "terraform/**",
+  "k8s/**",
+  "Dockerfile*",
+  ".env*",
+] as const;
+
+/** Does this scope glob name a protected area at any depth? Compares literal
+ * segments only — a wildcard segment names nothing, which is what keeps
+ * `src/**` out of this and `src/auth/**` in it. */
+export function namesSensitiveArea(scope: string[]): string | undefined {
+  for (const glob of scope) {
+    for (const seg of glob.replace(/\\/g, "/").split("/")) {
+      const s = seg.toLowerCase();
+      if ((SENSITIVE_SEGMENTS as readonly string[]).includes(s)) return s;
+    }
+  }
+  return undefined;
+}
+
+/** How a refused auto plan is made actionable. Mode is config-only by design
+ * (see `executionMode`), so the remedy is an edit to a reviewed file — never a
+ * flag or an environment variable, both of which the agent composes itself. */
+const REMEDY =
+  'To review and run this plan yourself, set "execution_mode": "human" in .sddx/config.json.';
 
 /**
  * The single approval decision, shared by the CLI predicate and the PreToolUse
@@ -247,18 +313,15 @@ export function decideGate(
     return { ...base, ok: false, mode: "human", reason: errors.join("; ") || "plan unreadable" };
   }
 
+  // Every autonomy bound is a hard refusal, and every one is evaluated BEFORE
+  // the token check. Ordering is the whole design: a token cannot buy an
+  // unattended run past a bound, because writing a token is a human act and a
+  // human acts in human mode. The previous ordering — bounds after the token,
+  // arming the gate instead of refusing — meant `graph approve` in auto mode
+  // produced a run recorded `auto` that a human had in fact approved.
   if (requestedMode === "auto") {
-    // Hard refusal: nobody is present to observe a manual oracle. This is
-    // incoherence, not risk appetite, so it fails rather than arming the gate.
-    const manual = nodes.find((n) => n.oracleType === "manual");
-    if (manual) {
-      return {
-        ...base,
-        ok: false,
-        mode: "auto",
-        refusal: `node "${manual.alias}" declares oracle.type: manual — an unattended run has nobody to observe it. Use an executable oracle, or run in human mode.`,
-      };
-    }
+    const refusal = autoRefusal(nodes, ceiling, overlaps, workspaceMode);
+    if (refusal) return { ...base, ok: false, mode: "auto", refusal };
   }
 
   const approval = readApproval(cwd, hash);
@@ -291,58 +354,68 @@ export function decideGate(
     };
   }
 
-  // auto: within bounds it self-approves; over them the gate arms exactly as it
-  // would in human mode. Degradation is recorded, never silent.
-
-  // Isolation is a blast-radius bound, not a preference. `--workspace none` runs
-  // every task in the user's live checkout instead of a worktree, mutating the
-  // branch they are sitting on — unattended. The token path above already
-  // refuses to let a `worktree` render authorize `none`, but that check needs a
-  // token, so on the self-approving auto path nothing was checking it at all,
-  // and the strategy comes from the command line the agent itself composes.
-  if (workspaceMode === "none") {
-    const why =
-      'workspace "none" runs every task directly in the working checkout instead of an isolated worktree';
-    return {
-      ...base,
-      ok: false,
-      mode: "human",
-      degradedReason: why,
-      reason: `auto mode degraded to human: ${why}`,
-    };
-  }
-
-  const overCeiling = nodes.length > ceiling;
-  // An EMPTY scope is unconfined — the task may write anywhere, which includes
-  // sddx's own enforcement paths. Treating "no scope" as "no reach" would have
-  // penalized honest scope declarations and made omitting `scope` a bypass, so
-  // an unconfined node trips this bound exactly as an explicitly-reaching one does.
-  const selfModifying = nodes.find(
-    (n) => n.scope.length === 0 || overlaps(n.scope, [...SELF_MODIFYING_GLOBS]),
-  );
-  if (selfModifying) {
-    const why =
-      selfModifying.scope.length === 0
-        ? `node "${selfModifying.alias}" declares no scope, so it is unconfined and may write sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")})`
-        : `node "${selfModifying.alias}" declares a scope reaching sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")})`;
-    return {
-      ...base,
-      ok: false,
-      mode: "human",
-      degradedReason: why,
-      reason: `auto mode degraded to human: ${why}`,
-    };
-  }
-  if (overCeiling) {
-    return {
-      ...base,
-      ok: false,
-      mode: "human",
-      degradedReason: `plan has ${nodes.length} nodes, over the auto_max_tasks ceiling of ${ceiling}`,
-      reason: `auto mode degraded to human: ${nodes.length} nodes exceeds auto_max_tasks=${ceiling}`,
-    };
-  }
   return { ...base, ok: true, mode: "auto" };
+}
+
+/**
+ * Every bound an unattended plan must clear, in precedence order, or `undefined`
+ * when it clears them all. Returning the FIRST failure keeps the message about
+ * one thing a user can act on rather than a list.
+ *
+ * Precedence is deliberate: incoherence (a manual oracle nobody can observe)
+ * before isolation, isolation before reach, reach before scale. A plan that is
+ * both unconfined and over the ceiling is better described by the former.
+ */
+function autoRefusal(
+  nodes: GateNode[],
+  ceiling: number,
+  overlaps: (a: string[], b: string[]) => boolean,
+  workspaceMode?: string,
+): string | undefined {
+  // Nobody is present to observe a manual oracle. Incoherence, not risk appetite.
+  const manual = nodes.find((n) => n.oracleType === "manual");
+  if (manual) {
+    return `node "${manual.alias}" declares oracle.type: manual — an unattended run has nobody to observe it. Use an executable oracle, or run in human mode. ${REMEDY}`;
+  }
+
+  // Isolation is a bound, not a preference. `--workspace none` runs every task
+  // in the user's live checkout, mutating the branch they are sitting on —
+  // unattended — and the strategy comes from the command line the agent composes.
+  if (workspaceMode === "none") {
+    return `workspace "none" runs every task directly in the working checkout instead of an isolated worktree, which an unattended run must not do. ${REMEDY}`;
+  }
+
+  // An EMPTY scope is unconfined — the task may write anywhere, which includes
+  // both sddx's own enforcement paths and every protected path below. Treating
+  // "no scope" as "no reach" would penalize honest scope declarations and make
+  // omitting `scope` the cheapest bypass of both bounds.
+  const unconfined = nodes.find((n) => n.scope.length === 0);
+  if (unconfined) {
+    return `node "${unconfined.alias}" declares no scope, so it is unconfined and may write sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")}) or protected paths (${SENSITIVE_SEGMENTS.join(", ")}, ${SENSITIVE_GLOBS.join(", ")}). ${REMEDY}`;
+  }
+
+  const selfModifying = nodes.find((n) => overlaps(n.scope, [...SELF_MODIFYING_GLOBS]));
+  if (selfModifying) {
+    return `node "${selfModifying.alias}" declares a scope reaching sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")}). ${REMEDY}`;
+  }
+
+  // Security, data, billing, and deployment decisions. Deterministic by design,
+  // and matched two ways — see the SENSITIVE_SEGMENTS note for why one is not enough.
+  for (const n of nodes) {
+    const named = namesSensitiveArea(n.scope);
+    if (named) {
+      return `node "${n.alias}" declares a scope naming the protected area "${named}" — a security, data, billing, or deployment decision is not one an unattended run may take. ${REMEDY}`;
+    }
+  }
+  const sensitive = nodes.find((n) => overlaps(n.scope, [...SENSITIVE_GLOBS]));
+  if (sensitive) {
+    return `node "${sensitive.alias}" declares a scope reaching protected paths (${SENSITIVE_GLOBS.join(", ")}) — a security, data, billing, or deployment decision is not one an unattended run may take. ${REMEDY}`;
+  }
+
+  if (nodes.length > ceiling) {
+    return `plan has ${nodes.length} nodes, over the auto_max_tasks ceiling of ${ceiling}. ${REMEDY}`;
+  }
+  return undefined;
 }
 
 /** Every approval token on disk, newest first. Used by the audit to check

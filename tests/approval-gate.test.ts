@@ -81,13 +81,15 @@ describe("approval gate decisions", () => {
     expect(approvalGate({ command: createCmd(rel), cwd }).decision).toBe("pass");
   });
 
-  test("auto mode over the ceiling asks", () => {
+  test("auto mode over the ceiling does not ask — the CLI refuses instead", () => {
+    // A bound no longer arms this gate. Asking here would invite the human to
+    // approve a plan the CLI is about to reject outright, so the hook stays
+    // silent and lets the command exit non-zero with the reason.
     const cwd = fixtureRepo();
     const rel = planRepo(cwd, 4);
     withConfig(cwd, { execution_mode: "auto", auto_max_tasks: 2 });
     const d = approvalGate({ command: createCmd(rel), cwd });
-    expect(d.decision).toBe("ask");
-    expect(d.reason).toContain("auto_max_tasks");
+    expect(d.decision).toBe("pass");
   });
 
   test("commands other than plan creation are not the gate's business", () => {

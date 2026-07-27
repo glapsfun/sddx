@@ -8428,18 +8428,20 @@ function ensureExcluded(cwd) {
 `);
 }
 function worktreeAvailable(cwd) {
-  const r = spawnSync6("git", ["worktree", "list"], { cwd });
-  if (r.status !== 0)
+  let root;
+  try {
+    root = resolveMainRepoRoot(cwd);
+  } catch {
     return false;
-  const gitDir = git(cwd, "rev-parse", "--git-dir");
-  const common = git(cwd, "rev-parse", "--git-common-dir");
-  return gitDir === common;
+  }
+  return spawnSync6("git", ["worktree", "list"], { cwd: root }).status === 0;
 }
 function createWorktree(cwd, id, baseSha) {
-  ensureExcluded(cwd);
-  mkdirSync5(worktreesDir(cwd), { recursive: true });
-  const path = join8(worktreesDir(cwd), id);
-  git(cwd, "worktree", "add", "-q", path, "-b", `sddx/${id}`, baseSha);
+  const root = resolveMainRepoRoot(cwd);
+  ensureExcluded(root);
+  mkdirSync5(worktreesDir(root), { recursive: true });
+  const path = join8(worktreesDir(root), id);
+  git(root, "worktree", "add", "-q", path, "-b", `sddx/${id}`, baseSha);
   return path;
 }
 function mergeParentsSequential(worktreePath, remaining) {
@@ -8650,6 +8652,39 @@ function listSddxWorktrees(cwd) {
 function hasSubmodules(cwd, baseSha) {
   const r = spawnSync6("git", ["cat-file", "-e", `${baseSha}:.gitmodules`], { cwd });
   return r.status === 0;
+}
+function submodulePaths(cwd, baseSha) {
+  const r = spawnSync6("git", ["show", `${baseSha}:.gitmodules`], { cwd, encoding: "utf8" });
+  if (r.status !== 0 || typeof r.stdout !== "string")
+    return [];
+  const paths = [];
+  for (const line of r.stdout.split(`
+`)) {
+    const m = /^\s*path\s*=\s*(.+?)\s*$/.exec(line);
+    if (m?.[1])
+      paths.push(m[1].replace(/\\/g, "/").replace(/\/+$/, ""));
+  }
+  return paths;
+}
+function submoduleScopeConflicts(cwd, baseSha, nodes) {
+  const submodules = submodulePaths(cwd, baseSha);
+  if (submodules.length === 0)
+    return [];
+  const conflicts = [];
+  for (const node of nodes) {
+    if (node.scope.length === 0) {
+      conflicts.push({ alias: node.alias, submodule: submodules[0] });
+      continue;
+    }
+    for (const sub of submodules) {
+      const hit = node.scope.find((s) => scopesOverlap([s], [`${sub}/**`]) || s === sub);
+      if (hit) {
+        conflicts.push({ alias: node.alias, submodule: sub, scope: hit });
+        break;
+      }
+    }
+  }
+  return conflicts;
 }
 var LOCK_STALE_MS = 10 * 60000;
 function acquireLock(lockPath, now) {
@@ -10511,6 +10546,14 @@ function resolvePlan(cwd, graphArg, requested) {
   if (base.source === "HEAD")
     notices.push("no origin remote — forking from local HEAD");
   const mode = pickWorkspaceMode(cwd, requested, notices);
+  if (mode === "worktree") {
+    if (!worktreeAvailable(cwd)) {
+      errs.push("worktree unavailable: git cannot create worktrees for this repository. No run was started. Use a checkout where `git worktree list` succeeds.");
+    }
+    for (const c of submoduleScopeConflicts(cwd, base.sha, graph.tasks.map((n) => ({ alias: n.alias, scope: loaded.get(n.alias)?.spec.scope ?? [] })))) {
+      errs.push(c.scope ? `unsupported layout: task "${c.alias}" declares scope ${c.scope}, which reaches the submodule ${c.submodule}. A worktree crossing a submodule boundary is unsafe, and no run was started.` : `unsupported layout: task "${c.alias}" declares no scope, so it cannot be proven disjoint from the submodule ${c.submodule}. Declare a scope, or use a checkout without submodules. No run was started.`);
+    }
+  }
   return { graph, loaded, idByAlias, goalId: gid, base, mode, notices, errors: errs };
 }
 function planNodeSummary(plan, alias) {

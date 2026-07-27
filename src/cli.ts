@@ -84,6 +84,7 @@ import {
   resolveBaseRef,
   resolveMainRepoRoot,
   retryWorkspace,
+  submoduleScopeConflicts,
   sweep,
   worktreeAvailable,
   worktreesDir,
@@ -496,6 +497,28 @@ function resolvePlan(cwd: string, graphArg: string, requested: WorkspaceFlag): R
   const base = resolveBaseRef(cwd);
   if (base.source === "HEAD") notices.push("no origin remote — forking from local HEAD");
   const mode = pickWorkspaceMode(cwd, requested, notices);
+
+  // Worktree preconditions, checked here so a dry run reports exactly what a
+  // real create would refuse. Scope-scoped rather than repository-wide: a
+  // vendored submodule no task touches is not a reason to refuse the run.
+  if (mode === "worktree") {
+    if (!worktreeAvailable(cwd)) {
+      errs.push(
+        "worktree unavailable: git cannot create worktrees for this repository. No run was started. Use a checkout where `git worktree list` succeeds.",
+      );
+    }
+    for (const c of submoduleScopeConflicts(
+      cwd,
+      base.sha,
+      graph.tasks.map((n) => ({ alias: n.alias, scope: loaded.get(n.alias)?.spec.scope ?? [] })),
+    )) {
+      errs.push(
+        c.scope
+          ? `unsupported layout: task "${c.alias}" declares scope ${c.scope}, which reaches the submodule ${c.submodule}. A worktree crossing a submodule boundary is unsafe, and no run was started.`
+          : `unsupported layout: task "${c.alias}" declares no scope, so it cannot be proven disjoint from the submodule ${c.submodule}. Declare a scope, or use a checkout without submodules. No run was started.`,
+      );
+    }
+  }
 
   return { graph, loaded, idByAlias, goalId: gid, base, mode, notices, errors: errs };
 }

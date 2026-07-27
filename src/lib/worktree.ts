@@ -14,6 +14,7 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, relative } from "node:path";
 import { branchExists, forceDeleteBranch, git } from "./git";
+import { scopesOverlap } from "./glob-overlap";
 import {
   dependsOnList,
   isDeferred,
@@ -84,20 +85,38 @@ export function ensureExcluded(cwd: string): void {
   appendFileSync(exclude, `${sep}${EXCLUDE_LINE}\n`);
 }
 
+/**
+ * Can git create worktrees for this repository?
+ *
+ * This asks one question — does `git worktree list` work — and deliberately no
+ * longer asks whether the caller happens to be sitting in a linked worktree.
+ * `git-dir !== git-common-dir` means only that, and `git worktree add` against
+ * the main repository root works fine from there. sddx runs its own agents
+ * inside linked worktrees it created, so that check refused sddx from the very
+ * workspaces it had just built.
+ *
+ * With no branch-mode fallback left, a false positive here costs the user the
+ * tool rather than a degraded mode, so the precondition asks only what it must.
+ */
 export function worktreeAvailable(cwd: string): boolean {
-  // A repo that is itself a linked worktree must not nest further worktrees.
-  const r = spawnSync("git", ["worktree", "list"], { cwd });
-  if (r.status !== 0) return false;
-  const gitDir = git(cwd, "rev-parse", "--git-dir");
-  const common = git(cwd, "rev-parse", "--git-common-dir");
-  return gitDir === common;
+  let root: string;
+  try {
+    root = resolveMainRepoRoot(cwd);
+  } catch {
+    return false;
+  }
+  return spawnSync("git", ["worktree", "list"], { cwd: root }).status === 0;
 }
 
 export function createWorktree(cwd: string, id: string, baseSha: string): string {
-  ensureExcluded(cwd);
-  mkdirSync(worktreesDir(cwd), { recursive: true });
-  const path = join(worktreesDir(cwd), id);
-  git(cwd, "worktree", "add", "-q", path, "-b", `sddx/${id}`, baseSha);
+  // Always against the MAIN repo root: invoked from inside a linked worktree,
+  // resolving relative to `cwd` would nest `.sddx-worktrees/` under that
+  // worktree, where the sweep and every path-based lookup would not find it.
+  const root = resolveMainRepoRoot(cwd);
+  ensureExcluded(root);
+  mkdirSync(worktreesDir(root), { recursive: true });
+  const path = join(worktreesDir(root), id);
+  git(root, "worktree", "add", "-q", path, "-b", `sddx/${id}`, baseSha);
   return path;
 }
 
@@ -400,6 +419,67 @@ export function listSddxWorktrees(cwd: string): WorktreeInfo[] {
 export function hasSubmodules(cwd: string, baseSha: string): boolean {
   const r = spawnSync("git", ["cat-file", "-e", `${baseSha}:.gitmodules`], { cwd });
   return r.status === 0;
+}
+
+/**
+ * Submodule paths declared in `.gitmodules` at `baseSha`, or `[]` when the file
+ * is absent or unreadable. Read from the commit rather than the working tree so
+ * the answer matches what a worktree forked at that SHA would contain.
+ */
+export function submodulePaths(cwd: string, baseSha: string): string[] {
+  const r = spawnSync("git", ["show", `${baseSha}:.gitmodules`], { cwd, encoding: "utf8" });
+  if (r.status !== 0 || typeof r.stdout !== "string") return [];
+  const paths: string[] = [];
+  for (const line of r.stdout.split("\n")) {
+    const m = /^\s*path\s*=\s*(.+?)\s*$/.exec(line);
+    if (m?.[1]) paths.push(m[1].replace(/\\/g, "/").replace(/\/+$/, ""));
+  }
+  return paths;
+}
+
+export interface SubmoduleConflict {
+  alias: string;
+  submodule: string;
+  /** Absent when the task declared no scope at all. */
+  scope?: string;
+}
+
+/**
+ * Which tasks could write inside a submodule, and which one.
+ *
+ * The blanket rule this replaces refused any repository containing a
+ * `.gitmodules`, forever, regardless of what tasks touched — one vendored
+ * dependency disqualified the whole repo. sddx already knows each task's write
+ * lane, validated at plan time by the same overlap check the schedule gate
+ * uses, so the precondition can ask the narrower question it actually means.
+ *
+ * A task declaring NO scope conflicts whenever any submodule exists: an
+ * undeclared write lane cannot be proven disjoint from the submodule path, and
+ * this whole narrowing rests on that proof. Same stance the autonomy bounds
+ * take toward an unconfined scope.
+ */
+export function submoduleScopeConflicts(
+  cwd: string,
+  baseSha: string,
+  nodes: ReadonlyArray<{ alias: string; scope: string[] }>,
+): SubmoduleConflict[] {
+  const submodules = submodulePaths(cwd, baseSha);
+  if (submodules.length === 0) return [];
+  const conflicts: SubmoduleConflict[] = [];
+  for (const node of nodes) {
+    if (node.scope.length === 0) {
+      conflicts.push({ alias: node.alias, submodule: submodules[0] as string });
+      continue;
+    }
+    for (const sub of submodules) {
+      const hit = node.scope.find((s) => scopesOverlap([s], [`${sub}/**`]) || s === sub);
+      if (hit) {
+        conflicts.push({ alias: node.alias, submodule: sub, scope: hit });
+        break;
+      }
+    }
+  }
+  return conflicts;
 }
 
 const LOCK_STALE_MS = 10 * 60_000;

@@ -7492,6 +7492,76 @@ function commit(cwd, message) {
   return headSha(cwd);
 }
 
+// src/lib/glob-overlap.ts
+function segments(glob) {
+  return glob.replace(/\\/g, "/").replace(/^(\.\/)+/, "").split("/").filter((s) => s !== "");
+}
+function segmentsOverlap(a, b) {
+  const memo = new Map;
+  const go = (i, j) => {
+    const key = i * (b.length + 1) + j;
+    const cached = memo.get(key);
+    if (cached !== undefined)
+      return cached;
+    let res;
+    if (i === a.length && j === b.length)
+      res = true;
+    else if (i < a.length && a[i] === "*")
+      res = go(i + 1, j) || j < b.length && go(i, j + 1);
+    else if (j < b.length && b[j] === "*")
+      res = go(i, j + 1) || i < a.length && go(i + 1, j);
+    else if (i === a.length || j === b.length)
+      res = false;
+    else {
+      const ca = a[i];
+      const cb = b[j];
+      res = ca === "?" || cb === "?" || ca === cb ? go(i + 1, j + 1) : false;
+    }
+    memo.set(key, res);
+    return res;
+  };
+  return go(0, 0);
+}
+function listsOverlap(a, b) {
+  const memo = new Map;
+  const go = (i, j) => {
+    const key = i * (b.length + 1) + j;
+    const cached = memo.get(key);
+    if (cached !== undefined)
+      return cached;
+    let res;
+    if (i === a.length && j === b.length)
+      res = true;
+    else if (i < a.length && a[i] === "**")
+      res = go(i + 1, j) || j < b.length && go(i, j + 1);
+    else if (j < b.length && b[j] === "**")
+      res = go(i, j + 1) || i < a.length && go(i + 1, j);
+    else if (i === a.length || j === b.length)
+      res = false;
+    else
+      res = segmentsOverlap(a[i], b[j]) && go(i + 1, j + 1);
+    memo.set(key, res);
+    return res;
+  };
+  return go(0, 0);
+}
+function overlaps(a, b) {
+  return listsOverlap(segments(a), segments(b));
+}
+function scopesOverlap(a, b) {
+  if (a.length === 0 && b.length === 0)
+    return false;
+  if (a.length === 0 || b.length === 0)
+    return true;
+  for (const ga of a) {
+    for (const gb of b) {
+      if (overlaps(ga, gb))
+        return true;
+    }
+  }
+  return false;
+}
+
 // src/lib/worktree.ts
 var worktreesDir = (cwd) => join3(cwd, ".sddx-worktrees");
 function tryRev(cwd, ref) {
@@ -7542,18 +7612,20 @@ function ensureExcluded(cwd) {
 `);
 }
 function worktreeAvailable(cwd) {
-  const r = spawnSync3("git", ["worktree", "list"], { cwd });
-  if (r.status !== 0)
+  let root;
+  try {
+    root = resolveMainRepoRoot(cwd);
+  } catch {
     return false;
-  const gitDir = git(cwd, "rev-parse", "--git-dir");
-  const common = git(cwd, "rev-parse", "--git-common-dir");
-  return gitDir === common;
+  }
+  return spawnSync3("git", ["worktree", "list"], { cwd: root }).status === 0;
 }
 function createWorktree(cwd, id, baseSha) {
-  ensureExcluded(cwd);
-  mkdirSync2(worktreesDir(cwd), { recursive: true });
-  const path = join3(worktreesDir(cwd), id);
-  git(cwd, "worktree", "add", "-q", path, "-b", `sddx/${id}`, baseSha);
+  const root = resolveMainRepoRoot(cwd);
+  ensureExcluded(root);
+  mkdirSync2(worktreesDir(root), { recursive: true });
+  const path = join3(worktreesDir(root), id);
+  git(root, "worktree", "add", "-q", path, "-b", `sddx/${id}`, baseSha);
   return path;
 }
 function mergeParentsSequential(worktreePath, remaining) {
@@ -7764,6 +7836,39 @@ function listSddxWorktrees(cwd) {
 function hasSubmodules(cwd, baseSha) {
   const r = spawnSync3("git", ["cat-file", "-e", `${baseSha}:.gitmodules`], { cwd });
   return r.status === 0;
+}
+function submodulePaths(cwd, baseSha) {
+  const r = spawnSync3("git", ["show", `${baseSha}:.gitmodules`], { cwd, encoding: "utf8" });
+  if (r.status !== 0 || typeof r.stdout !== "string")
+    return [];
+  const paths = [];
+  for (const line of r.stdout.split(`
+`)) {
+    const m = /^\s*path\s*=\s*(.+?)\s*$/.exec(line);
+    if (m?.[1])
+      paths.push(m[1].replace(/\\/g, "/").replace(/\/+$/, ""));
+  }
+  return paths;
+}
+function submoduleScopeConflicts(cwd, baseSha, nodes) {
+  const submodules = submodulePaths(cwd, baseSha);
+  if (submodules.length === 0)
+    return [];
+  const conflicts = [];
+  for (const node of nodes) {
+    if (node.scope.length === 0) {
+      conflicts.push({ alias: node.alias, submodule: submodules[0] });
+      continue;
+    }
+    for (const sub of submodules) {
+      const hit = node.scope.find((s) => scopesOverlap([s], [`${sub}/**`]) || s === sub);
+      if (hit) {
+        conflicts.push({ alias: node.alias, submodule: sub, scope: hit });
+        break;
+      }
+    }
+  }
+  return conflicts;
 }
 var LOCK_STALE_MS = 10 * 60000;
 function acquireLock(lockPath, now) {
@@ -8091,76 +8196,6 @@ var $parseDocument = publicApi.parseDocument;
 var $stringify = publicApi.stringify;
 var $visit = visit.visit;
 var $visitAsync = visit.visitAsync;
-
-// src/lib/glob-overlap.ts
-function segments(glob) {
-  return glob.replace(/\\/g, "/").replace(/^(\.\/)+/, "").split("/").filter((s) => s !== "");
-}
-function segmentsOverlap(a, b) {
-  const memo = new Map;
-  const go = (i, j) => {
-    const key = i * (b.length + 1) + j;
-    const cached = memo.get(key);
-    if (cached !== undefined)
-      return cached;
-    let res;
-    if (i === a.length && j === b.length)
-      res = true;
-    else if (i < a.length && a[i] === "*")
-      res = go(i + 1, j) || j < b.length && go(i, j + 1);
-    else if (j < b.length && b[j] === "*")
-      res = go(i, j + 1) || i < a.length && go(i + 1, j);
-    else if (i === a.length || j === b.length)
-      res = false;
-    else {
-      const ca = a[i];
-      const cb = b[j];
-      res = ca === "?" || cb === "?" || ca === cb ? go(i + 1, j + 1) : false;
-    }
-    memo.set(key, res);
-    return res;
-  };
-  return go(0, 0);
-}
-function listsOverlap(a, b) {
-  const memo = new Map;
-  const go = (i, j) => {
-    const key = i * (b.length + 1) + j;
-    const cached = memo.get(key);
-    if (cached !== undefined)
-      return cached;
-    let res;
-    if (i === a.length && j === b.length)
-      res = true;
-    else if (i < a.length && a[i] === "**")
-      res = go(i + 1, j) || j < b.length && go(i, j + 1);
-    else if (j < b.length && b[j] === "**")
-      res = go(i, j + 1) || i < a.length && go(i + 1, j);
-    else if (i === a.length || j === b.length)
-      res = false;
-    else
-      res = segmentsOverlap(a[i], b[j]) && go(i + 1, j + 1);
-    memo.set(key, res);
-    return res;
-  };
-  return go(0, 0);
-}
-function overlaps(a, b) {
-  return listsOverlap(segments(a), segments(b));
-}
-function scopesOverlap(a, b) {
-  if (a.length === 0 && b.length === 0)
-    return false;
-  if (a.length === 0 || b.length === 0)
-    return true;
-  for (const ga of a) {
-    for (const gb of b) {
-      if (overlaps(ga, gb))
-        return true;
-    }
-  }
-  return false;
-}
 
 // src/lib/graph.ts
 var ALIAS_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;

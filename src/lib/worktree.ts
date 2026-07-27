@@ -16,6 +16,7 @@ import { dirname, isAbsolute, join, relative } from "node:path";
 import { branchExists, forceDeleteBranch, git } from "./git";
 import {
   dependsOnList,
+  isDeferred,
   type Phase,
   resolveTaskState,
   retryPolicyOf,
@@ -181,7 +182,10 @@ export function materializeDependent(
   const forkSha = parentShas[0] as string;
   const rest = parentShas.slice(1);
 
-  if (task.workspace.mode === "branch") {
+  // While deferred, the eventual mode lives in `materialize_as`. Legacy state
+  // recorded it in `mode` directly, so fall back to that.
+  const targetMode = task.workspace.materialize_as ?? task.workspace.mode;
+  if (targetMode === "branch") {
     // no worktree — worktrees are unsafe in this repo (why branch mode was picked).
     // Create the branch at the fork commit; the task/spec stay in the main checkout.
     git(cwd, "branch", `sddx/${taskId}`, forkSha);
@@ -291,9 +295,8 @@ const allKnownTaskIds = (cwd: string): string[] => {
   return [...ids];
 };
 
-/** A dependent counts as already-materialized once its base is a real SHA
- * rather than the deferred `pending:...` placeholder. */
-const isMaterialized = (t: TaskState): boolean => !t.workspace.base_sha.startsWith("pending:");
+/** A dependent counts as already-materialized once it has a workspace. */
+const isMaterialized = (t: TaskState): boolean => !isDeferred(t);
 
 /**
  * After `retriedTaskId` produces a new commit, discard and re-materialize any
@@ -325,9 +328,11 @@ export function rematerializeStaleDependents(cwd: string, retriedTaskId: string)
     // the stale branch (worktree or branch mode) must go too, or re-materializing
     // via createWorktree/`git branch` would collide with the old tip
     if (branchExists(cwd, staleBranch)) forceDeleteBranch(cwd, staleBranch);
-    // reset to deferred so materializeDependent treats it as a fresh dispatch
+    // reset to deferred so materializeDependent treats it as a fresh dispatch,
+    // remembering the mode it must return to
     t.workspace = {
-      mode: t.workspace.mode,
+      mode: "deferred",
+      materialize_as: t.workspace.mode === "branch" ? "branch" : "worktree",
       branch: null,
       base_sha: `pending:${dependsOnList(t).join(",")}`,
     };

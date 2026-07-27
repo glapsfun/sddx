@@ -7223,6 +7223,7 @@ var TRANSITIONS = {
   DONE: [],
   ABANDONED: []
 };
+var isDeferred = (t) => t.workspace.mode === "deferred" || t.workspace.base_sha.startsWith("pending:");
 var DEFAULT_RETRY = { max_attempts: 1, workspace: "fresh" };
 function dependsOnList(t) {
   const d = t.depends_on;
@@ -7601,7 +7602,8 @@ function materializeDependent(cwd, taskId2) {
   }
   const forkSha = parentShas[0];
   const rest = parentShas.slice(1);
-  if (task.workspace.mode === "branch") {
+  const targetMode = task.workspace.materialize_as ?? task.workspace.mode;
+  if (targetMode === "branch") {
     git(cwd, "branch", `sddx/${taskId2}`, forkSha);
     let finalSha2 = forkSha;
     if (rest.length > 0) {
@@ -7684,7 +7686,7 @@ var allKnownTaskIds = (cwd) => {
     ids.add(id);
   return [...ids];
 };
-var isMaterialized = (t) => !t.workspace.base_sha.startsWith("pending:");
+var isMaterialized = (t) => !isDeferred(t);
 function rematerializeStaleDependents(cwd, retriedTaskId) {
   const rebuilt = [];
   for (const id of allKnownTaskIds(cwd)) {
@@ -7709,7 +7711,8 @@ function rematerializeStaleDependents(cwd, retriedTaskId) {
     if (branchExists(cwd, staleBranch))
       forceDeleteBranch(cwd, staleBranch);
     t.workspace = {
-      mode: t.workspace.mode,
+      mode: "deferred",
+      materialize_as: t.workspace.mode === "branch" ? "branch" : "worktree",
       branch: null,
       base_sha: `pending:${dependsOnList(t).join(",")}`
     };
@@ -9188,7 +9191,7 @@ function resolveTask(startPath) {
     } catch (e) {
       return { kind: "corrupt", root, path, error: e.message };
     }
-    if (!isTerminal(task.phase))
+    if (!isTerminal(task.phase) && !isDeferred(task))
       candidates.push(task);
   }
   if (candidates.length === 0)

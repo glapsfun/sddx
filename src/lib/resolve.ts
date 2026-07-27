@@ -3,7 +3,7 @@
 // workspace's own .sddx/ (worktrees carry their copy — see cli task create).
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve as resolvePath } from "node:path";
-import { isTerminal, type TaskState } from "./task";
+import { isDeferred, isTerminal, type TaskState } from "./task";
 
 export type Resolution =
   | { kind: "none" }
@@ -98,7 +98,11 @@ export function resolveTask(startPath: string): Resolution {
     } catch (e) {
       return { kind: "corrupt", root, path, error: (e as Error).message };
     }
-    if (!isTerminal(task.phase)) candidates.push(task);
+    // A deferred dependent has no workspace, so it governs none. Its state sits
+    // here only because the main checkout is the one place it can live until its
+    // parents finish; counting it made a task the user never started claim their
+    // own checkout, and two of them made it "ambiguous".
+    if (!isTerminal(task.phase) && !isDeferred(task)) candidates.push(task);
   }
   if (candidates.length === 0) return { kind: "none" };
   if (candidates.length === 1) return { kind: "task", root, task: candidates[0] as TaskState };

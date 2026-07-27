@@ -315,7 +315,12 @@ function createDeferredTask(
     cwd,
     spec,
     specPath,
-    { mode, branch: null, base_sha: `pending:${dependsOn.join(",")}` },
+    {
+      mode: "deferred",
+      materialize_as: mode as "worktree" | "branch",
+      branch: null,
+      base_sha: `pending:${dependsOn.join(",")}`,
+    },
     { dependsOn },
   );
   return id;

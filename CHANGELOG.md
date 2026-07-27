@@ -4,6 +4,20 @@ All notable changes to sddx are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sddx adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.3.0](https://github.com/glapsfun/sddx/compare/v2.2.0...v2.3.0) (2026-07-27)
+
+
+### Added
+
+* add human/auto execution modes with a deterministic approval gate ([90d546b](https://github.com/glapsfun/sddx/commit/90d546b0f1b751e362d60c0fa425379ea9fa3a25))
+* add human/auto execution modes with a deterministic approval gate ([477b309](https://github.com/glapsfun/sddx/commit/477b309c9426283cb5355558d4e650c6c83ccf54))
+
+
+### Fixed
+
+* close approval-gate bypasses found reviewing the execution-modes work ([148fef0](https://github.com/glapsfun/sddx/commit/148fef025b93aa91bf856f403863022542b18baa))
+* close gate bypasses and false alarms found reviewing the first fix ([fa89a6a](https://github.com/glapsfun/sddx/commit/fa89a6a0b04c38e96a7d3e2cc753129e398d39d8))
+
 ## [2.2.0](https://github.com/glapsfun/sddx/compare/v2.1.0...v2.2.0) (2026-07-26)
 
 

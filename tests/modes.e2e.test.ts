@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { planHash } from "../src/lib/approval";
 import { approvalGate } from "../src/lib/approvalgate";
 import { fixtureClone } from "./fixtures";
-import { repoRoot } from "./helpers";
+import { goalIds, readGoalAnywhere, repoRoot } from "./helpers";
 
 const CLI = join(repoRoot, "src/cli.ts");
 const cli = (cwd: string, env: NodeJS.ProcessEnv, ...args: string[]) =>
@@ -59,7 +59,7 @@ oracle:
 function materialized(cwd: string) {
   const dir = (p: string) => (existsSync(join(cwd, p)) ? readdirSync(join(cwd, p)) : []);
   return {
-    goals: dir(join(".sddx", "goals")),
+    goals: goalIds(cwd),
     branches: g(cwd, "branch", "--list", "sddx/*"),
     worktrees: dir(".sddx-worktrees"),
   };
@@ -113,7 +113,7 @@ describe("human mode end-to-end", () => {
     completeTask(cwd, human, map.n1, "part1");
 
     // 5. every receipt agrees with the goal on mode and plan hash
-    const goal = JSON.parse(readFileSync(join(cwd, ".sddx", "goals", `${goalId}.json`), "utf8"));
+    const goal = readGoalAnywhere(cwd, goalId) as any;
     expect(goal.approval.mode).toBe("human");
     expect(goal.approval.plan_sha256).toBe(planHash(join(cwd, rel)).hash);
     for (const id of Object.values(map)) {
@@ -239,7 +239,7 @@ describe("auto mode end-to-end", () => {
     const created = cli(cwd, human, "graph", "create", "--graph", rel, "--output", "json");
     expect(created.status).toBe(0);
     const goalId = JSON.parse(created.stdout).data.goalId as string;
-    const goal = JSON.parse(readFileSync(join(cwd, ".sddx", "goals", `${goalId}.json`), "utf8"));
+    const goal = readGoalAnywhere(cwd, goalId) as any;
     expect(goal.approval.mode).toBe("human");
     expect(goal.approval.requested_mode).toBeUndefined();
     expect(goal.approval.degraded_reason).toBeUndefined();

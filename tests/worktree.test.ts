@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   createWorktree,
@@ -50,7 +50,7 @@ test("createWorktree adds .sddx-worktrees/<id> on branch sddx/<id> at the base S
   git(clone, "commit", "-qm", "local ahead");
 
   const path = createWorktree(clone, "t1", base.sha);
-  expect(path).toBe(join(worktreesDir(clone), "t1"));
+  expect(realpathSync(path)).toBe(realpathSync(join(worktreesDir(clone), "t1")));
   expect(git(path, "rev-parse", "HEAD")).toBe(base.sha);
   expect(git(path, "rev-parse", "--abbrev-ref", "HEAD")).toBe("sddx/t1");
   expect(existsSync(join(path, "ahead.txt"))).toBe(false);
@@ -83,7 +83,7 @@ test("listSddxWorktrees sees only sddx-managed worktrees", () => {
   const path = createWorktree(clone, "mine", resolveBaseRef(clone).sha);
   git(clone, "worktree", "add", "-q", join(clone, "..", "foreign"), "-b", "user/foreign");
   const listed = listSddxWorktrees(clone);
-  expect(listed.map((w) => w.path)).toEqual([path]);
+  expect(listed.map((w) => realpathSync(w.path))).toEqual([realpathSync(path)]);
   expect(listed[0]?.branch).toBe("sddx/mine");
 });
 

@@ -2,6 +2,7 @@ import { git } from "./git";
 import { currentlyMergedTaskIds, type GoalApproval, goalCounts, readGoal } from "./goal";
 import { resolveReceiptRaw } from "./receipt";
 import { resolveTaskState } from "./task";
+import { resolveMainRepoRoot } from "./worktree";
 
 /** One task's oracle and how it actually came out. */
 export interface OracleOutcome {
@@ -49,7 +50,18 @@ export function generateRunReport(cwd: string, goalId: string, targetBranch: str
     (id) => !merged.includes(id) && resolveTaskState(cwd, id)?.phase === "ABANDONED",
   );
   const outstanding = goal.task_ids.filter((id) => !merged.includes(id) && !failed.includes(id));
-  const diffStat = git(cwd, "diff", "--stat", `${goal.base_sha}...${goal.run_branch}`);
+  // Run from the repository root, never the caller's cwd. A pathspec is
+  // relative to cwd, and so is git's own default diff scope — reporting from a
+  // subdirectory silently truncated the summary to that subtree, showing a
+  // reviewer a materially incomplete picture of what the run changed. The goal
+  // record itself needs no exclusion: it lives in `refs/sddx/goals/*`, not in
+  // the run branch's tree.
+  const diffStat = git(
+    resolveMainRepoRoot(cwd),
+    "diff",
+    "--stat",
+    `${goal.base_sha}...${goal.run_branch}`,
+  );
 
   const oracles: OracleOutcome[] = [];
   const assumptions: string[] = [];

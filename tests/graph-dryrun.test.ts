@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fixtureClone, fixtureRepo } from "./fixtures";
-import { repoRoot } from "./helpers";
+import { goalIds, readGoalAnywhere, repoRoot } from "./helpers";
 
 const CLI_SRC = join(repoRoot, "src/cli.ts");
 
@@ -47,7 +47,7 @@ function sideEffects(cwd: string) {
   const worktrees = spawnSync("git", ["worktree", "list"], { cwd, encoding: "utf8" });
   return {
     tasks: dir(join(".sddx", "tasks")),
-    goals: dir(join(".sddx", "goals")),
+    goals: goalIds(cwd),
     specs: dir(join(".sddx", "specs")),
     branches: (branches.stdout ?? "").trim(),
     worktreeCount: (worktrees.stdout ?? "").trim().split("\n").length,

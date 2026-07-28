@@ -18,6 +18,7 @@ import { parseSpec } from "../src/lib/spec";
 import { createTask, transition, writeTask } from "../src/lib/task";
 import { verifyTask } from "../src/lib/verify";
 import { fixtureRepo } from "./fixtures";
+import { mutateGoal } from "./helpers";
 
 const SPEC = `task: do the widget work
 success_criteria:
@@ -88,13 +89,9 @@ describe("approval provenance audit", () => {
     // auditReceipts and killed the whole report — the command whose job is to
     // detect tampering, disabled by the tampering.
     const { cwd, rel } = verifiedRepo({ mode: "human" });
-    const goalsDir = join(cwd, ".sddx", "goals");
-    for (const f of readdirSync(goalsDir)) {
-      const path = join(goalsDir, f);
-      const g = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
+    mutateGoal(cwd, (g) => {
       g.approval = { mode: "human" }; // plan_sha256 dropped
-      writeFileSync(path, JSON.stringify(g, null, 2));
-    }
+    });
     const res = auditReceipts(cwd);
     const finding = res.findings.find((f) => f.includes(rel) && f.includes("malformed"));
     expect(finding).toBeDefined();
@@ -133,11 +130,9 @@ describe("approval provenance audit", () => {
   test("a receipt with approval whose goal has none is not a finding", () => {
     // a goal created before provenance existed, or via standalone `goal create`
     const { cwd, id } = verifiedRepo({ mode: "human" });
-    const goalFile = readdirSync(join(cwd, ".sddx", "goals"))[0];
-    const gp = join(cwd, ".sddx", "goals", goalFile);
-    const g = JSON.parse(readFileSync(gp, "utf8")) as Record<string, unknown>;
-    delete g.approval;
-    writeFileSync(gp, `${JSON.stringify(g, null, 2)}\n`);
+    mutateGoal(cwd, (g) => {
+      delete g.approval;
+    });
     expect(auditReceipts(cwd).findings.filter((f) => f.includes("approval"))).toEqual([]);
     expect(id).toBeTruthy();
   });

@@ -30,6 +30,8 @@ A `graph.yaml` lists task nodes — an alias and a path to that task's spec —
 with optional `depends_on` edges between them:
 
 ```yaml
+schema_version: "1.0"
+interaction_mode: human
 goal: add two independent modules
 tasks:
   - alias: alpha

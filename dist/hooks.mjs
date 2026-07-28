@@ -6954,7 +6954,7 @@ import { join as join4 } from "node:path";
 // src/lib/config.ts
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-var EXECUTION_MODES = ["human", "auto"];
+var INTERACTION_MODES = ["human", "auto"];
 var DEFAULT_AUTO_MAX_TASKS = 6;
 function readConfig(root) {
   const path = join(root, ".sddx", "config.json");
@@ -7015,15 +7015,18 @@ function boardEnabled(root, env = process.env) {
     fallback: true
   });
 }
-var asMode = (v) => typeof v === "string" && EXECUTION_MODES.includes(v) ? v : null;
-function executionMode(root) {
-  return asMode(readConfig(root).execution_mode) ?? "human";
+var asMode = (v) => typeof v === "string" && INTERACTION_MODES.includes(v) ? v : null;
+function interactionMode(root) {
+  const cfg = readConfig(root);
+  if (cfg.interaction_mode !== undefined)
+    return asMode(cfg.interaction_mode) ?? "human";
+  return asMode(cfg.execution_mode) ?? "human";
 }
-var gateExecutionMode = executionMode;
+var gateInteractionMode = interactionMode;
 function autoMaxTasks(root) {
   return positiveInt(readConfig(root).auto_max_tasks) ?? DEFAULT_AUTO_MAX_TASKS;
 }
-var KNOWN_AGENT_ROLES = ["orchestrator", "planner", "tddExecutor", "verifier"];
+var KNOWN_AGENT_ROLES = ["intake", "orchestrator", "planner", "tddExecutor", "verifier"];
 function parseAgentModel(raw) {
   const models = {};
   const warnings = [];
@@ -7098,7 +7101,7 @@ function resolveConfig(root, env = process.env) {
     agent_model: parseAgentModel(cfg.agent_model).models,
     prefer_solo: resolveValue({ configValue: cfg.prefer_solo, configParse: bool, fallback: false }),
     verbose: resolveValue({ configValue: cfg.verbose, configParse: bool, fallback: false }),
-    execution_mode: executionMode(root),
+    interaction_mode: interactionMode(root),
     auto_max_tasks: autoMaxTasks(root)
   };
 }
@@ -7119,7 +7122,8 @@ var CONFIG_SCHEMA = [
   ["agent_model", isString, "a string"],
   ["prefer_solo", isBoolean, "a boolean"],
   ["verbose", isBoolean, "a boolean"],
-  ["execution_mode", isOneOf(EXECUTION_MODES), `one of ${EXECUTION_MODES.join("|")}`],
+  ["interaction_mode", isOneOf(INTERACTION_MODES), `one of ${INTERACTION_MODES.join("|")}`],
+  ["execution_mode", isOneOf(INTERACTION_MODES), `one of ${INTERACTION_MODES.join("|")}`],
   ["auto_max_tasks", isPositiveInt, "a positive integer"]
 ];
 var KNOWN_CONFIG_KEYS = new Set(CONFIG_SCHEMA.map(([key]) => key));
@@ -7136,6 +7140,9 @@ function validateConfigObject(obj) {
   }
   if (typeof obj.agent_model === "string") {
     warnings.push(...parseAgentModel(obj.agent_model).warnings);
+  }
+  if ("execution_mode" in obj) {
+    warnings.push(obj.interaction_mode === undefined ? '"execution_mode" has been renamed to "interaction_mode" — the old name is still read, rename it to silence this' : '"execution_mode" is ignored because "interaction_mode" is also set — remove the old key');
   }
   return warnings;
 }
@@ -8206,6 +8213,77 @@ var $visitAsync = visit.visitAsync;
 
 // src/lib/graph.ts
 var ALIAS_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+var INTERACTION_MODES2 = ["human", "auto"];
+function stringList(key, value, errors2) {
+  if (value === undefined)
+    return [];
+  if (!Array.isArray(value) || value.length === 0 || !value.every((s) => typeof s === "string" && s.trim() !== "")) {
+    errors2.push(`${key}: when present, must be a non-empty list of non-empty strings`);
+    return [];
+  }
+  return value.map((s) => s.trim());
+}
+function entryField(key, i, entry, field, errors2) {
+  const v = entry[field];
+  if (typeof v !== "string" || v.trim() === "") {
+    errors2.push(`${key}[${i}]: missing "${field}"`);
+    return "";
+  }
+  return v.trim();
+}
+function parseAnswers(value, errors2) {
+  if (value === undefined)
+    return [];
+  if (!Array.isArray(value) || value.length === 0) {
+    errors2.push("answers: when present, must be a non-empty list of {id, question, answer}");
+    return [];
+  }
+  const out = [];
+  for (let i = 0;i < value.length; i++) {
+    const e = value[i];
+    if (typeof e !== "object" || e === null || Array.isArray(e)) {
+      errors2.push(`answers[${i}]: must be a mapping with id, question and answer`);
+      continue;
+    }
+    const r = e;
+    out.push({
+      id: entryField("answers", i, r, "id", errors2),
+      question: entryField("answers", i, r, "question", errors2),
+      answer: entryField("answers", i, r, "answer", errors2)
+    });
+  }
+  return out;
+}
+function parseAssumptions(value, errors2) {
+  if (value === undefined)
+    return [];
+  if (!Array.isArray(value) || value.length === 0) {
+    errors2.push("assumptions: when present, must be a non-empty list of non-empty values");
+    return [];
+  }
+  const out = [];
+  for (let i = 0;i < value.length; i++) {
+    const e = value[i];
+    if (typeof e === "string") {
+      if (e.trim() === "")
+        errors2.push(`assumptions[${i}]: must not be empty`);
+      else
+        out.push(e.trim());
+      continue;
+    }
+    if (typeof e !== "object" || e === null || Array.isArray(e)) {
+      errors2.push(`assumptions[${i}]: must be a string or a mapping with id, value and rationale`);
+      continue;
+    }
+    const r = e;
+    entryField("assumptions", i, r, "id", errors2);
+    const v = entryField("assumptions", i, r, "value", errors2);
+    const rationale = entryField("assumptions", i, r, "rationale", errors2);
+    if (v !== "" && rationale !== "")
+      out.push(`${v} — ${rationale}`);
+  }
+  return out;
+}
 function parseGraph(yamlText) {
   let raw;
   try {
@@ -8225,11 +8303,20 @@ function parseGraph(yamlText) {
     errors2.push("tasks: non-empty list of task nodes required");
     return { errors: errors2 };
   }
-  if (r.assumptions !== undefined) {
-    if (!Array.isArray(r.assumptions) || r.assumptions.length === 0 || !r.assumptions.every((s) => typeof s === "string" && s.trim() !== "")) {
-      errors2.push("assumptions: when present, must be a non-empty list of non-empty strings");
-    }
+  const schemaVersion = typeof r.schema_version === "string" || typeof r.schema_version === "number" ? String(r.schema_version).trim() : "";
+  if (schemaVersion === "") {
+    errors2.push("schema_version: required in the Goal Brief header of a planned graph");
   }
+  const mode = typeof r.interaction_mode === "string" ? r.interaction_mode.trim() : "";
+  if (!INTERACTION_MODES2.includes(mode)) {
+    errors2.push(`interaction_mode: required in the Goal Brief header, one of ${INTERACTION_MODES2.join("|")}`);
+  }
+  const answers = parseAnswers(r.answers, errors2);
+  const assumptions = parseAssumptions(r.assumptions, errors2);
+  const constraints = stringList("constraints", r.constraints, errors2);
+  const acceptanceCriteria = stringList("acceptance_criteria", r.acceptance_criteria, errors2);
+  const outOfScope = stringList("out_of_scope", r.out_of_scope, errors2);
+  const unresolved = stringList("unresolved", r.unresolved, errors2);
   const nodes = [];
   const seen = new Set;
   for (let i = 0;i < r.tasks.length; i++) {
@@ -8275,9 +8362,48 @@ function parseGraph(yamlText) {
     graph: {
       goal: r.goal.trim(),
       tasks: nodes,
-      assumptions: Array.isArray(r.assumptions) ? r.assumptions.map((s) => s.trim()) : []
+      assumptions,
+      schema_version: schemaVersion,
+      interaction_mode: mode,
+      answers,
+      constraints,
+      acceptance_criteria: acceptanceCriteria,
+      unresolved,
+      out_of_scope: outOfScope
     }
   };
+}
+var TOP_LEVEL_KEY = /^[^\s#-][^:]*:/;
+function truncateToHeader(yamlText) {
+  const lines = yamlText.split(`
+`);
+  const out = [];
+  let dropping = false;
+  for (const line of lines) {
+    if (dropping) {
+      if (TOP_LEVEL_KEY.test(line))
+        dropping = false;
+      else
+        continue;
+    }
+    if (/^tasks:/.test(line)) {
+      dropping = true;
+      continue;
+    }
+    out.push(line);
+  }
+  const text = out.join(`
+`);
+  return yamlText.endsWith(`
+`) && text !== "" && !text.endsWith(`
+`) ? `${text}
+` : text;
+}
+function briefAssumptions(graph) {
+  return [
+    ...graph.assumptions,
+    ...graph.answers.map((a) => `answered: ${a.question} → ${a.answer}`)
+  ];
 }
 function ancestors(id, parents, guard = new Set([id])) {
   const out = new Set;
@@ -8457,6 +8583,10 @@ function readGoal(cwd, id) {
   }
   return g;
 }
+function goalExists(cwd, id) {
+  const root = mainRoot(cwd);
+  return goalBlobSha(root, id) !== null || existsSync5(goalPath(root, id));
+}
 function writeGoal(cwd, g) {
   const root = mainRoot(cwd);
   g.updated_at = new Date().toISOString();
@@ -8565,7 +8695,7 @@ function validateReceipt(raw) {
   if (version >= 4) {
     if (r.approval !== undefined) {
       const a = r.approval;
-      need("approval", typeof a === "object" && a !== null && (a.mode === "human" || a.mode === "auto") && typeof a.plan_sha256 === "string" && HEX64.test(a.plan_sha256) && (a.requested_mode === undefined || a.requested_mode === "human" || a.requested_mode === "auto") && Array.isArray(a.assumptions) && a.assumptions.every((x) => typeof x === "string") && Array.isArray(a.amendments) && a.amendments.length === 0);
+      need("approval", typeof a === "object" && a !== null && (a.mode === "human" || a.mode === "auto") && typeof a.plan_sha256 === "string" && HEX64.test(a.plan_sha256) && (a.requested_mode === undefined || a.requested_mode === "human" || a.requested_mode === "auto") && (a.authorization === undefined || a.authorization === "human-approval" || a.authorization === "auto") && Array.isArray(a.assumptions) && a.assumptions.every((x) => typeof x === "string") && Array.isArray(a.amendments) && a.amendments.length === 0);
     }
   } else {
     need("approval", r.approval === undefined);
@@ -8801,6 +8931,7 @@ function mergeAssumptions(goalLevel, nodeLevel) {
       out.push(a);
   return out;
 }
+var renderBlocker = (b) => `${b.node ? `node "${b.node}": ` : ""}${b.decision} — ${b.impact} ${b.next_step}`;
 var SELF_MODIFYING_GLOBS = [
   "hooks/**",
   ".claude-plugin/**",
@@ -8832,7 +8963,7 @@ function namesSensitiveArea(scope) {
   }
   return;
 }
-var REMEDY = 'To review and run this plan yourself, set "execution_mode": "human" in .sddx/config.json.';
+var REMEDY = 'To review and run this plan yourself, set "interaction_mode": "human" in .sddx/config.json.';
 function decideGate(cwd, graphPath, nodes, requestedMode, ceiling, overlaps2, workspaceMode) {
   const { hash, errors: errors2 } = planHash(graphPath);
   const base = { hash, requestedMode, nodeCount: nodes.length };
@@ -8840,9 +8971,10 @@ function decideGate(cwd, graphPath, nodes, requestedMode, ceiling, overlaps2, wo
     return { ...base, ok: false, mode: "human", reason: errors2.join("; ") || "plan unreadable" };
   }
   if (requestedMode === "auto") {
-    const refusal = autoRefusal(nodes, ceiling, overlaps2, workspaceMode);
-    if (refusal)
-      return { ...base, ok: false, mode: "auto", refusal };
+    const blocker = autoRefusal(nodes, ceiling, overlaps2, workspaceMode, unresolvedOf(graphPath));
+    if (blocker) {
+      return { ...base, ok: false, mode: "auto", refusal: renderBlocker(blocker), blocker };
+    }
   }
   const approval = readApproval(cwd, hash);
   if (approval) {
@@ -8866,36 +8998,93 @@ function decideGate(cwd, graphPath, nodes, requestedMode, ceiling, overlaps2, wo
   }
   return { ...base, ok: true, mode: "auto" };
 }
-function autoRefusal(nodes, ceiling, overlaps2, workspaceMode) {
+function autoRefusal(nodes, ceiling, overlaps2, workspaceMode, unresolved = []) {
   const manual = nodes.find((n) => n.oracleType === "manual");
   if (manual) {
-    return `node "${manual.alias}" declares oracle.type: manual — an unattended run has nobody to observe it. Use an executable oracle, or run in human mode. ${REMEDY}`;
+    return {
+      bound: "manual-oracle",
+      node: manual.alias,
+      decision: "declares oracle.type: manual",
+      impact: "an unattended run has nobody present to observe it, so completion could never be proven",
+      next_step: `Give it an executable oracle, or run it with a human watching. ${REMEDY}`
+    };
+  }
+  if (unresolved.length > 0) {
+    const list = unresolved.map((u) => `"${u}"`).join(", ");
+    return {
+      bound: "unresolved",
+      decision: `${unresolved.length} decision${unresolved.length === 1 ? "" : "s"} intake could not safely take: ${list}`,
+      impact: "the plan rests on a choice nobody has made, and an unattended run would make it by accident",
+      next_step: `Decide them and record them as answers in the Goal Brief header, or run in human mode. ${REMEDY}`
+    };
   }
   if (workspaceMode === "none") {
-    return `workspace "none" runs every task directly in the working checkout instead of an isolated worktree, which an unattended run must not do. ${REMEDY}`;
+    return {
+      bound: "workspace",
+      decision: 'workspace "none" was requested',
+      impact: "every task would run directly in the working checkout instead of an isolated worktree, mutating the branch you are sitting on",
+      next_step: `Use the default worktree isolation, or run in human mode. ${REMEDY}`
+    };
   }
   const unconfined = nodes.find((n) => n.scope.length === 0);
   if (unconfined) {
-    return `node "${unconfined.alias}" declares no scope, so it is unconfined and may write sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")}) or protected paths (${SENSITIVE_SEGMENTS.join(", ")}, ${SENSITIVE_GLOBS.join(", ")}). ${REMEDY}`;
+    return {
+      bound: "unconfined-scope",
+      node: unconfined.alias,
+      decision: "declares no scope, so it is unconfined",
+      impact: `it may write sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")}) or protected paths (${SENSITIVE_SEGMENTS.join(", ")}, ${SENSITIVE_GLOBS.join(", ")})`,
+      next_step: `Declare the smallest scope that covers the work, or run in human mode. ${REMEDY}`
+    };
   }
   const selfModifying = nodes.find((n) => overlaps2(n.scope, [...SELF_MODIFYING_GLOBS]));
   if (selfModifying) {
-    return `node "${selfModifying.alias}" declares a scope reaching sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")}). ${REMEDY}`;
+    return {
+      bound: "self-modifying",
+      node: selfModifying.alias,
+      decision: `declares a scope reaching sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")})`,
+      impact: "a plan that edits the machinery enforcing the plan cannot be bounded by it",
+      next_step: `Narrow the scope, or run it with a human reviewing. ${REMEDY}`
+    };
   }
+  const PROTECTED_IMPACT = "a security, data, billing, or deployment decision is not one an unattended run may take";
   for (const n of nodes) {
     const named = namesSensitiveArea(n.scope);
     if (named) {
-      return `node "${n.alias}" declares a scope naming the protected area "${named}" — a security, data, billing, or deployment decision is not one an unattended run may take. ${REMEDY}`;
+      return {
+        bound: "protected-path",
+        node: n.alias,
+        decision: `declares a scope naming the protected area "${named}"`,
+        impact: PROTECTED_IMPACT,
+        next_step: `Move that work into its own task and run it with a human reviewing. ${REMEDY}`
+      };
     }
   }
   const sensitive = nodes.find((n) => overlaps2(n.scope, [...SENSITIVE_GLOBS]));
   if (sensitive) {
-    return `node "${sensitive.alias}" declares a scope reaching protected paths (${SENSITIVE_GLOBS.join(", ")}) — a security, data, billing, or deployment decision is not one an unattended run may take. ${REMEDY}`;
+    return {
+      bound: "protected-path",
+      node: sensitive.alias,
+      decision: `declares a scope reaching protected paths (${SENSITIVE_GLOBS.join(", ")})`,
+      impact: PROTECTED_IMPACT,
+      next_step: `Move that work into its own task and run it with a human reviewing. ${REMEDY}`
+    };
   }
   if (nodes.length > ceiling) {
-    return `plan has ${nodes.length} nodes, over the auto_max_tasks ceiling of ${ceiling}. ${REMEDY}`;
+    return {
+      bound: "task-ceiling",
+      decision: `plan has ${nodes.length} nodes, over the auto_max_tasks ceiling of ${ceiling}`,
+      impact: "the blast radius of one unattended run is capped deliberately, and this plan exceeds it",
+      next_step: `Split the goal into smaller runs, raise auto_max_tasks in reviewed configuration, or run in human mode. ${REMEDY}`
+    };
   }
   return;
+}
+function unresolvedOf(graphPath) {
+  try {
+    return parseGraph(readFileSync7(graphPath, "utf8")).graph?.unresolved ?? [];
+  } catch {
+    return [];
+  }
 }
 
 // src/lib/spec.ts
@@ -9222,7 +9411,7 @@ function approvalGate(event) {
     if (!nodes) {
       return ask(`sddx: plan at ${graphArg} could not be read — approval cannot be verified`);
     }
-    const gate = decideGate(cwd, graphPath, nodes, gateExecutionMode(cwd), autoMaxTasks(cwd), scopesOverlap);
+    const gate = decideGate(cwd, graphPath, nodes, gateInteractionMode(cwd), autoMaxTasks(cwd), scopesOverlap);
     if (gate.ok)
       return pass;
     if (gate.refusal)
@@ -9402,7 +9591,7 @@ function isReadOnly(command) {
   return true;
 }
 function protectedPathBlock(path) {
-  const why = path === ".sddx/config.json" ? "It carries execution_mode, which decides whether a plan needs your approval at all." : "A token records that a human approved a plan, so writing one would forge that.";
+  const why = path === ".sddx/config.json" ? "It carries interaction_mode, which decides whether a plan needs your approval at all." : "A token records that a human approved a plan, so writing one would forge that.";
   return [
     `sddx approval gate: blocked Bash command referencing ${path}.`,
     why,
@@ -9674,7 +9863,7 @@ function approvalWriteBlock(relOrAbs) {
   if (CONFIG_PATH.test(path)) {
     return [
       `sddx approval gate: blocked write to ${relOrAbs} — sddx configuration is not tool-editable.`,
-      "It carries execution_mode, which decides whether a plan needs your approval at all,",
+      "It carries interaction_mode, which decides whether a plan needs your approval at all,",
       "so a tool that could rewrite it could switch off the gate that constrains it.",
       "Edit it yourself, or inspect the effective values with: sddx config show"
     ].join(`

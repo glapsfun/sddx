@@ -21,20 +21,20 @@ import { decideGate, readApproval, SENSITIVE_GLOBS, SENSITIVE_SEGMENTS } from ".
 import { approvalGate } from "../src/lib/approvalgate";
 import { scopesOverlap } from "../src/lib/glob-overlap";
 import { fixtureClone, fixtureRepo } from "./fixtures";
-import { repoRoot } from "./helpers";
+import { GRAPH_HEADER_LINES, repoRoot } from "./helpers";
 
 const CLI_SRC = join(repoRoot, "src/cli.ts");
 const cli = (cwd: string, ...args: string[]) =>
   spawnSync("bun", [CLI_SRC, ...args], { cwd, encoding: "utf8", env: process.env });
 
-// Mode is config-only by design (config.ts executionMode) — the environment is
+// Mode is config-only by design (config.ts interactionMode) — the environment is
 // part of the command line the agent composes, so tests write config as a user does.
 function withMode(cwd: string, mode: "human" | "auto", autoMaxTasks?: number): void {
   mkdirSync(join(cwd, ".sddx"), { recursive: true });
   writeFileSync(
     join(cwd, ".sddx", "config.json"),
     JSON.stringify({
-      execution_mode: mode,
+      interaction_mode: mode,
       ...(autoMaxTasks ? { auto_max_tasks: autoMaxTasks } : {}),
     }),
   );
@@ -51,7 +51,7 @@ ${scope ? `scope:\n  - "${scope}"\n` : ""}oracle:
 function planRepo(cwd: string, scopes: (string | undefined)[]): string {
   const drafts = join(cwd, ".sddx", "drafts");
   mkdirSync(drafts, { recursive: true });
-  const lines = ["goal: ship the widget", "tasks:"];
+  const lines = [...GRAPH_HEADER_LINES, "goal: ship the widget", "tasks:"];
   scopes.forEach((scope, i) => {
     writeFileSync(join(drafts, `n${i}.yaml`), SPEC(`build part ${i}`, scope));
     lines.push(`  - alias: n${i}`, `    spec: n${i}.yaml`);
@@ -202,10 +202,10 @@ describe("bounds refuse rather than arm the gate", () => {
     // The key named is the one that actually resolves the mode today. It
     // becomes `interaction_mode` when the config rename lands; naming the new
     // key before it works would send users to an edit that does nothing.
-    expect(out).toContain("execution_mode");
+    expect(out).toContain("interaction_mode");
     expect(out).toContain(".sddx/config.json");
     expect(out).not.toContain("--mode");
-    expect(out).not.toContain("SDDX_EXECUTION_MODE");
+    expect(out).not.toContain("SDDX_INTERACTION_MODE");
   });
 });
 
@@ -285,11 +285,11 @@ describe("the CLI and the hook cannot disagree about a refusal", () => {
 describe("mode is never presented as settable by flag or environment", () => {
   test("no CLI message offers --mode or an env var as the remedy", () => {
     // The message at the TDD-gate exemption refusal used to name both
-    // `--mode human` and `SDDX_EXECUTION_MODE=human`. Neither has ever
+    // `--mode human` and `SDDX_INTERACTION_MODE=human`. Neither has ever
     // existed — mode is config-only by design — so it sent users to a fix
     // that silently does nothing.
     const src = readFileSync(join(repoRoot, "src", "cli.ts"), "utf8");
-    expect(src).not.toContain("SDDX_EXECUTION_MODE");
+    expect(src).not.toContain("SDDX_INTERACTION_MODE");
     expect(src).not.toContain("--mode human");
     expect(src).not.toContain("--mode auto");
   });

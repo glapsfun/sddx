@@ -32,6 +32,9 @@ export interface ReceiptEnv {
 export interface ReceiptApproval {
   /** The mode that actually applied. */
   mode: "human" | "auto";
+  /** Whether a person approved this plan or the configured mode authorized it.
+   * Absent on receipts written before it was recorded. */
+  authorization?: "human-approval" | "auto";
   /** Set when `auto` was requested but a blast-radius bound armed the gate. */
   requested_mode?: "human" | "auto";
   degraded_reason?: string;
@@ -154,6 +157,9 @@ export function validateReceipt(raw: unknown): string[] {
           (a.requested_mode === undefined ||
             a.requested_mode === "human" ||
             a.requested_mode === "auto") &&
+          (a.authorization === undefined ||
+            a.authorization === "human-approval" ||
+            a.authorization === "auto") &&
           Array.isArray(a.assumptions) &&
           (a.assumptions as unknown[]).every((x) => typeof x === "string") &&
           Array.isArray(a.amendments) &&

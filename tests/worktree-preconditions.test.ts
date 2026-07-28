@@ -25,7 +25,7 @@ import {
   worktreeAvailable,
 } from "../src/lib/worktree";
 import { fixtureRepo } from "./fixtures";
-import { goalIds } from "./helpers";
+import { GRAPH_HEADER, goalIds } from "./helpers";
 
 const g = (cwd: string, ...args: string[]) => spawnSync("git", args, { cwd, encoding: "utf8" });
 const head = (cwd: string) => g(cwd, "rev-parse", "HEAD").stdout.trim();
@@ -141,7 +141,7 @@ describe("the canonical create path refuses rather than downgrading", () => {
     );
     writeFileSync(
       join(cwd, "graph.yaml"),
-      "goal: ship the widget\ntasks:\n  - alias: a\n    spec: specs/a.yaml\n",
+      `${GRAPH_HEADER}goal: ship the widget\ntasks:\n  - alias: a\n    spec: specs/a.yaml\n`,
     );
     return "graph.yaml";
   }

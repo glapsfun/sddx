@@ -1,5 +1,7 @@
+import type { InteractionMode } from "./config";
 import { git } from "./git";
 import {
+  type AuthorizationType,
   currentlyMergedTaskIds,
   type GoalApproval,
   goalCounts,
@@ -66,8 +68,17 @@ export interface RunReport {
   /** Per-task oracle outcomes, in the goal's task order. Retained alongside
    * `tasks` for callers that only want the oracle view. */
   oracles: OracleOutcome[];
-  /** Every assumption recorded across the goal's tasks, deduplicated. */
+  /** Every assumption recorded across the goal's tasks, deduplicated. This
+   * carries the user's recorded answers too — they ride the same denormalized
+   * path, labelled `answered:`, so a summary states both what was assumed and
+   * what was decided. */
   assumptions: string[];
+  /** The interaction mode this run was interpreted under. Lifted out of
+   * `approval` so structured consumers read it without reaching through an
+   * optional. Null for a goal predating provenance. */
+  interactionMode: InteractionMode | null;
+  /** Whether a person approved the plan or the mode authorized it. */
+  authorization: AuthorizationType | null;
   /** How this goal's plan was approved. Absent for a goal predating provenance. */
   approval?: GoalApproval;
 }
@@ -78,7 +89,7 @@ export interface RunReport {
  * combined result — everything `/sddx:run` needs to hand the user at the end
  * of a run, derived fresh from the goal file and task states, never cached.
  *
- * Identical across both execution modes by construction: the only
+ * Identical across both interaction modes by construction: the only
  * mode-dependent content is the approval line and any recorded assumptions.
  */
 export function generateRunReport(cwd: string, goalId: string, targetBranch: string): RunReport {
@@ -171,6 +182,8 @@ export function generateRunReport(cwd: string, goalId: string, targetBranch: str
     tasks,
     oracles,
     assumptions,
+    interactionMode: goal.approval?.mode ?? null,
+    authorization: goal.approval?.authorization ?? null,
     ...(goal.approval ? { approval: goal.approval } : {}),
     reviewCommands: [
       `git switch ${goal.run_branch}`,
@@ -184,7 +197,12 @@ export function generateRunReport(cwd: string, goalId: string, targetBranch: str
  * recorded degradation from `auto`. Deliberately does not claim who approved —
  * see the audit's bounded-claims note. */
 function approvalLines(a: GoalApproval): string[] {
-  const lines = ["Approval", `- mode: ${a.mode}`, `- plan: ${a.plan_sha256.slice(0, 12)}`];
+  const lines = [
+    "Approval",
+    `- interaction mode: ${a.mode}`,
+    ...(a.authorization ? [`- authorization: ${a.authorization}`] : []),
+    `- plan: ${a.plan_sha256.slice(0, 12)}`,
+  ];
   if (a.requested_mode && a.requested_mode !== a.mode) {
     lines.push(`- requested ${a.requested_mode}, ran as ${a.mode}`);
     if (a.degraded_reason) lines.push(`- reason: ${a.degraded_reason}`);

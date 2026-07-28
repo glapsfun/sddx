@@ -46,6 +46,8 @@ scope:
   - "src/b/**"
 EOF
 cat > graph.yaml <<'EOF'
+schema_version: "1.0"
+interaction_mode: human
 goal: ship two tasks together
 tasks:
   - alias: a

@@ -4,20 +4,20 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { approvalPath, planHash } from "../src/lib/approval";
 import { fixtureClone, fixtureRepo } from "./fixtures";
-import { goalIds, readGoalAnywhere, repoRoot } from "./helpers";
+import { GRAPH_HEADER, GRAPH_HEADER_LINES, goalIds, readGoalAnywhere, repoRoot } from "./helpers";
 
 const CLI_SRC = join(repoRoot, "src/cli.ts");
 
 function cli(cwd: string, env: NodeJS.ProcessEnv, ...args: string[]) {
   return spawnSync("bun", [CLI_SRC, ...args], { cwd, encoding: "utf8", env });
 }
-// Mode is config-only by design (config.ts executionMode): the environment is
+// Mode is config-only by design (config.ts interactionMode): the environment is
 // part of the command line the agent composes, so it must not switch the gate.
 const human = process.env;
 const auto = process.env;
 function withMode(cwd: string, mode: "human" | "auto"): void {
   mkdirSync(join(cwd, ".sddx"), { recursive: true });
-  writeFileSync(join(cwd, ".sddx", "config.json"), JSON.stringify({ execution_mode: mode }));
+  writeFileSync(join(cwd, ".sddx", "config.json"), JSON.stringify({ interaction_mode: mode }));
 }
 
 const SPEC = (task: string, scope?: string) => `task: ${task}
@@ -31,7 +31,7 @@ ${scope ? `scope:\n  - "${scope}"\n` : ""}oracle:
 function planRepo(cwd: string, nodes = 2): string {
   const drafts = join(cwd, ".sddx", "drafts");
   mkdirSync(drafts, { recursive: true });
-  const lines = ["goal: ship the widget", "tasks:"];
+  const lines = [...GRAPH_HEADER_LINES, "goal: ship the widget", "tasks:"];
   for (let i = 0; i < nodes; i++) {
     const alias = `n${i}`;
     writeFileSync(join(drafts, `${alias}.yaml`), SPEC(`build part ${i}`, `src/${alias}/**`));
@@ -77,7 +77,7 @@ describe("approval predicate on graph create", () => {
     writeFileSync(join(bad, ".sddx", "drafts", "a.yaml"), 'task: t\nsuccess_criteria:\n  - "w"\n');
     writeFileSync(
       join(bad, ".sddx", "drafts", "graph.yaml"),
-      "goal: g\ntasks:\n  - alias: alpha\n    spec: a.yaml\n",
+      `${GRAPH_HEADER}goal: g\ntasks:\n  - alias: alpha\n    spec: a.yaml\n`,
     );
     expect(
       cli(bad, human, "graph", "create", "--graph", join(".sddx", "drafts", "graph.yaml")).status,
@@ -130,7 +130,10 @@ describe("approval predicate on graph create", () => {
     mkdirSync(join(cwd, ".sddx", "drafts"), { recursive: true });
     writeFileSync(join(cwd, ".sddx", "drafts", "a.yaml"), 'task: t\nsuccess_criteria:\n  - "w"\n');
     const rel = join(".sddx", "drafts", "graph.yaml");
-    writeFileSync(join(cwd, rel), "goal: g\ntasks:\n  - alias: alpha\n    spec: a.yaml\n");
+    writeFileSync(
+      join(cwd, rel),
+      `${GRAPH_HEADER}goal: g\ntasks:\n  - alias: alpha\n    spec: a.yaml\n`,
+    );
 
     const r = cli(cwd, human, "graph", "create", "--graph", rel);
     // exits on validation (1), not on approval (3) — the human is never asked
@@ -171,7 +174,7 @@ describe("sddx graph approve", () => {
     const rel = join(".sddx", "drafts", "graph.yaml");
     writeFileSync(
       join(cwd, rel),
-      `goal: g
+      `${GRAPH_HEADER}goal: g
 tasks:
   - alias: alpha
     spec: a.yaml

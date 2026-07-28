@@ -112,7 +112,7 @@ function isReadOnly(command: string): boolean {
 function protectedPathBlock(path: string): string {
   const why =
     path === ".sddx/config.json"
-      ? "It carries execution_mode, which decides whether a plan needs your approval at all."
+      ? "It carries interaction_mode, which decides whether a plan needs your approval at all."
       : "A token records that a human approved a plan, so writing one would forge that.";
   return [
     `sddx approval gate: blocked Bash command referencing ${path}.`,

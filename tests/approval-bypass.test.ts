@@ -9,6 +9,7 @@ import { approvalGate, gatedAction, lex } from "../src/lib/approvalgate";
 import { bashGate } from "../src/lib/bashgate";
 import { scopesOverlap } from "../src/lib/glob-overlap";
 import { fixtureRepo } from "./fixtures";
+import { GRAPH_HEADER } from "./helpers";
 
 describe("gatedAction sees through shell syntax", () => {
   test("a `#` inside a quoted argument does not hide the rest of the line", () => {
@@ -181,15 +182,15 @@ describe("approval trust inputs are unreachable from Bash", () => {
   test(".sddx/config.json is refused too — it decides whether the gate arms", () => {
     const cwd = fixtureRepo();
     for (const command of [
-      `echo '{"execution_mode":"auto"}' > .sddx/config.json`,
+      `echo '{"interaction_mode":"auto"}' > .sddx/config.json`,
       // redirect glued to the filename: anchoring on an explicit character class
       // dropped this spelling, which is exactly the write being guarded
-      `cd .sddx;printf '{"execution_mode":"auto"}'>config.json`,
+      `cd .sddx;printf '{"interaction_mode":"auto"}'>config.json`,
       "node /tmp/forge.js .sddx/config.json",
     ]) {
       const d = bashGate({ command, cwd });
       expect(d.allow).toBe(false);
-      if (!d.allow) expect(d.reason).toContain("execution_mode");
+      if (!d.allow) expect(d.reason).toContain("interaction_mode");
     }
   });
 
@@ -247,7 +248,7 @@ oracle:
     const rel = join(".sddx", "drafts", "graph.yaml");
     writeFileSync(
       join(cwd, rel),
-      "goal: ship the widget\ntasks:\n  - alias: n0\n    spec: n0.yaml\n",
+      `${GRAPH_HEADER}goal: ship the widget\ntasks:\n  - alias: n0\n    spec: n0.yaml\n`,
     );
     return join(cwd, rel);
   }

@@ -7,7 +7,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { auditReceipts } from "./audit";
 import { computeBoard } from "./board";
 import {
@@ -21,7 +21,7 @@ import {
 } from "./lib/approval";
 import {
   autoMaxTasks,
-  gateExecutionMode,
+  gateInteractionMode,
   readConfig,
   resolveConfig,
   validateConfigObject,
@@ -42,12 +42,21 @@ import {
   createGoal,
   currentlyMergedTaskIds,
   findGoalForTask,
+  goalExists,
   goalId,
   goalPath,
   readGoal,
   runBranchName,
 } from "./lib/goal";
-import { type Graph, type GraphNode, parseGraph, validateSchedule } from "./lib/graph";
+import {
+  briefAssumptions,
+  type Graph,
+  type GraphNode,
+  parseGraph,
+  truncateToHeader,
+  validateSchedule,
+} from "./lib/graph";
+import { parseQuestionBatch, QUESTION_CAP } from "./lib/intake";
 import { detectRunState, renderMenu, resolveSelection, runActions } from "./lib/next-actions";
 import { type OutputFormat, parseOutputFlag, printError, printLine, Reporter } from "./lib/output";
 import { createGoalPr } from "./lib/pr";
@@ -95,8 +104,11 @@ const USAGE = `usage:
   sddx verify <id> [--model <m>] [--harness <h>]
   sddx goal create --goal <sentence> --tasks <id1,id2,...>
   sddx goal show <id>
+  sddx intake check --batch <path>
   sddx graph create --graph <path> [--workspace auto|worktree|branch|none] [--dry-run]
   sddx graph approve --graph <path> [--workspace auto|worktree|branch|none]
+  sddx graph regenerate --graph <path>
+  sddx graph cancel --graph <path>
   sddx pr create --goal <goal-id> [--title <title>]
   sddx run report --goal <goal-id>
   sddx board
@@ -122,13 +134,13 @@ let currentCommand = "sddx";
 /** Fatal error exit, format-aware: plain stderr text in terminal mode (as
  * before), or a proper `status: "error"` envelope in json/markdown mode so
  * automation parsing `--output json` never has to handle unstructured text. */
-function failWith(messages: string[], code: 1 | 2 | 3 = 1): never {
+function failWith(messages: string[], code: 1 | 2 | 3 = 1, data: unknown = null): never {
   if (currentFormat === "terminal") {
     for (const m of messages) printError(m);
   } else {
     const reporter = makeReporter(currentCommand, currentFormat, currentNoColor);
     for (const m of messages) reporter.error(m);
-    reporter.finish(null, { status: "error" });
+    reporter.finish(data, { status: "error" });
   }
   process.exit(code);
 }
@@ -523,11 +535,11 @@ function resolvePlan(cwd: string, graphArg: string, requested: WorkspaceFlag): R
       if (otherId === id) errs.push(`${node.alias}: task id ${id} collides with ${otherAlias}`);
     }
     idByAlias.set(node.alias, id);
-    // Cross-cutting assumptions are copied in here, before the spec is
-    // registered, so each receipt states its conditions without needing the
-    // goal file to interpret it.
+    // Cross-cutting assumptions and recorded answers are copied in here, before
+    // the spec is registered, so each receipt states its conditions — and what
+    // the user decided — without needing the goal file to interpret it.
     loaded.set(node.alias, {
-      spec: { ...spec, assumptions: mergeAssumptions(graph.assumptions, spec.assumptions) },
+      spec: { ...spec, assumptions: mergeAssumptions(briefAssumptions(graph), spec.assumptions) },
       src,
     });
   }
@@ -643,6 +655,27 @@ function planNodeSummary(plan: ResolvedPlan, alias: string): Record<string, stri
 }
 
 /**
+ * The Goal Brief's approval-relevant facts — the second unit a re-render diffs
+ * on, and for the same reason the node summary covers every spec field. The
+ * node summaries only cover the decomposition, so an edit to a constraint, an
+ * acceptance criterion, or the unresolved list — the header the whole plan was
+ * built ON — re-rendered as "changes since last render: none", telling a human
+ * following the skill's "a second read is cheap" instruction that nothing moved.
+ */
+function planBriefSummary(graph: Graph): Record<string, string> {
+  const list = (xs: string[]): string => xs.join(" | ") || "(none)";
+  return {
+    goal: graph.goal,
+    answers: list(graph.answers.map((a) => `${a.question} → ${a.answer}`)),
+    assumptions: list(graph.assumptions),
+    constraints: list(graph.constraints),
+    acceptance_criteria: list(graph.acceptance_criteria),
+    out_of_scope: list(graph.out_of_scope),
+    unresolved: list(graph.unresolved),
+  };
+}
+
+/**
  * The fork point the render must report. `createRootTask` honours the passed
  * `forkSha` only on the worktree path; in branch and none mode it branches from
  * local HEAD instead, and branch mode is auto-selected whenever submodules are
@@ -664,34 +697,134 @@ function forkPointLines(cwd: string, plan: ResolvedPlan): string[] {
   ];
 }
 
+/**
+ * The plan-review stage offers these and nothing else. A fifth action here
+ * would be one taken before the plan was authorized, which is the one thing
+ * this stage exists to prevent; the post-run handoff is a different menu at a
+ * different point (`next-actions --goal`), and the two are never combined.
+ */
+const PLAN_ACTIONS = ["Approve", "Edit", "Regenerate", "Cancel"] as const;
+
+/** Where plan drafts live, by convention every skill and agent follows — and
+ * the only directory the Regenerate/Cancel actions may write or delete in. */
+const draftsDir = (cwd: string): string => join(sddxDir(cwd), "drafts");
+
+/** Whether `path` is inside `dir`. Resolved-path comparison, so a `..` segment
+ * in a draft-supplied path cannot escape. */
+function within(dir: string, path: string): boolean {
+  const rel = relative(dir, path);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute(rel);
+}
+
 /** Where the last render of this plan was cached, so a re-render can show only
  * what moved. Keyed by goal id — a revision that changes the goal sentence is a
  * different plan and correctly renders in full. */
 const renderCachePath = (cwd: string, gid: string): string =>
-  join(sddxDir(cwd), "drafts", `.render-${gid}.json`);
+  join(draftsDir(cwd), `.render-${gid}.json`);
+
+/** Discards the cached render, so the next dry run of a re-planned goal renders
+ * in full instead of diffing against a plan that no longer exists. The key is
+ * the goal id, derived from the goal sentence — so a Regenerate or Cancel
+ * followed by re-planning the same sentence would otherwise land on the same
+ * cache entry. */
+function dropRenderCache(cwd: string, gid: string | null): void {
+  if (gid !== null) rmSync(renderCachePath(cwd, gid), { force: true });
+}
 
 function renderPlan(cwd: string, graphArg: string, plan: ResolvedPlan, reporter: Reporter): void {
+  const mode = gateInteractionMode(cwd);
   const order = topoOrder(plan.graph.tasks).map((n) => n.alias);
   const current: Record<string, Record<string, string>> = {};
   for (const alias of order) current[alias] = planNodeSummary(plan, alias);
+  const currentBrief = planBriefSummary(plan.graph);
 
   const { hash } = planHash(join(cwd, graphArg));
+
+  // What a real create would bring into existence. Only ROOT tasks get a
+  // worktree up front; a dependent is deferred until every parent is DONE, so
+  // reporting one worktree per task would overstate what is about to happen.
+  const targetBranch = defaultBranch(cwd);
+  const runBranch = runBranchName(plan.goalId);
+  const rootCount = plan.graph.tasks.filter((n) => n.depends_on.length === 0).length;
+  const worktreeCount = plan.mode === "worktree" ? rootCount : 0;
+
   const lines: string[] = [
     `goal: ${plan.graph.goal}`,
     `plan: ${hash.slice(0, 12)} (${order.length} node${order.length === 1 ? "" : "s"})`,
     `workspace: ${plan.mode}`,
+    `target branch: ${targetBranch}`,
+    `run branch: ${runBranch} (not created yet)`,
+    plan.mode === "worktree"
+      ? `worktrees: ${worktreeCount} at creation, ${order.length} once every dependent materializes`
+      : `worktrees: none (${plan.mode} mode)`,
     ...forkPointLines(cwd, plan),
     "validation: passed",
     "",
   ];
 
+  // The Goal Brief header, so the one artifact the gate depends on shows what
+  // the plan was built ON — what the user decided, what sddx assumed on their
+  // behalf, and what nobody settled — not just the decomposition it produced.
+  // Sections a header does not declare are omitted rather than shown empty.
+  const brief = plan.graph;
+  // The header records the mode intake was DISPATCHED under; the gate reads
+  // `.sddx/config.json` and nothing else (see `gateInteractionMode`), so an
+  // agent-authored header can never widen the gate. When the two disagree the
+  // render would otherwise state both as fact in one payload, leaving a reader
+  // of `brief.interactionMode` believing a run is human-gated when it is not.
+  const modeDiverges = brief.interaction_mode !== mode;
+  if (modeDiverges) {
+    lines.push(
+      `planned under interaction_mode: ${brief.interaction_mode}, configured mode is ${mode} — the configured mode governs this run`,
+      "",
+    );
+  }
+  if (brief.answers.length > 0) {
+    lines.push("answered:");
+    for (const a of brief.answers) lines.push(`  ${a.question} → ${a.answer}`);
+    lines.push("");
+  }
+  if (brief.assumptions.length > 0) {
+    lines.push("assumptions:");
+    for (const a of brief.assumptions) lines.push(`  ${a}`);
+    lines.push("");
+  }
+  if (brief.constraints.length > 0) {
+    lines.push("constraints:");
+    for (const c of brief.constraints) lines.push(`  ${c}`);
+    lines.push("");
+  }
+  if (brief.acceptance_criteria.length > 0) {
+    lines.push("acceptance criteria:");
+    for (const a of brief.acceptance_criteria) lines.push(`  ${a}`);
+    lines.push("");
+  }
+  if (brief.out_of_scope.length > 0) {
+    lines.push("out of scope:");
+    for (const o of brief.out_of_scope) lines.push(`  ${o}`);
+    lines.push("");
+  }
+  if (brief.unresolved.length > 0) {
+    lines.push("unresolved:");
+    for (const u of brief.unresolved) lines.push(`  ${u}`);
+    lines.push("");
+  }
+
   // Diff against the previous render of this same plan, when there was one — a
   // second read must cost only what changed, or the gate stops being read.
   let previous: Record<string, Record<string, string>> | null = null;
+  let previousBrief: Record<string, string> | null = null;
   try {
-    previous = JSON.parse(
-      readFileSync(renderCachePath(cwd, plan.goalId), "utf8"),
-    ) as typeof current;
+    const parsed = JSON.parse(readFileSync(renderCachePath(cwd, plan.goalId), "utf8")) as Record<
+      string,
+      unknown
+    >;
+    // A cache written before the header was diffed holds the node map at the
+    // top level. Read it as nodes-only rather than reporting every brief field
+    // as changed on the first render after an upgrade.
+    const versioned = "nodes" in parsed && "brief" in parsed;
+    previous = (versioned ? parsed.nodes : parsed) as typeof current;
+    previousBrief = versioned ? (parsed.brief as Record<string, string>) : null;
   } catch {
     previous = null;
   }
@@ -715,6 +848,14 @@ function renderPlan(cwd: string, graphArg: string, plan: ResolvedPlan, reporter:
 
   if (previous) {
     const changed: string[] = [];
+    const beforeBrief = previousBrief;
+    if (beforeBrief) {
+      const fields = Object.keys(currentBrief).filter((f) => beforeBrief[f] !== currentBrief[f]);
+      if (fields.length > 0) {
+        changed.push("  ~ goal brief");
+        for (const f of fields) changed.push(`      ${f}: ${beforeBrief[f]} → ${currentBrief[f]}`);
+      }
+    }
     for (const alias of order) {
       const before = previous[alias];
       const after = current[alias];
@@ -737,12 +878,29 @@ function renderPlan(cwd: string, graphArg: string, plan: ResolvedPlan, reporter:
       ...changed,
     );
   }
+  // Exactly four actions, and only in human mode. Auto renders no menu and
+  // waits for no selection — a run recorded `auto` must never have a human
+  // approval hiding underneath it, and offering one here is how that happens.
+  // Printing the menu authorizes nothing: each line names the command the USER
+  // runs, and `graph create` still exits 3 without a token.
+  const actions = mode === "human" ? PLAN_ACTIONS : [];
+  if (actions.length > 0) {
+    lines.push("", "actions:");
+    lines.push(`  Approve    — ... graph approve --graph ${graphArg}`);
+    lines.push("  Edit       — revise the drafts, then re-render (any edit re-arms the gate)");
+    lines.push(`  Regenerate — ... graph regenerate --graph ${graphArg} (keeps the Goal Brief)`);
+    lines.push(`  Cancel     — ... graph cancel --graph ${graphArg}`);
+  }
+
   lines.push("", "nothing written — this is a dry run");
   reporter.success(lines.join("\n"));
 
   try {
     mkdirSync(dirname(renderCachePath(cwd, plan.goalId)), { recursive: true });
-    writeFileSync(renderCachePath(cwd, plan.goalId), JSON.stringify(current));
+    writeFileSync(
+      renderCachePath(cwd, plan.goalId),
+      JSON.stringify({ nodes: current, brief: currentBrief }),
+    );
   } catch {
     // a cache we cannot write costs a full re-render, never a failed dry run
   }
@@ -757,11 +915,28 @@ function renderPlan(cwd: string, graphArg: string, plan: ResolvedPlan, reporter:
     // The task ids and run branch a real create WOULD produce. Both are
     // resolved during preflight already; omitting them left the dry run unable
     // to answer "what will this create", which is the question it exists for.
-    runBranch: runBranchName(plan.goalId),
+    runBranch,
     aliasToId: Object.fromEntries(plan.idByAlias),
     taskIds: [...plan.idByAlias.values()],
     executionOrder: order,
     nodes: current,
+    targetBranch,
+    worktreeCount,
+    taskCount: order.length,
+    interactionMode: mode,
+    actions,
+    // True when the header's mode is not the one that governs — so a structured
+    // consumer reading `brief.interactionMode` cannot mistake it for the gate's.
+    interactionModeDiverges: modeDiverges,
+    brief: {
+      interactionMode: brief.interaction_mode,
+      answers: brief.answers,
+      assumptions: brief.assumptions,
+      constraints: brief.constraints,
+      acceptanceCriteria: brief.acceptance_criteria,
+      outOfScope: brief.out_of_scope,
+      unresolved: brief.unresolved,
+    },
   });
 }
 
@@ -777,7 +952,7 @@ function gateNodes(plan: ResolvedPlan): GateNode[] {
 /**
  * Mode for a gate decision comes from `.sddx/config.json` alone — never from a
  * flag or the environment, both of which are part of the command line the agent
- * composes (see `gateExecutionMode`). The token must also match the workspace
+ * composes (see `gateInteractionMode`). The token must also match the workspace
  * strategy actually in play, since `--workspace none` abandons isolation.
  */
 function resolveApproval(cwd: string, graphArg: string, plan: ResolvedPlan): GateDecision {
@@ -785,7 +960,7 @@ function resolveApproval(cwd: string, graphArg: string, plan: ResolvedPlan): Gat
     cwd,
     join(cwd, graphArg),
     gateNodes(plan),
-    gateExecutionMode(cwd),
+    gateInteractionMode(cwd),
     autoMaxTasks(cwd),
     scopesOverlap,
     // the RESOLVED mode, matching what the token recorded
@@ -815,19 +990,21 @@ function cmdGraphApprove(
   if (hash === "") failWith(errors.map((e) => `graph approve: ${e}`));
 
   // Run the gate's HARD refusals here too. Without this, approving a plan whose
-  // node declares `oracle.type: manual` under `execution_mode: auto` reports
+  // node declares `oracle.type: manual` under `interaction_mode: auto` reports
   // success and writes a token, and the very next `graph create` refuses it —
   // telling a human who just approved as a human to "run in human mode".
-  const refusal = decideGate(
+  const decision = decideGate(
     cwd,
     join(cwd, graphArg),
     gateNodes(plan),
-    gateExecutionMode(cwd),
+    gateInteractionMode(cwd),
     autoMaxTasks(cwd),
     scopesOverlap,
     plan.mode,
-  ).refusal;
-  if (refusal) failWith([`graph approve: ${refusal}`]);
+  );
+  if (decision.refusal) {
+    failWith([`graph approve: ${decision.refusal}`], 1, { blocker: decision.blocker });
+  }
 
   // A token always records `mode: "human"`. Approving IS the deliberate act, so
   // recording the *configured* mode here would let a `mode: auto` receipt mean
@@ -888,8 +1065,10 @@ function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noCol
   // self-grant. Exit 3 marks "approval required", distinct from 1 and 2.
   const gate = resolveApproval(cwd, graphArg, plan);
   // A hard refusal fails (exit 1) rather than arming the gate — asking a human
-  // to approve an incoherent plan is worse than refusing it outright.
-  if (gate.refusal) failWith([`graph create: ${gate.refusal}`]);
+  // to approve an incoherent plan is worse than refusing it outright. The
+  // structured blocker rides along so a caller can act on the bound that fired
+  // instead of parsing the sentence describing it.
+  if (gate.refusal) failWith([`graph create: ${gate.refusal}`], 1, { blocker: gate.blocker });
   if (!gate.ok) {
     failWith([`graph create: ${gate.reason}`], 3);
   }
@@ -963,6 +1142,9 @@ function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noCol
       baseSha: base.sha,
       approval: {
         mode: gate.mode,
+        // A token always records `mode: human` (approving IS the deliberate
+        // act), so a human-resolved gate is exactly a matched token.
+        authorization: gate.mode === "human" ? "human-approval" : "auto",
         plan_sha256: gate.hash,
         at: new Date().toISOString(),
       },
@@ -1334,7 +1516,7 @@ function cmdConfigShow(cwd: string, args: string[], format: OutputFormat, noColo
     `agent_model: ${agentModel}`,
     `prefer_solo: ${cfg.prefer_solo}`,
     `verbose: ${cfg.verbose}`,
-    `execution_mode: ${cfg.execution_mode}`,
+    `interaction_mode: ${cfg.interaction_mode}`,
     `auto_max_tasks: ${cfg.auto_max_tasks}`,
   ];
   reporter.success(lines.join("\n"));
@@ -1382,6 +1564,149 @@ function cmdConfigValidate(cwd: string, format: OutputFormat, noColor: boolean):
   reporter.finish({ hasConfig: true, warnings });
 }
 
+/**
+ * Validates an intake question batch. This exists as a command, rather than as
+ * a line in the intake agent's prompt, because the three-question cap is an
+ * acceptance criterion — and an acceptance criterion a model can talk its way
+ * past is not one. The dispatching skill writes what intake returned and runs
+ * this before rendering anything to the user.
+ */
+function cmdIntakeCheck(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
+  const reporter = makeReporter("intake check", format, noColor);
+  const path = flag(args, "--batch");
+  if (!path) fail("intake check: --batch <path> is required");
+  const abs = resolve(cwd, path);
+  let text: string;
+  try {
+    text = readFileSync(abs, "utf8");
+  } catch (e) {
+    // A batch that cannot be read must not pass as "no questions" — that would
+    // send an unreviewed plan straight past the one round of questions.
+    fail(`intake check: cannot read ${path}: ${(e as Error).message}`);
+  }
+  const { questions, errors } = parseQuestionBatch(text);
+  if (!questions)
+    failWith(
+      errors.map((e) => `intake check: ${e}`),
+      2,
+    );
+  reporter.success(
+    `intake check: ${questions.length} question${questions.length === 1 ? "" : "s"} (cap ${QUESTION_CAP})`,
+  );
+  reporter.finish({ count: questions.length, cap: QUESTION_CAP, questions });
+}
+
+/**
+ * Resolves a draft graph for Regenerate/Cancel: its absolute path, the spec
+ * drafts it references, and the goal id it would materialize as. Both actions
+ * are only ever legal while the plan is still a draft, so the goal check lives
+ * here — once a goal record exists, branches, worktrees, and task state exist
+ * with it, and neither action is a way to unwind those.
+ */
+function draftPlan(cwd: string, args: string[], action: string) {
+  const graphArg = flag(args, "--graph");
+  if (!graphArg) fail(`graph ${action}: --graph <path> is required`);
+  const abs = resolve(cwd, graphArg);
+  // Both actions DELETE (and Regenerate rewrites), and the path they act on
+  // comes from a command line the agent composes plus `spec:` strings a draft
+  // declares. Neither is a trusted path source: the Bash gate lets the sddx CLI
+  // run in every phase, so without this an executor blocked from writing source
+  // could still `graph cancel --graph src/index.ts` — or point a draft's `spec:`
+  // at `../../src/index.ts` — and delete it, exit 0, "removed 1 draft". Drafts
+  // live under `.sddx/drafts/` by construction, so refuse anything outside it.
+  const drafts = draftsDir(cwd);
+  if (!within(drafts, abs)) {
+    fail(
+      `graph ${action}: ${graphArg} is not under ${relative(cwd, drafts)}/ — ${action} only ever removes plan drafts, and refuses any path outside the drafts directory`,
+      2,
+    );
+  }
+  let text: string;
+  try {
+    text = readFileSync(abs, "utf8");
+  } catch (e) {
+    fail(`graph ${action}: cannot read ${graphArg}: ${(e as Error).message}`);
+  }
+  const { graph, errors } = parseGraph(text);
+  // A header-only draft has nothing to regenerate but is still cancellable, so
+  // an unparseable file is not fatal here — only a materialized one is.
+  const goal = graph ? graph.goal : (/^goal:\s*(.+)$/m.exec(text)?.[1] ?? "").trim();
+  const gid = goal === "" ? null : goalId(goal);
+  // `goalExists` prefers the run-branch ref over a loose file, so this sees a
+  // canonical goal as well as a legacy one. It deliberately does not PARSE the
+  // record: a goal that exists but fails validation is still a materialized
+  // run, and reading that as "still a draft" is how these actions came to delete
+  // the artifacts an approval token and `plan_sha256` are bound to.
+  if (gid !== null && goalExists(cwd, gid)) {
+    fail(
+      `graph ${action}: goal ${gid} has already been created from this plan — ${action} only applies while it is still a draft. Use cleanup/next-actions to unwind a materialized run.`,
+      3,
+    );
+  }
+  const specs = (graph?.tasks ?? []).map((n) => resolve(dirname(abs), n.spec));
+  for (const spec of specs) {
+    if (!within(drafts, spec)) {
+      fail(
+        `graph ${action}: ${relative(cwd, spec)} is outside ${relative(cwd, drafts)}/ — a node's spec path may not escape the drafts directory`,
+        2,
+      );
+    }
+  }
+  return { graphArg, abs, text, graph, errors, specs, goalId: gid };
+}
+
+/**
+ * Regenerate: discard the decomposition, keep the Goal Brief. The header is
+ * truncated textually so every recorded answer survives byte-for-byte — the
+ * user answered those questions once, and a re-plan is not a reason to ask
+ * again. The orchestrator then runs afresh over the same header.
+ */
+function cmdGraphRegenerate(
+  cwd: string,
+  args: string[],
+  format: OutputFormat,
+  noColor: boolean,
+): void {
+  const reporter = makeReporter("graph regenerate", format, noColor);
+  const { graphArg, abs, text, specs, goalId: gid } = draftPlan(cwd, args, "regenerate");
+  const header = truncateToHeader(text);
+  writeFileSync(abs, header);
+  const removed: string[] = [];
+  for (const spec of specs) {
+    if (!existsSync(spec)) continue;
+    rmSync(spec, { force: true });
+    removed.push(relative(cwd, spec));
+  }
+  dropRenderCache(cwd, gid);
+  reporter.success(
+    [
+      `graph regenerate: ${graphArg} truncated to its Goal Brief header — every recorded answer kept`,
+      `removed ${removed.length} node spec draft${removed.length === 1 ? "" : "s"}`,
+      "re-run the orchestrator over this header to produce a new decomposition",
+    ].join("\n"),
+  );
+  reporter.finish({ graph: graphArg, removedSpecs: removed, headerBytes: header.length });
+}
+
+/** Cancel: remove the drafts and nothing else. No run has started, so there is
+ * no branch, worktree, task, goal record, or token to unwind — which is the
+ * whole reason the gate sits before materialization rather than after it. */
+function cmdGraphCancel(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
+  const reporter = makeReporter("graph cancel", format, noColor);
+  const { graphArg, abs, specs, goalId: gid } = draftPlan(cwd, args, "cancel");
+  const removed: string[] = [];
+  for (const path of [...specs, abs]) {
+    if (!existsSync(path)) continue;
+    rmSync(path, { force: true });
+    removed.push(relative(cwd, path));
+  }
+  dropRenderCache(cwd, gid);
+  reporter.success(
+    `graph cancel: removed ${removed.length} draft${removed.length === 1 ? "" : "s"} for ${graphArg} — no branch, worktree, task, goal, or approval token existed to undo`,
+  );
+  reporter.finish({ removed });
+}
+
 function main(argv: string[]): void {
   const cwd = process.cwd();
   const { format, noColor, rest: cleaned } = parseOutputFlag(argv);
@@ -1422,9 +1747,9 @@ function main(argv: string[]): void {
       // which resolves to `human`, which silently granted the exemption on
       // exactly the unattended runs this refusal exists to stop. Same fix
       // verify.ts already needed for reading the goal file.
-      if (gateExecutionMode(resolveMainRepoRoot(cwd)) === "auto") {
+      if (gateInteractionMode(resolveMainRepoRoot(cwd)) === "auto") {
         fail(
-          `task allow: refused in auto mode — a TDD-gate exemption always requires a human. Mode is read from reviewed configuration only: set "execution_mode": "human" in .sddx/config.json to grant "${path}" on ${id}.`,
+          `task allow: refused in auto mode — a TDD-gate exemption always requires a human. Mode is read from reviewed configuration only: set "interaction_mode": "human" in .sddx/config.json to grant "${path}" on ${id}.`,
         );
       }
       const task = readTask(cwd, id);
@@ -1512,12 +1837,24 @@ function main(argv: string[]): void {
       reporter.finish(goal);
       return;
     }
+    if (cmd === "intake" && rest[0] === "check") {
+      cmdIntakeCheck(cwd, rest.slice(1), format, noColor);
+      return;
+    }
     if (cmd === "graph" && rest[0] === "approve") {
       cmdGraphApprove(cwd, rest.slice(1), format, noColor);
       return;
     }
     if (cmd === "graph" && rest[0] === "create") {
       cmdGraphCreate(cwd, rest.slice(1), format, noColor);
+      return;
+    }
+    if (cmd === "graph" && rest[0] === "regenerate") {
+      cmdGraphRegenerate(cwd, rest.slice(1), format, noColor);
+      return;
+    }
+    if (cmd === "graph" && rest[0] === "cancel") {
+      cmdGraphCancel(cwd, rest.slice(1), format, noColor);
       return;
     }
     if (cmd === "pr" && rest[0] === "create") {

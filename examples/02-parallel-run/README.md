@@ -45,6 +45,8 @@ scope:
   - "src/bravo/**"
 EOF
 cat > graph.yaml <<'EOF'
+schema_version: "1.0"
+interaction_mode: human
 goal: add two independent modules
 tasks:
   - alias: alpha

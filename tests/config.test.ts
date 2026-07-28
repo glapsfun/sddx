@@ -4,8 +4,8 @@ import { join } from "node:path";
 import {
   autoMaxTasks,
   boardEnabled,
-  executionMode,
-  gateExecutionMode,
+  gateInteractionMode,
+  interactionMode,
   oracleRuns,
   parseAgentModel,
   resolveConfig,
@@ -109,28 +109,31 @@ describe("parseAgentModel", () => {
   });
 });
 
-describe("execution mode config", () => {
-  test("executionMode reads .sddx/config.json only — config > default human", () => {
+describe("interaction mode config", () => {
+  test("interactionMode reads .sddx/config.json only — config > default human", () => {
     const cwd = fixtureRepo();
-    expect(executionMode(cwd)).toBe("human");
-    withConfig(cwd, { execution_mode: "auto" });
-    expect(executionMode(cwd)).toBe("auto");
+    expect(interactionMode(cwd)).toBe("human");
+    withConfig(cwd, { interaction_mode: "auto" });
+    expect(interactionMode(cwd)).toBe("auto");
   });
 
   test("SECURITY: the environment cannot switch the mode", () => {
-    // An inline `SDDX_EXECUTION_MODE=auto sddx …` is part of the command line the
-    // agent composes, so honoring it would let the thing the gate constrains
+    // An inline `SDDX_INTERACTION_MODE=auto sddx …` is part of the command line
+    // the agent composes, so honoring it would let the thing the gate constrains
     // switch the gate off. Config — a committed file a human edits — is the only
     // trusted source. Same for the ceiling: raising it buys blast radius.
+    // Neither the new name nor the legacy one is honored.
     const cwd = fixtureRepo();
-    withConfig(cwd, { execution_mode: "human", auto_max_tasks: 2 });
+    withConfig(cwd, { interaction_mode: "human", auto_max_tasks: 2 });
+    process.env.SDDX_INTERACTION_MODE = "auto";
     process.env.SDDX_EXECUTION_MODE = "auto";
     process.env.SDDX_AUTO_MAX_TASKS = "999";
     try {
-      expect(executionMode(cwd)).toBe("human");
+      expect(interactionMode(cwd)).toBe("human");
       expect(autoMaxTasks(cwd)).toBe(2);
-      expect(gateExecutionMode(cwd)).toBe("human");
+      expect(gateInteractionMode(cwd)).toBe("human");
     } finally {
+      delete process.env.SDDX_INTERACTION_MODE;
       delete process.env.SDDX_EXECUTION_MODE;
       delete process.env.SDDX_AUTO_MAX_TASKS;
     }
@@ -138,21 +141,23 @@ describe("execution mode config", () => {
 
   test("an unrecognized mode resolves to human, never auto", () => {
     const cwd = fixtureRepo();
-    withConfig(cwd, { execution_mode: "yolo" });
-    expect(executionMode(cwd)).toBe("human");
+    withConfig(cwd, { interaction_mode: "yolo" });
+    expect(interactionMode(cwd)).toBe("human");
   });
 
   test("an absent value never yields auto", () => {
     const cwd = fixtureRepo();
-    expect(executionMode(cwd)).toBe("human");
+    expect(interactionMode(cwd)).toBe("human");
     withConfig(cwd, {});
-    expect(executionMode(cwd)).toBe("human");
+    expect(interactionMode(cwd)).toBe("human");
   });
 
   test("an unrecognized mode is reported by config validation", () => {
-    expect(validateConfigObject({ execution_mode: "yolo" }).join("\n")).toContain("execution_mode");
-    expect(validateConfigObject({ execution_mode: "auto" })).toHaveLength(0);
-    expect(validateConfigObject({ execution_mode: "human" })).toHaveLength(0);
+    expect(validateConfigObject({ interaction_mode: "yolo" }).join("\n")).toContain(
+      "interaction_mode",
+    );
+    expect(validateConfigObject({ interaction_mode: "auto" })).toHaveLength(0);
+    expect(validateConfigObject({ interaction_mode: "human" })).toHaveLength(0);
   });
 
   test("autoMaxTasks: config > default, positive integers only", () => {
@@ -175,13 +180,82 @@ describe("execution mode config", () => {
 
   test("both keys appear fully resolved in resolveConfig", () => {
     const cwd = fixtureRepo();
-    expect(resolveConfig(cwd, {}).execution_mode).toBe("human");
+    expect(resolveConfig(cwd, {}).interaction_mode).toBe("human");
     expect(resolveConfig(cwd, {}).auto_max_tasks).toBe(6);
     // config show must display what the gate actually uses
-    withConfig(cwd, { execution_mode: "human" });
-    expect(resolveConfig(cwd, { SDDX_EXECUTION_MODE: "auto" }).execution_mode).toBe("human");
-    withConfig(cwd, { execution_mode: "auto", auto_max_tasks: 2 });
-    expect(resolveConfig(cwd, {}).execution_mode).toBe("auto");
+    withConfig(cwd, { interaction_mode: "human" });
+    expect(resolveConfig(cwd, { SDDX_INTERACTION_MODE: "auto" }).interaction_mode).toBe("human");
+    withConfig(cwd, { interaction_mode: "auto", auto_max_tasks: 2 });
+    expect(resolveConfig(cwd, {}).interaction_mode).toBe("auto");
     expect(resolveConfig(cwd, {}).auto_max_tasks).toBe(2);
+  });
+});
+
+// `execution_mode` → `interaction_mode`. The security property the new name
+// describes was always the point: the key decides whether a plan needs a human
+// at all, which is about the interaction, not about how execution proceeds.
+describe("interaction_mode (renamed from execution_mode)", () => {
+  test("the new key is read", () => {
+    const cwd = fixtureRepo();
+    withConfig(cwd, { interaction_mode: "auto" });
+    expect(interactionMode(cwd)).toBe("auto");
+  });
+
+  test("the legacy key is still read, so an existing checkout keeps working", () => {
+    const cwd = fixtureRepo();
+    withConfig(cwd, { execution_mode: "auto" });
+    expect(interactionMode(cwd)).toBe("auto");
+  });
+
+  test("the legacy key warns, naming its replacement", () => {
+    const warnings = validateConfigObject({ execution_mode: "auto" });
+    expect(warnings.join("\n")).toContain("execution_mode");
+    expect(warnings.join("\n")).toContain("interaction_mode");
+  });
+
+  test("the new key warns about nothing", () => {
+    expect(validateConfigObject({ interaction_mode: "auto" })).toHaveLength(0);
+    expect(validateConfigObject({ interaction_mode: "human" })).toHaveLength(0);
+  });
+
+  test("the new key wins when both are present", () => {
+    const cwd = fixtureRepo();
+    withConfig(cwd, { execution_mode: "auto", interaction_mode: "human" });
+    expect(interactionMode(cwd)).toBe("human");
+  });
+
+  test("an invalid value resolves to human, never auto — in either key", () => {
+    const cwd = fixtureRepo();
+    withConfig(cwd, { interaction_mode: "yolo" });
+    expect(interactionMode(cwd)).toBe("human");
+    withConfig(cwd, { execution_mode: "yolo" });
+    expect(interactionMode(cwd)).toBe("human");
+  });
+
+  test("an invalid new key does not fall through to a stale legacy auto", () => {
+    // The half-finished rename: the key was renamed, its value mistyped, and
+    // the old line left behind. Falling through resolved the gate to `auto` —
+    // so a user who believes they are in human mode, and whom validation tells
+    // the legacy key is ignored, gets a plan that self-approves.
+    const cwd = fixtureRepo();
+    withConfig(cwd, { interaction_mode: "manual", execution_mode: "auto" });
+    expect(interactionMode(cwd)).toBe("human");
+  });
+
+  test("resolved config reports the new name only", () => {
+    const cwd = fixtureRepo();
+    withConfig(cwd, { execution_mode: "auto" });
+    const resolved = resolveConfig(cwd, {}) as unknown as Record<string, unknown>;
+    expect(resolved.interaction_mode).toBe("auto");
+    expect(resolved.execution_mode).toBeUndefined();
+  });
+
+  test("neither key is settable by environment variable", () => {
+    const cwd = fixtureRepo();
+    withConfig(cwd, { interaction_mode: "human" });
+    expect(
+      resolveConfig(cwd, { SDDX_INTERACTION_MODE: "auto", SDDX_EXECUTION_MODE: "auto" })
+        .interaction_mode,
+    ).toBe("human");
   });
 });

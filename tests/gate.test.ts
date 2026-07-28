@@ -240,17 +240,17 @@ describe("approval tokens are not writable by hand", () => {
     for (const p of [`${cwd}/.sddx/tasks/../config.json`, ".sddx/tasks/../config.json"]) {
       const c = tddGate({ filePath: p, cwd });
       expect(c.allow).toBe(false);
-      if (!c.allow) expect(c.reason).toContain("execution_mode");
+      if (!c.allow) expect(c.reason).toContain("interaction_mode");
     }
   });
 
-  test(".sddx/config.json is not tool-editable — it is the only source of execution_mode", () => {
+  test(".sddx/config.json is not tool-editable — it is the only source of interaction_mode", () => {
     const cwd = fixtureRepo();
     for (const p of [".sddx/config.json", join(cwd, ".sddx", "config.json")]) {
       const d = tddGate({ filePath: p, cwd });
       expect(d.allow).toBe(false);
       if (d.allow) continue;
-      expect(d.reason).toContain("execution_mode");
+      expect(d.reason).toContain("interaction_mode");
     }
   });
 

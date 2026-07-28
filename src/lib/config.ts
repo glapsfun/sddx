@@ -16,15 +16,25 @@ export interface SddxConfig {
   agent_model?: string;
   prefer_solo?: boolean;
   verbose?: boolean;
-  execution_mode?: ExecutionMode;
+  /** Renamed from `execution_mode`. Both are read; the new name wins. */
+  interaction_mode?: InteractionMode;
+  /** DEPRECATED — read for compatibility, never written. See `interactionMode`. */
+  execution_mode?: InteractionMode;
   auto_max_tasks?: number;
 }
 
-/** Which approval gates are armed. `auto` is `human` with the plan-approval
- * gate pre-satisfied — never a second execution path. */
-export type ExecutionMode = "human" | "auto";
+/**
+ * Which approval gates are armed. `auto` is `human` with the plan-approval gate
+ * pre-satisfied — never a second execution path.
+ *
+ * Named for the INTERACTION it governs, not for execution: the two modes share
+ * one execution engine and differ only in whether a human is consulted before
+ * materialization. The old name (`execution_mode`) suggested two ways of
+ * running, which is exactly what this is not.
+ */
+export type InteractionMode = "human" | "auto";
 
-export const EXECUTION_MODES = ["human", "auto"] as const;
+export const INTERACTION_MODES = ["human", "auto"] as const;
 
 /** The node-count ceiling above which `auto` arms the approval gate anyway. */
 export const DEFAULT_AUTO_MAX_TASKS = 6;
@@ -116,9 +126,9 @@ export function boardEnabled(root: string, env: NodeJS.ProcessEnv = process.env)
   });
 }
 
-const asMode = (v: unknown): ExecutionMode | null =>
-  typeof v === "string" && (EXECUTION_MODES as readonly string[]).includes(v)
-    ? (v as ExecutionMode)
+const asMode = (v: unknown): InteractionMode | null =>
+  typeof v === "string" && (INTERACTION_MODES as readonly string[]).includes(v)
+    ? (v as InteractionMode)
     : null;
 
 /**
@@ -131,20 +141,31 @@ const asMode = (v: unknown): ExecutionMode | null =>
  * `sddx graph create … --mode auto` would silently satisfy a user who
  * configured `human`. Config is a committed file a human edits, and it is the
  * only source a gate decision may trust. For unattended CI, commit
- * `execution_mode: "auto"` — reviewable, unlike an env var.
+ * `interaction_mode: "auto"` — reviewable, unlike an env var.
  *
  * An invalid or unreadable value resolves to `human`, never `auto`.
  */
-export function executionMode(root: string): ExecutionMode {
-  return asMode(readConfig(root).execution_mode) ?? "human";
+export function interactionMode(root: string): InteractionMode {
+  const cfg = readConfig(root);
+  // The new name wins, and it wins even when its value is junk: a PRESENT
+  // `interaction_mode` is the answer, so a typo resolves to `human` rather than
+  // falling through to a stale `execution_mode: "auto"` left behind by the
+  // rename. Falling through would make an unreadable value resolve to `auto` —
+  // the one thing this key documents it never does.
+  if (cfg.interaction_mode !== undefined) return asMode(cfg.interaction_mode) ?? "human";
+  // Absent entirely: the legacy key is still read so a checkout configured
+  // before the rename keeps its mode rather than silently falling back to
+  // `human` — a silent fallback would be safe but would also mean an unattended
+  // CI run mysteriously starts asking for approval.
+  return asMode(cfg.execution_mode) ?? "human";
 }
 
-/** The gate's mode. Same config-only resolution as `executionMode`; the alias
+/** The gate's mode. Same config-only resolution as `interactionMode`; the alias
  * exists so gate call sites read as what they are. */
-export const gateExecutionMode = executionMode;
+export const gateInteractionMode = interactionMode;
 
 /**
- * `.sddx/config.json` only, for the same reason as `executionMode`: raising the
+ * `.sddx/config.json` only, for the same reason as `interactionMode`: raising the
  * ceiling widens how much unattended work self-approves, so an environment
  * override would be a second way for the agent to buy itself blast radius.
  */
@@ -152,7 +173,7 @@ export function autoMaxTasks(root: string): number {
   return positiveInt(readConfig(root).auto_max_tasks) ?? DEFAULT_AUTO_MAX_TASKS;
 }
 
-const KNOWN_AGENT_ROLES = ["orchestrator", "planner", "tddExecutor", "verifier"] as const;
+const KNOWN_AGENT_ROLES = ["intake", "orchestrator", "planner", "tddExecutor", "verifier"] as const;
 
 /**
  * Parses `agent_model` ("role=model" pairs, comma-separated) into a role→model
@@ -198,7 +219,7 @@ export interface ResolvedConfig {
   agent_model: Record<string, string>;
   prefer_solo: boolean;
   verbose: boolean;
-  execution_mode: ExecutionMode;
+  interaction_mode: InteractionMode;
   auto_max_tasks: number;
 }
 
@@ -264,8 +285,8 @@ export function resolveConfig(root: string, env: NodeJS.ProcessEnv = process.env
     agent_model: parseAgentModel(cfg.agent_model).models,
     prefer_solo: resolveValue({ configValue: cfg.prefer_solo, configParse: bool, fallback: false }),
     verbose: resolveValue({ configValue: cfg.verbose, configParse: bool, fallback: false }),
-    // both config-only by design — see executionMode()
-    execution_mode: executionMode(root),
+    // both config-only by design — see interactionMode()
+    interaction_mode: interactionMode(root),
     auto_max_tasks: autoMaxTasks(root),
   };
 }
@@ -300,7 +321,8 @@ const CONFIG_SCHEMA: ReadonlyArray<[string, (v: unknown) => boolean, string]> = 
   ["agent_model", isString, "a string"],
   ["prefer_solo", isBoolean, "a boolean"],
   ["verbose", isBoolean, "a boolean"],
-  ["execution_mode", isOneOf(EXECUTION_MODES), `one of ${EXECUTION_MODES.join("|")}`],
+  ["interaction_mode", isOneOf(INTERACTION_MODES), `one of ${INTERACTION_MODES.join("|")}`],
+  ["execution_mode", isOneOf(INTERACTION_MODES), `one of ${INTERACTION_MODES.join("|")}`],
   ["auto_max_tasks", isPositiveInt, "a positive integer"],
 ];
 
@@ -325,6 +347,16 @@ export function validateConfigObject(obj: Record<string, unknown>): string[] {
   }
   if (typeof obj.agent_model === "string") {
     warnings.push(...parseAgentModel(obj.agent_model).warnings);
+  }
+  // Read, but named for what it is. The key is still honored, so this is a
+  // rename notice rather than a failure — and it names the replacement, since
+  // a warning that does not say what to do instead is just noise.
+  if ("execution_mode" in obj) {
+    warnings.push(
+      obj.interaction_mode === undefined
+        ? '"execution_mode" has been renamed to "interaction_mode" — the old name is still read, rename it to silence this'
+        : '"execution_mode" is ignored because "interaction_mode" is also set — remove the old key',
+    );
   }
   return warnings;
 }

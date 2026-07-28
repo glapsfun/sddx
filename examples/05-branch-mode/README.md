@@ -40,6 +40,8 @@ scope:
   - "src/a/child.ts"
 EOF
 cat > graph.yaml <<'EOF'
+schema_version: "1.0"
+interaction_mode: human
 goal: ship on branches
 tasks:
   - alias: a

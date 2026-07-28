@@ -1,6 +1,6 @@
 ---
 name: verifier
-description: Executes a task's oracle via sddx verify, which writes the hash-chained receipt and atomic commit. Read-and-run only — never edits source, never fixes failures.
+description: Runs a task's oracle via sddx verify, which writes the hash-chained receipt and commit. Read-and-run only — never edits source.
 tools: Read, Bash
 ---
 

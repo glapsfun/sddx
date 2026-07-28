@@ -21,7 +21,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { decideGate, type GateNode, planHash } from "./approval";
-import { autoMaxTasks, gateExecutionMode } from "./config";
+import { autoMaxTasks, gateInteractionMode } from "./config";
 import { scopesOverlap } from "./glob-overlap";
 import { parseGraph } from "./graph";
 import { parseSpec } from "./spec";
@@ -364,12 +364,12 @@ export function approvalGate(event: {
     // Mode comes from `.sddx/config.json` ONLY. It is deliberately NOT read from
     // the command line or the environment here: both are composed by the very
     // agent this gate constrains, so honoring a `--mode auto` or an inline
-    // `SDDX_EXECUTION_MODE=auto` would let it switch off the user's chosen mode.
+    // `SDDX_INTERACTION_MODE=auto` would let it switch off the user's chosen mode.
     const gate = decideGate(
       cwd,
       graphPath,
       nodes,
-      gateExecutionMode(cwd),
+      gateInteractionMode(cwd),
       autoMaxTasks(cwd),
       scopesOverlap,
       // omitted deliberately: only the CLI can resolve `auto` to the effective

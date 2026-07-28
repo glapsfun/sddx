@@ -5,6 +5,14 @@ import { join } from "node:path";
 
 export const repoRoot = new URL("..", import.meta.url).pathname;
 
+/** The Goal Brief header keys every *planned* graph must carry. Intake writes
+ * the header; the orchestrator appends `tasks:`. Fixtures that hand-write a
+ * plan prepend this so they describe a plan rather than a half-written draft.
+ * The optional list keys (answers, assumptions, …) are omitted on purpose —
+ * this is the minimum a graph needs to parse. */
+export const GRAPH_HEADER_LINES = ['schema_version: "1.0"', "interaction_mode: human"];
+export const GRAPH_HEADER = `${GRAPH_HEADER_LINES.join("\n")}\n`;
+
 /** Inject oracle_red evidence dated 1970 — satisfies verify's red-check gate in
  * fixtures whose oracles pass from the start. Real red-checks are e2e-tested. */
 export function fakeRedCheck(root: string, id: string): void {

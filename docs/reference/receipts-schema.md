@@ -109,12 +109,15 @@ Versions 1–3 remain valid and MUST NOT carry an `approval` block; a pre-v4
 receipt containing one is a finding.
 
 `sddx audit` cross-checks a receipt's `approval` against its goal and reports any
-disagreement in `mode` or `plan_sha256` — **but only where the goal file is
-present.** `.sddx/goals/` is local-only and never committed, so in a fresh clone
-or CI there is nothing to compare against; the audit then emits a note saying
-the provenance was *not* cross-checked rather than passing silently. Treat a
-receipt's `approval` block as self-reported unless you see that cross-check
-confirmed.
+disagreement in `mode` or `plan_sha256` — **but only where the goal record is
+present.** The record lives in `refs/sddx/goals/<goal-id>`, which a clone does
+not fetch by default (`sddx pr create` pushes it alongside the run branch, and
+a reviewer fetches it with
+`git fetch origin 'refs/sddx/goals/*:refs/sddx/goals/*'`). Where it is absent —
+a fresh clone that never fetched it, or CI — there is nothing to compare
+against; the audit emits a note saying the provenance was *not* cross-checked
+rather than passing silently. Treat a receipt's `approval` block as
+self-reported unless you see that cross-check confirmed.
 
 **What this proves:** which plan a receipt descends from and which mode it ran
 under. **Not** who approved it — see

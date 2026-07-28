@@ -91,7 +91,11 @@ and exits 1 — a spec without an oracle never becomes a task.
 `--workspace` (default `auto`):
 
 - `auto` — worktree when possible; prints `submodules detected → branch mode`
-  or `git worktree unavailable → branch mode` when downgrading.
+  or `git worktree unavailable → branch mode` when downgrading. **`graph create`
+  does not downgrade**: there `auto` means worktree, and a failed worktree
+  precondition refuses the run rather than silently moving it into a weaker
+  isolation model. The downgrade survives only on this legacy `task create`
+  path, which `retire-alternate-flows` removes.
 - `worktree` — fresh worktree at `.sddx-worktrees/<id>` on branch `sddx/<id>`,
   forked from `origin/HEAD` (falls back to local HEAD with a notice when there
   is no origin). The spec is copied to `.sddx/specs/<id>.yaml` *inside the
@@ -201,7 +205,7 @@ to stderr and exits 1 on any finding — CI-friendly. Clean run:
 sddx goal create --goal <sentence> --tasks <id1,id2,...>
 ```
 
-Persists `.sddx/goals/<goal-id>.json` listing the given task ids, and creates
+Persists the goal record listing the given task ids, and creates
 its run branch (`sddx/run-<goal-id>`, forked from the resolved `origin/HEAD`)
 — the record `sddx pr create --goal <goal-id>` later reads to know what to
 push. Refuses if any listed task id doesn't exist, or if the derived goal id

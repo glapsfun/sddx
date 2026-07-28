@@ -276,6 +276,30 @@ export function resolveReceiptRaw(cwd: string, id: string): Buffer | null {
   return goal ? readReceiptRawFromRef(cwd, goal.run_branch, id) : null;
 }
 
+/**
+ * Where a task's receipt can be read from, named the way a human would open it
+ * — a filesystem path, or a `<ref>:<path>` git spec when the receipt survives
+ * only inside a branch. Null when there is none.
+ *
+ * The run summary quotes this so a reported `pass` is something the reader can
+ * open. A verdict nobody can check is the kind of claim receipts exist to
+ * replace.
+ */
+export function resolveReceiptPath(cwd: string, id: string): string | null {
+  const wt = join(cwd, ".sddx-worktrees", id, ".sddx", "receipts", `${id}.json`);
+  if (existsSync(wt)) return wt;
+  const local = join(cwd, ".sddx", "receipts", `${id}.json`);
+  if (existsSync(local)) return local;
+  if (readReceiptRawFromRef(cwd, `sddx/${id}`, id)) {
+    return `sddx/${id}:.sddx/receipts/${id}.json`;
+  }
+  const goal = findGoalForTask(cwd, id);
+  if (goal && readReceiptRawFromRef(cwd, goal.run_branch, id)) {
+    return `${goal.run_branch}:.sddx/receipts/${id}.json`;
+  }
+  return null;
+}
+
 /** Same cross-location lookup as `resolveReceiptRaw`, parsed. */
 export function resolveReceipt(cwd: string, id: string): Receipt | null {
   const raw = resolveReceiptRaw(cwd, id);

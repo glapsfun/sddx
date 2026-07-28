@@ -621,7 +621,7 @@ describe("sddx cli", () => {
     expect(report.status).toBe(0);
     expect(report.stdout).toContain("Run completed");
     expect(report.stdout).toContain("1 of 1 task(s) merged");
-    expect(report.stdout).toContain("Base branch remains unchanged: main");
+    expect(report.stdout).toContain("Target branch remains unchanged: main");
 
     const menu = cli(cwd, "next-actions", "--goal", goalId);
     expect(menu.status).toBe(0);

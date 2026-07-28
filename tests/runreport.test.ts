@@ -84,9 +84,11 @@ describe("generateRunReport / renderRunReport", () => {
     ]);
 
     const rendered = renderRunReport(report);
-    expect(rendered).toContain("Run completed");
+    // one merged, one failed: not "completed" — the headline must not
+    // contradict the counts printed directly beneath it
+    expect(rendered).toContain("Run finished with unresolved tasks");
     expect(rendered).toContain(`Review branch: ${goal.run_branch}`);
-    expect(rendered).toContain("Base branch remains unchanged: main");
+    expect(rendered).toContain("Target branch remains unchanged: main");
     expect(rendered).toContain("1 of 2 task(s) merged");
     expect(rendered).toContain("1 task(s) failed");
   });

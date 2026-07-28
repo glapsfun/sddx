@@ -1,7 +1,13 @@
 import { git } from "./git";
-import { currentlyMergedTaskIds, type GoalApproval, goalCounts, readGoal } from "./goal";
-import { resolveReceiptRaw } from "./receipt";
-import { resolveTaskState } from "./task";
+import {
+  currentlyMergedTaskIds,
+  type GoalApproval,
+  goalCounts,
+  type MergeEntry,
+  readGoal,
+} from "./goal";
+import { resolveReceiptPath } from "./receipt";
+import { blockedOn, resolveTaskState, skippedOn } from "./task";
 import { resolveMainRepoRoot } from "./worktree";
 
 /** One task's oracle and how it actually came out. */
@@ -13,6 +19,31 @@ export interface OracleOutcome {
   verdict: "pass" | "abandoned" | "outstanding";
 }
 
+/**
+ * Where a task actually ended up.
+ *
+ * `merged` and `failed` were the only outcomes the report distinguished, so a
+ * task whose merge CONFLICTED read as "outstanding" — indistinguishable from
+ * one still being worked on, even though it has a passing oracle and a receipt
+ * and needs a human to resolve a merge. Likewise a dependent skipped because
+ * its parent was abandoned looked like work still in flight.
+ */
+export type TaskStatus = "merged" | "failed" | "skipped" | "blocked" | "conflicted" | "outstanding";
+
+export interface TaskOutcome {
+  taskId: string;
+  status: TaskStatus;
+  /** The oracle and its verdict, as `OracleOutcome` reports them. */
+  oracle: OracleOutcome;
+  /** Path of the receipt backing a `pass`, or null when there is none. A
+   * verdict the reader cannot open is a claim, which is what receipts replace. */
+  receiptPath: string | null;
+  /** The task's most recent integration result, or null if never attempted. */
+  integration: "merged" | "conflict" | "reverted" | null;
+  /** For `blocked`/`skipped`, the ancestor responsible. */
+  because: string | null;
+}
+
 export interface RunReport {
   goalId: string;
   /** The goal sentence, so the summary states what was attempted. */
@@ -22,11 +53,18 @@ export interface RunReport {
   baseSha: string;
   merged: number;
   failed: number;
+  skipped: number;
+  blocked: number;
+  conflicted: number;
   outstanding: number;
   total: number;
   diffStat: string;
   reviewCommands: string[];
-  /** Per-task oracle outcomes, in the goal's task order. */
+  /** Per-task outcome, in the goal's task order. Every task appears exactly
+   * once, and the counts above are derived from these — they cannot disagree. */
+  tasks: TaskOutcome[];
+  /** Per-task oracle outcomes, in the goal's task order. Retained alongside
+   * `tasks` for callers that only want the oracle view. */
   oracles: OracleOutcome[];
   /** Every assumption recorded across the goal's tasks, deduplicated. */
   assumptions: string[];
@@ -64,7 +102,13 @@ export function generateRunReport(cwd: string, goalId: string, targetBranch: str
   );
 
   const oracles: OracleOutcome[] = [];
+  const tasks: TaskOutcome[] = [];
   const assumptions: string[] = [];
+  // Most recent integration attempt per task, read from the goal's merge log —
+  // the declared source of truth; `task.integration` is a derived mirror.
+  const latestMerge = new Map<string, MergeEntry>();
+  for (const e of goal.merges) latestMerge.set(e.task_id, e);
+
   for (const id of goal.task_ids) {
     const task = resolveTaskState(cwd, id);
     for (const a of task?.assumptions ?? []) if (!assumptions.includes(a)) assumptions.push(a);
@@ -72,14 +116,41 @@ export function generateRunReport(cwd: string, goalId: string, targetBranch: str
     // shared cross-location lookup: a receipt may live in the task's worktree,
     // the main checkout, its own `sddx/<id>` branch, or the run branch, and a
     // swept worktree or branch-mode task has none of the first two.
-    const hasReceipt = resolveReceiptRaw(cwd, id) !== null;
-    oracles.push({
+    const receiptPath = resolveReceiptPath(cwd, id);
+    const oracle: OracleOutcome = {
       taskId: id,
       run: task?.oracle.run ?? "(unknown)",
       expect: task?.oracle.expect ?? "(unknown)",
-      verdict: hasReceipt ? "pass" : task?.phase === "ABANDONED" ? "abandoned" : "outstanding",
+      verdict: receiptPath ? "pass" : task?.phase === "ABANDONED" ? "abandoned" : "outstanding",
+    };
+    oracles.push(oracle);
+
+    const entry = latestMerge.get(id) ?? null;
+    const skipper = task ? skippedOn(cwd, task) : null;
+    const blocker = task ? blockedOn(cwd, task) : null;
+    // Precedence mirrors the board's: a terminal outcome for the task itself
+    // outranks anything inherited from an ancestor.
+    const status: TaskStatus = merged.includes(id)
+      ? "merged"
+      : failed.includes(id)
+        ? "failed"
+        : entry?.result === "conflict"
+          ? "conflicted"
+          : skipper
+            ? "skipped"
+            : blocker
+              ? "blocked"
+              : "outstanding";
+    tasks.push({
+      taskId: id,
+      status,
+      oracle,
+      receiptPath,
+      integration: entry?.result ?? null,
+      because: skipper ?? blocker ?? null,
     });
   }
+  const count = (s: TaskStatus): number => tasks.filter((t) => t.status === s).length;
 
   return {
     goalId: goal.id,
@@ -87,11 +158,17 @@ export function generateRunReport(cwd: string, goalId: string, targetBranch: str
     runBranch: goal.run_branch,
     targetBranch,
     baseSha: goal.base_sha,
-    merged: merged.length,
-    failed: failed.length,
-    outstanding: outstanding.length,
+    // Derived from `tasks`, so a count can never disagree with the per-task
+    // listing sitting next to it in the same summary.
+    merged: count("merged"),
+    failed: count("failed"),
+    skipped: count("skipped"),
+    blocked: count("blocked"),
+    conflicted: count("conflicted"),
+    outstanding: count("outstanding"),
     total: goalCounts(goal).total,
     diffStat,
+    tasks,
     oracles,
     assumptions,
     ...(goal.approval ? { approval: goal.approval } : {}),
@@ -116,21 +193,38 @@ function approvalLines(a: GoalApproval): string[] {
 }
 
 export function renderRunReport(r: RunReport): string {
-  // "Completed" only once nothing is still outstanding — this report can be
-  // requested at any point mid-run, not only at the very end.
+  // "Completed" means every task merged. Keying it on `outstanding` alone
+  // called a run complete while a task sat failed, skipped, or verified-but-
+  // not-integrated — the summary's headline contradicting its own counts three
+  // lines below. This report can be requested at any point mid-run.
+  const done = r.merged === r.total;
+  const stalled = r.outstanding === 0 && !done;
   const lines = [
-    r.outstanding > 0 ? "Run in progress" : "Run completed",
+    done ? "Run completed" : stalled ? "Run finished with unresolved tasks" : "Run in progress",
     "",
     `Goal: ${r.goal}`,
     `Review branch: ${r.runBranch}`,
-    `Base branch remains unchanged: ${r.targetBranch}`,
+    `Target branch remains unchanged: ${r.targetBranch}`,
     "",
     ...(r.approval ? approvalLines(r.approval) : []),
     "Summary",
     `- ${r.merged} of ${r.total} task(s) merged`,
+    // Only non-zero buckets are printed: a clean run should not have to be read
+    // past five "0 task(s)" lines to see that it worked. The JSON rendering
+    // carries every count regardless.
     ...(r.failed > 0 ? [`- ${r.failed} task(s) failed`] : []),
+    ...(r.conflicted > 0 ? [`- ${r.conflicted} task(s) verified but not integrated`] : []),
+    ...(r.skipped > 0 ? [`- ${r.skipped} task(s) skipped`] : []),
+    ...(r.blocked > 0 ? [`- ${r.blocked} task(s) blocked`] : []),
     ...(r.outstanding > 0 ? [`- ${r.outstanding} task(s) outstanding`] : []),
     ...(r.diffStat ? r.diffStat.split("\n").map((l) => `- ${l.trim()}`) : []),
+    "",
+    "Tasks",
+    ...r.tasks.map((t) => {
+      const why = t.because ? ` (${t.because})` : "";
+      const receipt = t.receiptPath ? ` — receipt ${t.receiptPath}` : "";
+      return `- ${t.taskId}: ${t.status}${why}${receipt}`;
+    }),
     "",
     "Oracle results",
     ...r.oracles.map((o) => `- ${o.taskId}: ${o.verdict} — ${o.run} (expect ${o.expect})`),

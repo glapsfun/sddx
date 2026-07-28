@@ -7459,17 +7459,6 @@ function remoteUrl(cwd, remote) {
   const r = spawnSync2("git", ["remote", "get-url", remote], { cwd, encoding: "utf8" });
   return r.status === 0 ? r.stdout.trim() : null;
 }
-function upstreamBranch(cwd) {
-  const r = spawnSync2("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], {
-    cwd,
-    encoding: "utf8"
-  });
-  return r.status === 0 ? r.stdout.trim() : null;
-}
-function commitsAheadOfUpstream(cwd) {
-  const r = spawnSync2("git", ["rev-list", "--count", "@{u}..HEAD"], { cwd, encoding: "utf8" });
-  return r.status === 0 ? Number(r.stdout.trim()) : 0;
-}
 function defaultBranch(cwd) {
   const r = spawnSync2("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], {
     cwd,
@@ -8628,6 +8617,22 @@ function resolveReceiptRaw(cwd, id) {
     return direct;
   const goal = findGoalForTask(cwd, id);
   return goal ? readReceiptRawFromRef(cwd, goal.run_branch, id) : null;
+}
+function resolveReceiptPath(cwd, id) {
+  const wt = join6(cwd, ".sddx-worktrees", id, ".sddx", "receipts", `${id}.json`);
+  if (existsSync6(wt))
+    return wt;
+  const local = join6(cwd, ".sddx", "receipts", `${id}.json`);
+  if (existsSync6(local))
+    return local;
+  if (readReceiptRawFromRef(cwd, `sddx/${id}`, id)) {
+    return `sddx/${id}:.sddx/receipts/${id}.json`;
+  }
+  const goal = findGoalForTask(cwd, id);
+  if (goal && readReceiptRawFromRef(cwd, goal.run_branch, id)) {
+    return `${goal.run_branch}:.sddx/receipts/${id}.json`;
+  }
+  return null;
 }
 function resolveReceipt(cwd, id) {
   const raw = resolveReceiptRaw(cwd, id);

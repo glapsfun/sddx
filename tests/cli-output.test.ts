@@ -199,14 +199,19 @@ describe("two-task board summary (JSON + Markdown)", () => {
 });
 
 describe("sddx next-actions --output markdown", () => {
-  test("includes a Next Actions section listing the same actions as the terminal menu", () => {
+  test("a missing --goal renders through the framework, not as bare text", () => {
+    // The current-branch menu is retired, so the reachable non-goal outcome is
+    // the usage error — which must still come back as a proper envelope in
+    // every format rather than as unstructured stderr.
     const cwd = fixtureRepo();
-    writeFileSync(join(cwd, "untracked.txt"), "x\n");
-    const terminalRun = cli(cwd, "next-actions");
-    expect(terminalRun.status).toBe(0);
-
     const mdRun = cli(cwd, "next-actions", "--output", "markdown");
-    expect(mdRun.status).toBe(0);
-    expect(mdRun.stdout).toContain("## Next Actions");
+    expect(mdRun.status).not.toBe(0);
+    expect(`${mdRun.stdout}${mdRun.stderr}`).toContain("--goal");
+
+    const jsonRun = cli(cwd, "next-actions", "--output", "json");
+    expect(jsonRun.status).not.toBe(0);
+    const envelope = JSON.parse(`${jsonRun.stdout}${jsonRun.stderr}`.trim());
+    expect(envelope.status).toBe("error");
+    expect(envelope.errors.join(" ")).toContain("--goal");
   });
 });

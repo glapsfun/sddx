@@ -6946,14 +6946,14 @@ var require_public_api = __commonJS((exports) => {
 // src/cli.ts
 import {
   copyFileSync as copyFileSync2,
-  existsSync as existsSync12,
+  existsSync as existsSync11,
   mkdirSync as mkdirSync8,
   readdirSync as readdirSync7,
-  readFileSync as readFileSync10,
+  readFileSync as readFileSync9,
   rmSync as rmSync3,
   writeFileSync as writeFileSync9
 } from "node:fs";
-import { dirname as dirname3, join as join13, relative as relative2, resolve as resolve2 } from "node:path";
+import { dirname as dirname3, join as join12, relative as relative2, resolve as resolve2 } from "node:path";
 
 // src/audit.ts
 import { spawnSync as spawnSync5 } from "node:child_process";
@@ -7762,6 +7762,22 @@ function resolveReceiptRaw(cwd, id) {
   const goal = findGoalForTask(cwd, id);
   return goal ? readReceiptRawFromRef(cwd, goal.run_branch, id) : null;
 }
+function resolveReceiptPath(cwd, id) {
+  const wt = join3(cwd, ".sddx-worktrees", id, ".sddx", "receipts", `${id}.json`);
+  if (existsSync3(wt))
+    return wt;
+  const local = join3(cwd, ".sddx", "receipts", `${id}.json`);
+  if (existsSync3(local))
+    return local;
+  if (readReceiptRawFromRef(cwd, `sddx/${id}`, id)) {
+    return `sddx/${id}:.sddx/receipts/${id}.json`;
+  }
+  const goal = findGoalForTask(cwd, id);
+  if (goal && readReceiptRawFromRef(cwd, goal.run_branch, id)) {
+    return `${goal.run_branch}:.sddx/receipts/${id}.json`;
+  }
+  return null;
+}
 function resolveReceipt(cwd, id) {
   const raw = resolveReceiptRaw(cwd, id);
   if (!raw)
@@ -8419,17 +8435,6 @@ function remoteUrl(cwd, remote) {
   const r = spawnSync6("git", ["remote", "get-url", remote], { cwd, encoding: "utf8" });
   return r.status === 0 ? r.stdout.trim() : null;
 }
-function upstreamBranch(cwd) {
-  const r = spawnSync6("git", ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], {
-    cwd,
-    encoding: "utf8"
-  });
-  return r.status === 0 ? r.stdout.trim() : null;
-}
-function commitsAheadOfUpstream(cwd) {
-  const r = spawnSync6("git", ["rev-list", "--count", "@{u}..HEAD"], { cwd, encoding: "utf8" });
-  return r.status === 0 ? Number(r.stdout.trim()) : 0;
-}
 function defaultBranch(cwd) {
   const r = spawnSync6("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], {
     cwd,
@@ -9048,11 +9053,6 @@ function computeBoard(cwd) {
   return { path, changed, data: boardDataFromRows(cwd, rows, flags) };
 }
 
-// src/lib/next-actions.ts
-import { spawnSync as spawnSync10 } from "node:child_process";
-import { existsSync as existsSync10, readFileSync as readFileSync9 } from "node:fs";
-import { join as join11 } from "node:path";
-
 // src/lib/prhost.ts
 import { spawnSync as spawnSync8 } from "node:child_process";
 function run(cli, args, cwd) {
@@ -9320,253 +9320,6 @@ function revertTaskMerge(cwd, goalId2, id) {
 }
 
 // src/lib/next-actions.ts
-function prLookup(cwd, branch) {
-  let backend;
-  try {
-    backend = resolveBackend(cwd);
-  } catch {
-    return {
-      state: "pushed-no-pr",
-      warning: "cannot determine PR host — showing local-only actions"
-    };
-  }
-  const auth = backend.authStatus(cwd);
-  if (!auth.ok) {
-    return {
-      state: "pushed-no-pr",
-      warning: `${backend.name} is not authenticated — showing local-only actions`
-    };
-  }
-  const found = backend.findPr(cwd, branch);
-  return { state: found ? "pr-open" : "pushed-no-pr", warning: null };
-}
-function detectState(cwd) {
-  const branch = currentBranch(cwd);
-  if (isDirty(cwd))
-    return { state: "uncommitted", branch, warning: null };
-  const upstream = upstreamBranch(cwd);
-  if (!upstream || commitsAheadOfUpstream(cwd) > 0) {
-    return { state: "committed-unpushed", branch, warning: null };
-  }
-  const { state, warning } = prLookup(cwd, branch);
-  return { state, branch, warning };
-}
-function runTestsAction(cwd) {
-  const pkgPath = join11(cwd, "package.json");
-  if (!existsSync10(pkgPath))
-    return { ok: false, message: "no package.json found — nothing to run" };
-  let hasTestScript = false;
-  try {
-    const pkg = JSON.parse(readFileSync9(pkgPath, "utf8"));
-    hasTestScript = Boolean(pkg.scripts?.test);
-  } catch {
-    return { ok: false, message: "package.json is unreadable — cannot determine the test script" };
-  }
-  if (!hasTestScript)
-    return { ok: false, message: 'no "test" script in package.json' };
-  const r = spawnSync10("npm", ["test", "--silent"], { cwd, encoding: "utf8" });
-  const output = ((r.stdout ?? "") + (r.stderr ?? "")).trim();
-  return { ok: r.status === 0, message: output || `exit ${r.status}` };
-}
-var CATALOG = [
-  {
-    id: "commit",
-    label: "Commit",
-    category: "git",
-    validIn: ["uncommitted"],
-    implemented: true,
-    run(cwd) {
-      stageAll(cwd);
-      const sha = commit(cwd, "sddx: checkpoint");
-      return { ok: true, message: `committed ${sha}` };
-    }
-  },
-  {
-    id: "commit-push",
-    label: "Commit & Push",
-    category: "git",
-    validIn: ["uncommitted"],
-    aliases: ["commit and push"],
-    implemented: true,
-    run(cwd, ctx) {
-      stageAll(cwd);
-      const sha = commit(cwd, "sddx: checkpoint");
-      push(cwd, ctx.branch);
-      return { ok: true, message: `committed ${sha} and pushed ${ctx.branch}` };
-    }
-  },
-  {
-    id: "push",
-    label: "Push",
-    category: "git",
-    validIn: ["committed-unpushed"],
-    implemented: true,
-    run(cwd, ctx) {
-      push(cwd, ctx.branch);
-      return { ok: true, message: `pushed ${ctx.branch}` };
-    }
-  },
-  {
-    id: "create-pr",
-    label: "Create PR/MR",
-    category: "git",
-    validIn: ["committed-unpushed", "pushed-no-pr"],
-    aliases: ["create pull request", "create merge request", "open pr", "open mr"],
-    implemented: true,
-    run(cwd, ctx) {
-      const backend = resolveBackend(cwd);
-      const upstream = upstreamBranch(cwd);
-      if (!upstream)
-        push(cwd, ctx.branch);
-      const url = backend.openPr(cwd, { branch: ctx.branch, title: ctx.branch, body: "" });
-      return { ok: true, message: `opened ${url}` };
-    }
-  },
-  {
-    id: "merge-branch",
-    label: "Merge Branch",
-    category: "git",
-    validIn: ["committed-unpushed"],
-    implemented: true,
-    run(cwd, ctx) {
-      const target = defaultBranch(cwd);
-      git(cwd, "checkout", target);
-      try {
-        git(cwd, "merge", "--no-ff", "-m", `sddx: merge ${ctx.branch}`, ctx.branch);
-      } catch (e) {
-        git(cwd, "checkout", ctx.branch);
-        throw e;
-      }
-      return { ok: true, message: `merged ${ctx.branch} into ${target} (${headSha(cwd)})` };
-    }
-  },
-  {
-    id: "merge-to-main",
-    label: "Merge to Main",
-    category: "git",
-    validIn: ["pr-open"],
-    implemented: true,
-    run(cwd, ctx) {
-      const backend = resolveBackend(cwd);
-      const report = backend.mergePr(cwd, ctx.branch);
-      return { ok: true, message: report || `merged ${ctx.branch}` };
-    }
-  },
-  {
-    id: "continue-working",
-    label: "Continue Working",
-    category: "development",
-    validIn: ["uncommitted", "committed-unpushed", "pushed-no-pr", "pr-open"],
-    implemented: true,
-    run() {
-      return { ok: true, message: "continuing — no action taken" };
-    }
-  },
-  {
-    id: "start-next-task",
-    label: "Start Next Task",
-    category: "development",
-    validIn: ["pr-open"],
-    implemented: true,
-    run() {
-      return { ok: true, message: "run /sddx:plan or /sddx:run to start the next task" };
-    }
-  },
-  {
-    id: "show-diff",
-    label: "Show Git Diff",
-    category: "quality",
-    validIn: ["uncommitted"],
-    implemented: true,
-    run(cwd) {
-      const diff = git(cwd, "diff", "HEAD");
-      return { ok: true, message: diff || "(no changes)" };
-    }
-  },
-  {
-    id: "run-tests",
-    label: "Run Tests",
-    category: "quality",
-    validIn: ["uncommitted"],
-    implemented: true,
-    run(cwd) {
-      return runTestsAction(cwd);
-    }
-  },
-  {
-    id: "discard-changes",
-    label: "Discard Changes",
-    category: "other",
-    validIn: ["uncommitted"],
-    implemented: true,
-    run(cwd) {
-      git(cwd, "checkout", "--", ".");
-      git(cwd, "clean", "-fd");
-      return { ok: true, message: "discarded uncommitted changes" };
-    }
-  },
-  {
-    id: "exit",
-    label: "Exit",
-    category: "other",
-    validIn: ["uncommitted", "committed-unpushed", "pushed-no-pr", "pr-open"],
-    implemented: true,
-    run() {
-      return { ok: true, message: "session ended" };
-    }
-  },
-  {
-    id: "create-release",
-    label: "Create Release",
-    category: "other",
-    validIn: [],
-    implemented: false
-  },
-  { id: "create-tag", label: "Create Git Tag", category: "other", validIn: [], implemented: false },
-  { id: "deploy", label: "Deploy", category: "other", validIn: [], implemented: false },
-  {
-    id: "generate-changelog",
-    label: "Generate Changelog",
-    category: "other",
-    validIn: [],
-    implemented: false
-  },
-  {
-    id: "generate-release-notes",
-    label: "Generate Release Notes",
-    category: "other",
-    validIn: [],
-    implemented: false
-  },
-  {
-    id: "run-security-scan",
-    label: "Run Security Scan",
-    category: "other",
-    validIn: [],
-    implemented: false
-  },
-  {
-    id: "run-performance-tests",
-    label: "Run Performance Tests",
-    category: "other",
-    validIn: [],
-    implemented: false
-  },
-  {
-    id: "open-project-dashboard",
-    label: "Open Project Dashboard",
-    category: "other",
-    validIn: [],
-    implemented: false
-  },
-  {
-    id: "switch-branch",
-    label: "Switch Branch",
-    category: "other",
-    validIn: [],
-    implemented: false
-  }
-];
 var CATEGORY_ORDER = ["git", "development", "quality", "other"];
 var CATEGORY_LABEL = {
   git: "Git",
@@ -9574,9 +9327,6 @@ var CATEGORY_LABEL = {
   quality: "Quality",
   other: "Other"
 };
-function visibleActions(state) {
-  return CATALOG.filter((a) => a.implemented && a.validIn.includes(state)).sort((a, b) => CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category));
-}
 function renderMenu(visible) {
   const lines = ["Next Actions", ""];
   let n = 0;
@@ -9746,8 +9496,8 @@ function runActions(cwd, state) {
 }
 
 // src/lib/output.ts
-import { existsSync as existsSync11, writeFileSync as writeFileSync8 } from "node:fs";
-import { join as join12 } from "node:path";
+import { existsSync as existsSync10, writeFileSync as writeFileSync8 } from "node:fs";
+import { join as join11 } from "node:path";
 
 // src/lib/ansi.ts
 var CODES = {
@@ -9906,10 +9656,10 @@ function writeTerminalFinal(result, colorFor) {
   }
 }
 function uniquePath(dir, baseName, ext) {
-  let candidate = join12(dir, `${baseName}.${ext}`);
+  let candidate = join11(dir, `${baseName}.${ext}`);
   let n = 2;
-  while (existsSync11(candidate)) {
-    candidate = join12(dir, `${baseName}-${n}.${ext}`);
+  while (existsSync10(candidate)) {
+    candidate = join11(dir, `${baseName}-${n}.${ext}`);
     n++;
   }
   return candidate;
@@ -10005,11 +9755,11 @@ class Reporter {
 }
 
 // src/lib/oracle.ts
-import { spawnSync as spawnSync11 } from "node:child_process";
+import { spawnSync as spawnSync10 } from "node:child_process";
 var ORACLE_TIMEOUT_MS = 10 * 60000;
 function runOracle(cwd, run2) {
   const started = Date.now();
-  const r = spawnSync11("sh", ["-c", run2], { cwd, timeout: ORACLE_TIMEOUT_MS });
+  const r = spawnSync10("sh", ["-c", run2], { cwd, timeout: ORACLE_TIMEOUT_MS });
   if (r.error)
     throw new Error(`oracle could not run: ${r.error.message}`);
   return {
@@ -10051,31 +9801,53 @@ function generateRunReport(cwd, goalId2, targetBranch) {
   const outstanding = goal.task_ids.filter((id) => !merged.includes(id) && !failed.includes(id));
   const diffStat = git(resolveMainRepoRoot(cwd), "diff", "--stat", `${goal.base_sha}...${goal.run_branch}`);
   const oracles = [];
+  const tasks = [];
   const assumptions = [];
+  const latestMerge = new Map;
+  for (const e of goal.merges)
+    latestMerge.set(e.task_id, e);
   for (const id of goal.task_ids) {
     const task = resolveTaskState(cwd, id);
     for (const a of task?.assumptions ?? [])
       if (!assumptions.includes(a))
         assumptions.push(a);
-    const hasReceipt = resolveReceiptRaw(cwd, id) !== null;
-    oracles.push({
+    const receiptPath2 = resolveReceiptPath(cwd, id);
+    const oracle = {
       taskId: id,
       run: task?.oracle.run ?? "(unknown)",
       expect: task?.oracle.expect ?? "(unknown)",
-      verdict: hasReceipt ? "pass" : task?.phase === "ABANDONED" ? "abandoned" : "outstanding"
+      verdict: receiptPath2 ? "pass" : task?.phase === "ABANDONED" ? "abandoned" : "outstanding"
+    };
+    oracles.push(oracle);
+    const entry = latestMerge.get(id) ?? null;
+    const skipper = task ? skippedOn(cwd, task) : null;
+    const blocker = task ? blockedOn(cwd, task) : null;
+    const status = merged.includes(id) ? "merged" : failed.includes(id) ? "failed" : entry?.result === "conflict" ? "conflicted" : skipper ? "skipped" : blocker ? "blocked" : "outstanding";
+    tasks.push({
+      taskId: id,
+      status,
+      oracle,
+      receiptPath: receiptPath2,
+      integration: entry?.result ?? null,
+      because: skipper ?? blocker ?? null
     });
   }
+  const count = (s) => tasks.filter((t) => t.status === s).length;
   return {
     goalId: goal.id,
     goal: goal.goal,
     runBranch: goal.run_branch,
     targetBranch,
     baseSha: goal.base_sha,
-    merged: merged.length,
-    failed: failed.length,
-    outstanding: outstanding.length,
+    merged: count("merged"),
+    failed: count("failed"),
+    skipped: count("skipped"),
+    blocked: count("blocked"),
+    conflicted: count("conflicted"),
+    outstanding: count("outstanding"),
     total: goalCounts(goal).total,
     diffStat,
+    tasks,
     oracles,
     assumptions,
     ...goal.approval ? { approval: goal.approval } : {},
@@ -10096,20 +9868,32 @@ function approvalLines(a) {
   return [...lines, ""];
 }
 function renderRunReport(r) {
+  const done = r.merged === r.total;
+  const stalled = r.outstanding === 0 && !done;
   const lines = [
-    r.outstanding > 0 ? "Run in progress" : "Run completed",
+    done ? "Run completed" : stalled ? "Run finished with unresolved tasks" : "Run in progress",
     "",
     `Goal: ${r.goal}`,
     `Review branch: ${r.runBranch}`,
-    `Base branch remains unchanged: ${r.targetBranch}`,
+    `Target branch remains unchanged: ${r.targetBranch}`,
     "",
     ...r.approval ? approvalLines(r.approval) : [],
     "Summary",
     `- ${r.merged} of ${r.total} task(s) merged`,
     ...r.failed > 0 ? [`- ${r.failed} task(s) failed`] : [],
+    ...r.conflicted > 0 ? [`- ${r.conflicted} task(s) verified but not integrated`] : [],
+    ...r.skipped > 0 ? [`- ${r.skipped} task(s) skipped`] : [],
+    ...r.blocked > 0 ? [`- ${r.blocked} task(s) blocked`] : [],
     ...r.outstanding > 0 ? [`- ${r.outstanding} task(s) outstanding`] : [],
     ...r.diffStat ? r.diffStat.split(`
 `).map((l) => `- ${l.trim()}`) : [],
+    "",
+    "Tasks",
+    ...r.tasks.map((t) => {
+      const why = t.because ? ` (${t.because})` : "";
+      const receipt = t.receiptPath ? ` — receipt ${t.receiptPath}` : "";
+      return `- ${t.taskId}: ${t.status}${why}${receipt}`;
+    }),
     "",
     "Oracle results",
     ...r.oracles.map((o) => `- ${o.taskId}: ${o.verdict} — ${o.run} (expect ${o.expect})`),
@@ -10225,11 +10009,11 @@ function parseSpec(yamlText) {
 }
 
 // src/lib/envinfo.ts
-import { spawnSync as spawnSync12 } from "node:child_process";
+import { spawnSync as spawnSync11 } from "node:child_process";
 import { arch, platform } from "node:os";
 function captureEnv(cwd) {
   const bun = globalThis.Bun;
-  const status = spawnSync12("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
+  const status = spawnSync11("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
   return {
     os: platform(),
     arch: arch(),
@@ -10355,7 +10139,6 @@ var USAGE = `usage:
   sddx audit [--signatures] [--ci]
   sddx cleanup <id>
   sddx sweep
-  sddx next-actions [--select <reply>]
   sddx next-actions --goal <goal-id> [--select <reply>]
   sddx config show [--json (deprecated, use --output json)]
   sddx config validate
@@ -10392,8 +10175,8 @@ function makeReporter(command, format, noColor) {
   });
 }
 function mainTaskIds(cwd) {
-  const dir = join13(sddxDir(cwd), "tasks");
-  if (!existsSync12(dir))
+  const dir = join12(sddxDir(cwd), "tasks");
+  if (!existsSync11(dir))
     return [];
   return readdirSync7(dir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length));
 }
@@ -10421,7 +10204,7 @@ function flags(args, name) {
 function readVersionField(relativePath) {
   try {
     const manifest = new URL(relativePath, import.meta.url);
-    return JSON.parse(readFileSync10(manifest, "utf8")).version;
+    return JSON.parse(readFileSync9(manifest, "utf8")).version;
   } catch {
     return "unknown";
   }
@@ -10470,7 +10253,7 @@ class Rollback {
     this.steps.push({
       describe: `worktree ${absPath}`,
       undo: (cwd) => {
-        if (existsSync12(absPath))
+        if (existsSync11(absPath))
           removeWorktreeForced(cwd, absPath);
       }
     });
@@ -10480,10 +10263,10 @@ class Rollback {
       describe: `task state ${id}`,
       undo: (cwd) => {
         for (const p of [
-          join13(sddxDir(cwd), "tasks", `${id}.json`),
-          join13(sddxDir(cwd), "specs", `${id}.yaml`)
+          join12(sddxDir(cwd), "tasks", `${id}.json`),
+          join12(sddxDir(cwd), "specs", `${id}.yaml`)
         ]) {
-          if (existsSync12(p))
+          if (existsSync11(p))
             rmSync3(p, { force: true });
         }
       }
@@ -10514,10 +10297,10 @@ function createRootTask(cwd, spec, specSrc, mode, reporter, forkSha) {
       baseSha = base2.sha;
     }
     const wtPath = createWorktree(cwd, id, baseSha);
-    const relPath = join13(".sddx-worktrees", id);
-    mkdirSync8(join13(sddxDir(wtPath), "specs"), { recursive: true });
-    const specPath2 = join13(".sddx", "specs", `${id}.yaml`);
-    copyFileSync2(specSrc, join13(wtPath, specPath2));
+    const relPath = join12(".sddx-worktrees", id);
+    mkdirSync8(join12(sddxDir(wtPath), "specs"), { recursive: true });
+    const specPath2 = join12(".sddx", "specs", `${id}.yaml`);
+    copyFileSync2(specSrc, join12(wtPath, specPath2));
     createTask(wtPath, spec, specPath2, {
       mode: "worktree",
       branch: `sddx/${id}`,
@@ -10533,9 +10316,9 @@ function createRootTask(cwd, spec, specSrc, mode, reporter, forkSha) {
   const base = headSha(cwd);
   if (useBranch)
     createBranch(cwd, `sddx/${id}`);
-  mkdirSync8(join13(sddxDir(cwd), "specs"), { recursive: true });
-  const specPath = join13(".sddx", "specs", `${id}.yaml`);
-  copyFileSync2(specSrc, join13(cwd, specPath));
+  mkdirSync8(join12(sddxDir(cwd), "specs"), { recursive: true });
+  const specPath = join12(".sddx", "specs", `${id}.yaml`);
+  copyFileSync2(specSrc, join12(cwd, specPath));
   createTask(cwd, spec, specPath, {
     mode,
     branch: useBranch ? `sddx/${id}` : null,
@@ -10548,9 +10331,9 @@ function createDeferredTask(cwd, spec, specSrc, mode, dependsOn) {
     throw new Error("dependent tasks require worktree or branch mode — `none` has no isolatable base to fork from");
   }
   const id = taskId(spec.task);
-  mkdirSync8(join13(sddxDir(cwd), "specs"), { recursive: true });
-  const specPath = join13(".sddx", "specs", `${id}.yaml`);
-  copyFileSync2(specSrc, join13(cwd, specPath));
+  mkdirSync8(join12(sddxDir(cwd), "specs"), { recursive: true });
+  const specPath = join12(".sddx", "specs", `${id}.yaml`);
+  copyFileSync2(specSrc, join12(cwd, specPath));
   createTask(cwd, spec, specPath, {
     mode: "deferred",
     materialize_as: mode,
@@ -10569,7 +10352,7 @@ function cmdTaskCreate(cwd, args, format, noColor) {
     fail(USAGE, 2);
   let yamlText;
   try {
-    yamlText = readFileSync10(join13(cwd, specArg), "utf8");
+    yamlText = readFileSync9(join12(cwd, specArg), "utf8");
   } catch {
     fail(`cannot read spec file: ${specArg}`);
   }
@@ -10578,7 +10361,7 @@ function cmdTaskCreate(cwd, args, format, noColor) {
     failWith(errors2.map((e) => `spec error: ${e}`));
   }
   const mode = pickWorkspace(cwd, requested, reporter);
-  const specSrc = join13(cwd, specArg);
+  const specSrc = join12(cwd, specArg);
   const dependsOn = flags(args, "--depends-on");
   if (dependsOn.length > 0) {
     for (const parentId of dependsOn) {
@@ -10627,7 +10410,7 @@ function topoOrder(nodes) {
 function resolvePlan(cwd, graphArg, requested) {
   let graphText;
   try {
-    graphText = readFileSync10(join13(cwd, graphArg), "utf8");
+    graphText = readFileSync9(join12(cwd, graphArg), "utf8");
   } catch {
     fail(`cannot read graph file: ${graphArg}`);
   }
@@ -10635,7 +10418,7 @@ function resolvePlan(cwd, graphArg, requested) {
   if (!graph) {
     failWith(graphErrors.map((e) => `graph error: ${e}`));
   }
-  const graphDir = dirname3(join13(cwd, graphArg));
+  const graphDir = dirname3(join12(cwd, graphArg));
   const errs = [];
   if (requested === "none" && graph.tasks.some((n) => n.depends_on.length > 0)) {
     errs.push("workspace none is incompatible with dependent tasks — use worktree or branch mode");
@@ -10646,7 +10429,7 @@ function resolvePlan(cwd, graphArg, requested) {
     const src = resolve2(graphDir, node.spec);
     let text;
     try {
-      text = readFileSync10(src, "utf8");
+      text = readFileSync9(src, "utf8");
     } catch {
       errs.push(`${node.alias}: cannot read spec ${node.spec}`);
       continue;
@@ -10676,7 +10459,7 @@ function resolvePlan(cwd, graphArg, requested) {
     scope: loaded.get(n.alias)?.spec.scope ?? []
   }))));
   const gid = goalId(graph.goal);
-  if (existsSync12(goalPath(cwd, gid)))
+  if (existsSync11(goalPath(cwd, gid)))
     errs.push(`goal error: goal ${gid} already exists`);
   const notices = [];
   const base = resolveBaseRef(cwd);
@@ -10699,7 +10482,7 @@ function resolvePlan(cwd, graphArg, requested) {
     if (branchExists(cwd, `sddx/${id}`)) {
       errs.push(`${alias}: task branch sddx/${id} already exists`);
     }
-    if (mode === "worktree" && existsSync12(join13(worktreesDir(resolveMainRepoRoot(cwd)), id))) {
+    if (mode === "worktree" && existsSync11(join12(worktreesDir(resolveMainRepoRoot(cwd)), id))) {
       errs.push(`${alias}: worktree destination .sddx-worktrees/${id} already exists`);
     }
   }
@@ -10745,13 +10528,13 @@ function forkPointLines(cwd, plan) {
     `task base: ${taskBase} (local HEAD — ${plan.mode} mode branches from your checkout)`
   ];
 }
-var renderCachePath = (cwd, gid) => join13(sddxDir(cwd), "drafts", `.render-${gid}.json`);
+var renderCachePath = (cwd, gid) => join12(sddxDir(cwd), "drafts", `.render-${gid}.json`);
 function renderPlan(cwd, graphArg, plan, reporter) {
   const order = topoOrder(plan.graph.tasks).map((n) => n.alias);
   const current = {};
   for (const alias of order)
     current[alias] = planNodeSummary(plan, alias);
-  const { hash } = planHash(join13(cwd, graphArg));
+  const { hash } = planHash(join12(cwd, graphArg));
   const lines = [
     `goal: ${plan.graph.goal}`,
     `plan: ${hash.slice(0, 12)} (${order.length} node${order.length === 1 ? "" : "s"})`,
@@ -10762,7 +10545,7 @@ function renderPlan(cwd, graphArg, plan, reporter) {
   ];
   let previous = null;
   try {
-    previous = JSON.parse(readFileSync10(renderCachePath(cwd, plan.goalId), "utf8"));
+    previous = JSON.parse(readFileSync9(renderCachePath(cwd, plan.goalId), "utf8"));
   } catch {
     previous = null;
   }
@@ -10826,7 +10609,7 @@ function gateNodes(plan) {
   }));
 }
 function resolveApproval(cwd, graphArg, plan) {
-  return decideGate(cwd, join13(cwd, graphArg), gateNodes(plan), gateExecutionMode(cwd), autoMaxTasks(cwd), scopesOverlap, plan.mode);
+  return decideGate(cwd, join12(cwd, graphArg), gateNodes(plan), gateExecutionMode(cwd), autoMaxTasks(cwd), scopesOverlap, plan.mode);
 }
 function cmdGraphApprove(cwd, args, format, noColor) {
   const reporter = makeReporter("graph approve", format, noColor);
@@ -10840,10 +10623,10 @@ function cmdGraphApprove(cwd, args, format, noColor) {
   if (plan.errors.length > 0) {
     failWith(plan.errors.map((e) => `graph approve: ${e}`));
   }
-  const { hash, errors: errors2 } = planHash(join13(cwd, graphArg));
+  const { hash, errors: errors2 } = planHash(join12(cwd, graphArg));
   if (hash === "")
     failWith(errors2.map((e) => `graph approve: ${e}`));
-  const refusal = decideGate(cwd, join13(cwd, graphArg), gateNodes(plan), gateExecutionMode(cwd), autoMaxTasks(cwd), scopesOverlap, plan.mode).refusal;
+  const refusal = decideGate(cwd, join12(cwd, graphArg), gateNodes(plan), gateExecutionMode(cwd), autoMaxTasks(cwd), scopesOverlap, plan.mode).refusal;
   if (refusal)
     failWith([`graph approve: ${refusal}`]);
   const approval = writeApproval(cwd, {
@@ -10908,7 +10691,7 @@ function cmdGraphCreate(cwd, args, format, noColor) {
         const id = plan.idByAlias.get(node.alias);
         undo.branch(`sddx/${id}`);
         if (mode === "worktree")
-          undo.worktree(join13(worktreesDir(mainRepoRoot), id));
+          undo.worktree(join12(worktreesDir(mainRepoRoot), id));
         undo.taskState(id);
         const created0 = createRootTask(cwd, spec, src, mode, reporter, base.sha);
         aliasToId.set(node.alias, created0.id);
@@ -11054,13 +10837,13 @@ function cmdCleanup(cwd, args, format, noColor) {
   if (!id)
     fail(USAGE, 2);
   const branch = `sddx/${id}`;
-  const wtPath = join13(worktreesDir(cwd), id);
-  if (existsSync12(wtPath)) {
+  const wtPath = join12(worktreesDir(cwd), id);
+  if (existsSync11(wtPath)) {
     if (isDirty(wtPath)) {
-      fail(`refusing: worktree ${join13(".sddx-worktrees", id)} has uncommitted changes`);
+      fail(`refusing: worktree ${join12(".sddx-worktrees", id)} has uncommitted changes`);
     }
     removeWorktree(cwd, wtPath);
-    reporter.success(`removed worktree ${join13(".sddx-worktrees", id)}`);
+    reporter.success(`removed worktree ${join12(".sddx-worktrees", id)}`);
   }
   if (!branchExists(cwd, branch)) {
     reporter.success(`no branch ${branch} — nothing to clean up`);
@@ -11100,7 +10883,7 @@ function cmdGoalCreate(cwd, args, format, noColor) {
     failWith(scheduleErrs.map((e) => `goal error: ${e}`));
   }
   const gid = goalId(goalSentence);
-  if (existsSync12(goalPath(cwd, gid)))
+  if (existsSync11(goalPath(cwd, gid)))
     fail(`goal ${gid} already exists at ${goalPath(cwd, gid)}`);
   const base = resolveBaseRef(cwd);
   if (base.source === "HEAD")
@@ -11181,43 +10964,14 @@ function cmdNextActions(cwd, args, format, noColor) {
   const reporter = makeReporter("next-actions", format, noColor);
   const selectArg = flag(args, "--select");
   const goalArg = flag(args, "--goal");
-  if (goalArg) {
-    cmdNextActionsRun(cwd, goalArg, selectArg, reporter);
-    return;
+  if (!goalArg) {
+    failWith([
+      "next-actions: --goal <goal-id> is required.",
+      "The handoff is goal-scoped: it is shown once, after the run summary.",
+      "Find the goal id with: sddx board"
+    ], 2);
   }
-  const detected = detectState(cwd);
-  if (detected.warning)
-    reporter.success(`warning: ${detected.warning}`);
-  if (selectArg === undefined) {
-    const visible = visibleActions(detected.state);
-    reporter.success(renderMenu(visible));
-    reporter.finish({ selected: null, nextActions: visible.map((a) => a.label) });
-    return;
-  }
-  const fresh = detectState(cwd);
-  const freshVisible = visibleActions(fresh.state);
-  const resolved = resolveSelection(selectArg, freshVisible);
-  if ("error" in resolved) {
-    reporter.error(resolved.error === "ambiguous" ? `"${selectArg}" matches more than one action — be more specific.` : `"${selectArg}" isn't a valid action right now.`, { stream: "stdout" });
-    reporter.success(renderMenu(freshVisible));
-    process.exitCode = 1;
-    reporter.finish({ selected: selectArg, error: resolved.error }, { status: "error" });
-    return;
-  }
-  if (!resolved.run) {
-    reporter.error(`${resolved.label}: not implemented yet.`, { stream: "stdout" });
-    process.exitCode = 1;
-    reporter.finish({ selected: resolved.label, implemented: false }, { status: "error" });
-    return;
-  }
-  const result = resolved.run(cwd, { branch: fresh.branch });
-  if (result.ok) {
-    reporter.success(result.message);
-  } else {
-    reporter.error(result.message, { stream: "stdout" });
-    process.exitCode = 1;
-  }
-  reporter.finish({ selected: resolved.label, ok: result.ok }, { status: result.ok ? "success" : "error" });
+  cmdNextActionsRun(cwd, goalArg, selectArg, reporter);
 }
 var CONFIG_ENV_VAR_BY_KEY = {
   test_globs: "SDDX_TEST_GLOBS",
@@ -11274,15 +11028,15 @@ function cmdConfigShow(cwd, args, format, noColor) {
 }
 function cmdConfigValidate(cwd, format, noColor) {
   const reporter = makeReporter("config validate", format, noColor);
-  const path = join13(sddxDir(cwd), "config.json");
-  if (!existsSync12(path)) {
+  const path = join12(sddxDir(cwd), "config.json");
+  if (!existsSync11(path)) {
     reporter.success("config validate: no .sddx/config.json — using built-in defaults");
     reporter.finish({ hasConfig: false, warnings: [] });
     return;
   }
   let parsed;
   try {
-    parsed = JSON.parse(readFileSync10(path, "utf8"));
+    parsed = JSON.parse(readFileSync9(path, "utf8"));
   } catch (e) {
     fail(`config validate: .sddx/config.json is not valid JSON: ${e.message}`);
   }

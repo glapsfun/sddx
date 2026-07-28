@@ -14,11 +14,12 @@ Run: `... verify <task-id> --model <your model id, if you know it>`
   spec + task file + receipt. If the task belongs to a goal, the same command
   also merged it into that goal's run branch automatically — report that
   integration line too (merged, or a conflict needing manual resolution).
-  Report the receipt path and commit SHA, then run `... next-actions` (same
-  cwd as the `verify` call, so it reflects this task's own branch/worktree)
-  and relay its output verbatim as the completion message — don't compose
-  your own summary of what's next. On the user's reply, run
-  `... next-actions --select "<reply>"` and relay that output too.
+  Report the receipt path, the commit SHA, and the integration line — then
+  stop. Do NOT offer a menu of next actions here. The handoff is goal-scoped
+  and belongs to the run: it is shown once, after the run summary, by
+  `... next-actions --goal <goal-id>`. A per-task menu offered actions before
+  the run reached that single handoff point, and offered them against whatever
+  branch the verifier happened to be sitting on.
 - **fail** → the oracle's exit code and the attempt count are printed; the task
   stays in VERIFY. Return to the loop (fix under GREEN/REFACTOR rules), then
   verify again. Respect the spec's stop_rules: if iterations exceed

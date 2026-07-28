@@ -8889,6 +8889,9 @@ function taskRow(taskPath2, id, receiptsDirs, threshold) {
   let t;
   try {
     t = JSON.parse(readFileSync8(taskPath2, "utf8"));
+    if (typeof t !== "object" || t === null || typeof t.workspace !== "object" || !t.workspace) {
+      throw new Error("task state has no workspace block");
+    }
   } catch {
     return {
       id,
@@ -8916,8 +8919,8 @@ function taskRow(taskPath2, id, receiptsDirs, threshold) {
     ...deps.length > 0 ? { dependsOn: deps } : {},
     ...t.on_dependency_failure ? { onDependencyFailure: t.on_dependency_failure } : {},
     sentence: t.task,
-    workspace: t.workspace.mode,
-    branch: t.workspace.branch,
+    workspace: t.workspace.mode ?? DASH,
+    branch: t.workspace.branch ?? null,
     iterations: String(t.iterations),
     receipt,
     allow: t.allow.length > 0 ? t.allow.join(", ") : DASH

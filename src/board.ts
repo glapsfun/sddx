@@ -58,6 +58,14 @@ function taskRow(
   let t: TaskState;
   try {
     t = JSON.parse(readFileSync(taskPath, "utf8")) as TaskState;
+    // Parsing is not the same as being well-shaped. Task files are untrusted
+    // input here — written by an older sddx, hand-edited, or truncated — and
+    // `board` is one of the two commands whose entire job is to keep working
+    // on history the write path has since narrowed. Reading a missing
+    // `workspace` unguarded turned an inspection command into a crash.
+    if (typeof t !== "object" || t === null || typeof t.workspace !== "object" || !t.workspace) {
+      throw new Error("task state has no workspace block");
+    }
   } catch {
     return {
       id,
@@ -84,8 +92,8 @@ function taskRow(
     ...(deps.length > 0 ? { dependsOn: deps } : {}),
     ...(t.on_dependency_failure ? { onDependencyFailure: t.on_dependency_failure } : {}),
     sentence: t.task,
-    workspace: t.workspace.mode,
-    branch: t.workspace.branch,
+    workspace: t.workspace.mode ?? DASH,
+    branch: t.workspace.branch ?? null,
     iterations: String(t.iterations),
     receipt,
     allow: t.allow.length > 0 ? t.allow.join(", ") : DASH,

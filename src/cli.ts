@@ -48,14 +48,7 @@ import {
   runBranchName,
 } from "./lib/goal";
 import { type Graph, type GraphNode, parseGraph, validateSchedule } from "./lib/graph";
-import {
-  detectRunState,
-  detectState,
-  renderMenu,
-  resolveSelection,
-  runActions,
-  visibleActions,
-} from "./lib/next-actions";
+import { detectRunState, renderMenu, resolveSelection, runActions } from "./lib/next-actions";
 import { type OutputFormat, parseOutputFlag, printError, printLine, Reporter } from "./lib/output";
 import { createGoalPr } from "./lib/pr";
 import { sha256 } from "./lib/receipt";
@@ -110,7 +103,6 @@ const USAGE = `usage:
   sddx audit [--signatures] [--ci]
   sddx cleanup <id>
   sddx sweep
-  sddx next-actions [--select <reply>]
   sddx next-actions --goal <goal-id> [--select <reply>]
   sddx config show [--json (deprecated, use --output json)]
   sddx config validate
@@ -1283,58 +1275,20 @@ function cmdNextActions(cwd: string, args: string[], format: OutputFormat, noCol
   const reporter = makeReporter("next-actions", format, noColor);
   const selectArg = flag(args, "--select");
   const goalArg = flag(args, "--goal");
-  if (goalArg) {
-    cmdNextActionsRun(cwd, goalArg, selectArg, reporter);
-    return;
-  }
-  // detected fresh here, and again just before executing a selection — state
-  // between "show the menu" and "act on a reply" spans a model turn, so it
-  // can drift (the user may commit or push by hand outside sddx meanwhile)
-  const detected = detectState(cwd);
-  if (detected.warning) reporter.success(`warning: ${detected.warning}`);
-
-  if (selectArg === undefined) {
-    const visible = visibleActions(detected.state);
-    reporter.success(renderMenu(visible));
-    reporter.finish({ selected: null, nextActions: visible.map((a) => a.label) });
-    return;
-  }
-
-  const fresh = detectState(cwd);
-  const freshVisible = visibleActions(fresh.state);
-  const resolved = resolveSelection(selectArg, freshVisible);
-  if ("error" in resolved) {
-    // stdout, matching next-actions' historical convention (exit code carries
-    // the failure signal) — but recorded as a real `error` message so the
-    // JSON/Markdown envelope's `errors` array isn't empty despite status "error"
-    reporter.error(
-      resolved.error === "ambiguous"
-        ? `"${selectArg}" matches more than one action — be more specific.`
-        : `"${selectArg}" isn't a valid action right now.`,
-      { stream: "stdout" },
+  // Goal-scoped only. The current-branch variant answered a question about the
+  // checkout rather than about the run, and could offer actions before the run
+  // reached its single handoff point.
+  if (!goalArg) {
+    failWith(
+      [
+        "next-actions: --goal <goal-id> is required.",
+        "The handoff is goal-scoped: it is shown once, after the run summary.",
+        "Find the goal id with: sddx board",
+      ],
+      2,
     );
-    reporter.success(renderMenu(freshVisible));
-    process.exitCode = 1;
-    reporter.finish({ selected: selectArg, error: resolved.error }, { status: "error" });
-    return;
   }
-  if (!resolved.run) {
-    reporter.error(`${resolved.label}: not implemented yet.`, { stream: "stdout" });
-    process.exitCode = 1;
-    reporter.finish({ selected: resolved.label, implemented: false }, { status: "error" });
-    return;
-  }
-  const result = resolved.run(cwd, { branch: fresh.branch });
-  if (result.ok) {
-    reporter.success(result.message);
-  } else {
-    reporter.error(result.message, { stream: "stdout" });
-    process.exitCode = 1;
-  }
-  reporter.finish(
-    { selected: resolved.label, ok: result.ok },
-    { status: result.ok ? "success" : "error" },
-  );
+  cmdNextActionsRun(cwd, goalArg, selectArg, reporter);
 }
 
 /** Env var consulted for each key that has one, in resolveConfig's precedence. */

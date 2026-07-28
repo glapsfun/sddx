@@ -24,51 +24,6 @@ import { revertTaskMerge } from "./runbranch";
 import { resolveTaskState } from "./task";
 import { isDirty } from "./worktree";
 
-export type RepoState = "uncommitted" | "committed-unpushed" | "pushed-no-pr" | "pr-open";
-
-export interface DetectedState {
-  state: RepoState;
-  branch: string;
-  /** Set when a PR/MR host lookup couldn't be completed (network/auth) — the
-   * state still degrades to a safe local-only value, this just explains why
-   * PR-dependent actions might be missing. */
-  warning: string | null;
-}
-
-/** Resolves PR/MR existence for `branch`, degrading to local-only state (with
- * a warning) when the host can't be reached rather than guessing. */
-function prLookup(cwd: string, branch: string): { state: RepoState; warning: string | null } {
-  let backend: ReturnType<typeof resolveBackend>;
-  try {
-    backend = resolveBackend(cwd);
-  } catch {
-    return {
-      state: "pushed-no-pr",
-      warning: "cannot determine PR host — showing local-only actions",
-    };
-  }
-  const auth = backend.authStatus(cwd);
-  if (!auth.ok) {
-    return {
-      state: "pushed-no-pr",
-      warning: `${backend.name} is not authenticated — showing local-only actions`,
-    };
-  }
-  const found = backend.findPr(cwd, branch);
-  return { state: found ? "pr-open" : "pushed-no-pr", warning: null };
-}
-
-export function detectState(cwd: string): DetectedState {
-  const branch = currentBranch(cwd);
-  if (isDirty(cwd)) return { state: "uncommitted", branch, warning: null };
-  const upstream = upstreamBranch(cwd);
-  if (!upstream || commitsAheadOfUpstream(cwd) > 0) {
-    return { state: "committed-unpushed", branch, warning: null };
-  }
-  const { state, warning } = prLookup(cwd, branch);
-  return { state, branch, warning };
-}
-
 export interface ActionResult {
   ok: boolean;
   message: string;
@@ -80,232 +35,19 @@ export interface ActionContext {
 
 export type ActionCategory = "git" | "development" | "quality" | "other";
 
+/** One offerable action. `validIn` survives from the retired state-filtered
+ * catalog and is unused by the run menu, which builds exactly the actions that
+ * are valid rather than filtering a fixed list. */
 export interface Action {
   id: string;
   label: string;
   category: ActionCategory;
-  validIn: RepoState[];
+  validIn: string[];
   aliases?: string[];
   /** false for documented-but-not-shipped future actions — never shown. */
   implemented: boolean;
   run?: (cwd: string, ctx: ActionContext) => ActionResult;
 }
-
-function runTestsAction(cwd: string): ActionResult {
-  const pkgPath = join(cwd, "package.json");
-  if (!existsSync(pkgPath)) return { ok: false, message: "no package.json found — nothing to run" };
-  let hasTestScript = false;
-  try {
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { scripts?: Record<string, string> };
-    hasTestScript = Boolean(pkg.scripts?.test);
-  } catch {
-    return { ok: false, message: "package.json is unreadable — cannot determine the test script" };
-  }
-  if (!hasTestScript) return { ok: false, message: 'no "test" script in package.json' };
-  const r = spawnSync("npm", ["test", "--silent"], { cwd, encoding: "utf8" });
-  const output = ((r.stdout ?? "") + (r.stderr ?? "")).trim();
-  return { ok: r.status === 0, message: output || `exit ${r.status}` };
-}
-
-export const CATALOG: Action[] = [
-  {
-    id: "commit",
-    label: "Commit",
-    category: "git",
-    validIn: ["uncommitted"],
-    implemented: true,
-    run(cwd) {
-      stageAll(cwd);
-      const sha = commit(cwd, "sddx: checkpoint");
-      return { ok: true, message: `committed ${sha}` };
-    },
-  },
-  {
-    id: "commit-push",
-    label: "Commit & Push",
-    category: "git",
-    validIn: ["uncommitted"],
-    aliases: ["commit and push"],
-    implemented: true,
-    run(cwd, ctx) {
-      stageAll(cwd);
-      const sha = commit(cwd, "sddx: checkpoint");
-      push(cwd, ctx.branch);
-      return { ok: true, message: `committed ${sha} and pushed ${ctx.branch}` };
-    },
-  },
-  {
-    id: "push",
-    label: "Push",
-    category: "git",
-    validIn: ["committed-unpushed"],
-    implemented: true,
-    run(cwd, ctx) {
-      push(cwd, ctx.branch);
-      return { ok: true, message: `pushed ${ctx.branch}` };
-    },
-  },
-  {
-    id: "create-pr",
-    label: "Create PR/MR",
-    category: "git",
-    validIn: ["committed-unpushed", "pushed-no-pr"],
-    aliases: ["create pull request", "create merge request", "open pr", "open mr"],
-    implemented: true,
-    run(cwd, ctx) {
-      const backend = resolveBackend(cwd);
-      const upstream = upstreamBranch(cwd);
-      if (!upstream) push(cwd, ctx.branch);
-      const url = backend.openPr(cwd, { branch: ctx.branch, title: ctx.branch, body: "" });
-      return { ok: true, message: `opened ${url}` };
-    },
-  },
-  {
-    id: "merge-branch",
-    label: "Merge Branch",
-    category: "git",
-    validIn: ["committed-unpushed"],
-    implemented: true,
-    run(cwd, ctx) {
-      const target = defaultBranch(cwd);
-      git(cwd, "checkout", target);
-      try {
-        git(cwd, "merge", "--no-ff", "-m", `sddx: merge ${ctx.branch}`, ctx.branch);
-      } catch (e) {
-        git(cwd, "checkout", ctx.branch);
-        throw e;
-      }
-      return { ok: true, message: `merged ${ctx.branch} into ${target} (${headSha(cwd)})` };
-    },
-  },
-  {
-    id: "merge-to-main",
-    label: "Merge to Main",
-    category: "git",
-    validIn: ["pr-open"],
-    implemented: true,
-    run(cwd, ctx) {
-      const backend = resolveBackend(cwd);
-      const report = backend.mergePr(cwd, ctx.branch);
-      return { ok: true, message: report || `merged ${ctx.branch}` };
-    },
-  },
-  {
-    id: "continue-working",
-    label: "Continue Working",
-    category: "development",
-    validIn: ["uncommitted", "committed-unpushed", "pushed-no-pr", "pr-open"],
-    implemented: true,
-    run() {
-      return { ok: true, message: "continuing — no action taken" };
-    },
-  },
-  {
-    id: "start-next-task",
-    label: "Start Next Task",
-    category: "development",
-    validIn: ["pr-open"],
-    implemented: true,
-    run() {
-      return { ok: true, message: "run /sddx:plan or /sddx:run to start the next task" };
-    },
-  },
-  {
-    id: "show-diff",
-    label: "Show Git Diff",
-    category: "quality",
-    validIn: ["uncommitted"],
-    implemented: true,
-    run(cwd) {
-      const diff = git(cwd, "diff", "HEAD");
-      return { ok: true, message: diff || "(no changes)" };
-    },
-  },
-  {
-    id: "run-tests",
-    label: "Run Tests",
-    category: "quality",
-    validIn: ["uncommitted"],
-    implemented: true,
-    run(cwd) {
-      return runTestsAction(cwd);
-    },
-  },
-  {
-    id: "discard-changes",
-    label: "Discard Changes",
-    category: "other",
-    validIn: ["uncommitted"],
-    implemented: true,
-    run(cwd) {
-      git(cwd, "checkout", "--", ".");
-      git(cwd, "clean", "-fd");
-      return { ok: true, message: "discarded uncommitted changes" };
-    },
-  },
-  {
-    id: "exit",
-    label: "Exit",
-    category: "other",
-    validIn: ["uncommitted", "committed-unpushed", "pushed-no-pr", "pr-open"],
-    implemented: true,
-    run() {
-      return { ok: true, message: "session ended" };
-    },
-  },
-  // Documented future catalog — never shown (implemented: false).
-  {
-    id: "create-release",
-    label: "Create Release",
-    category: "other",
-    validIn: [],
-    implemented: false,
-  },
-  { id: "create-tag", label: "Create Git Tag", category: "other", validIn: [], implemented: false },
-  { id: "deploy", label: "Deploy", category: "other", validIn: [], implemented: false },
-  {
-    id: "generate-changelog",
-    label: "Generate Changelog",
-    category: "other",
-    validIn: [],
-    implemented: false,
-  },
-  {
-    id: "generate-release-notes",
-    label: "Generate Release Notes",
-    category: "other",
-    validIn: [],
-    implemented: false,
-  },
-  {
-    id: "run-security-scan",
-    label: "Run Security Scan",
-    category: "other",
-    validIn: [],
-    implemented: false,
-  },
-  {
-    id: "run-performance-tests",
-    label: "Run Performance Tests",
-    category: "other",
-    validIn: [],
-    implemented: false,
-  },
-  {
-    id: "open-project-dashboard",
-    label: "Open Project Dashboard",
-    category: "other",
-    validIn: [],
-    implemented: false,
-  },
-  {
-    id: "switch-branch",
-    label: "Switch Branch",
-    category: "other",
-    validIn: [],
-    implemented: false,
-  },
-];
 
 const CATEGORY_ORDER: ActionCategory[] = ["git", "development", "quality", "other"];
 const CATEGORY_LABEL: Record<ActionCategory, string> = {
@@ -315,12 +57,20 @@ const CATEGORY_LABEL: Record<ActionCategory, string> = {
   other: "Other",
 };
 
-/** The menu for `state`, in the fixed category order the numbering follows. */
-export function visibleActions(state: RepoState): Action[] {
-  return CATALOG.filter((a) => a.implemented && a.validIn.includes(state)).sort(
-    (a, b) => CATEGORY_ORDER.indexOf(a.category) - CATEGORY_ORDER.indexOf(b.category),
-  );
-}
+/**
+ * The retired current-branch action catalog lived here.
+ *
+ * It answered a question about the CHECKOUT — is this branch dirty, pushed,
+ * does it have a PR — and offered per-task handoffs keyed to that. Under the
+ * canonical run lifecycle the only handoff is goal-scoped and comes once, after
+ * the run summary, so a menu derived from ambient repository state could offer
+ * actions before the run reached its single handoff point, and offer them for a
+ * branch that had nothing to do with the run.
+ *
+ * `renderMenu` and `resolveSelection` survive because they operate on any
+ * `Action[]`; only the state detector and the static catalog it filtered are
+ * gone. See `runActions` below for the replacement.
+ */
 
 export function renderMenu(visible: Action[]): string {
   const lines = ["Next Actions", ""];

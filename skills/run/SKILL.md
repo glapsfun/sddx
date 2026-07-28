@@ -132,9 +132,9 @@ which is the point.
    branch only, never the target branch. A merge conflict here is reported,
    not silently resolved: the task keeps its DONE phase and receipt, but is
    flagged as verified-and-not-yet-integrated. Each dispatched verifier
-   follows /sddx:verify, which on a pass also runs `... next-actions` inside
-   that task's own worktree/branch and relays it — so each task still gets the
-   same deterministic hand-off /sddx:quick uses, scoped to its own branch.
+   follows /sddx:verify, which reports the receipt, the commit, and the
+   integration result — and nothing else. There is no per-task menu: the run
+   has exactly one handoff, shown after the run summary.
    When every parent of a child reaches DONE, materialize it with
    `... task materialize <child-id>` — forks from its sole parent's commit, or
    sequentially merges every parent's commit for a fan-in child (safe by

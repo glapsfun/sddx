@@ -5,7 +5,7 @@
   },
   "metadata": {
     "description": "Marketplace for the sddx Spec-Driven Development plugin",
-    "version": "2.3.0"
+    "version": "3.0.0"
   },
   "plugins": [
     {

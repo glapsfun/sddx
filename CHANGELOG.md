@@ -4,6 +4,32 @@ All notable changes to sddx are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sddx adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.0.0](https://github.com/glapsfun/sddx/compare/v2.3.0...v3.0.0) (2026-07-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* `sddx next-actions` now requires `--goal <goal-id>`. The current-branch menu and its action catalog are removed.
+* an auto-mode plan over a bound now exits non-zero instead of exit 3, and cannot be approved past. Set "execution_mode": "human" in .sddx/config.json to review and run it. Approval tokens no longer record requested_mode or degraded_reason; existing tokens carrying them still parse.
+
+### Added
+
+* canonical run lifecycle, sections 1-4 ([b45001c](https://github.com/glapsfun/sddx/commit/b45001c4f004363cf2c0a3eda11c0e1957a37676))
+* canonical run lifecycle, sections 1-4 ([cbd22b5](https://github.com/glapsfun/sddx/commit/cbd22b5812968fc78b206069ab1df7e8c3c3d8f0))
+* commit the goal record to its run branch ([98c8d22](https://github.com/glapsfun/sddx/commit/98c8d220954203d9af679ece49369e2320deb541))
+* complete the canonical initializer's preflight and add rollback ([cd45f4e](https://github.com/glapsfun/sddx/commit/cd45f4e4ad50589a2144cb3be72efb2f7ab029dd))
+* one authoritative run summary and one goal-scoped handoff ([86ec3f2](https://github.com/glapsfun/sddx/commit/86ec3f2c5a10ed09b78c37c0b63faa0d7fe15e37))
+* refuse autonomy bounds instead of degrading auto into human ([910d8f2](https://github.com/glapsfun/sddx/commit/910d8f2ea6b926b6de831ef41ad3f0e7d2e67708))
+
+
+### Fixed
+
+* address code-review findings on the canonical lifecycle branch ([fee6f3b](https://github.com/glapsfun/sddx/commit/fee6f3b9a5b42dc91dffdabfea382c743e640a16))
+* keep the board readable on legacy task state ([b42fe80](https://github.com/glapsfun/sddx/commit/b42fe807b95f7cda777f3ab546bc4130bd1bb99f))
+* keep the board readable on task state the write path no longer produces ([c612156](https://github.com/glapsfun/sddx/commit/c6121568afda410353ed76c142a892d044ce44dc))
+* make worktree preconditions precise, since they are now fatal ([e1cc204](https://github.com/glapsfun/sddx/commit/e1cc204a7b7dee7f0e419f13ed044772650f0f74))
+* stop a deferred dependent claiming the user's own checkout ([03c1ef9](https://github.com/glapsfun/sddx/commit/03c1ef9ad4021ab313569ec247344a8df78e6873))
+
 ## [2.3.0](https://github.com/glapsfun/sddx/compare/v2.2.0...v2.3.0) (2026-07-27)
 
 

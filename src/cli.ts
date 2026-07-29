@@ -48,6 +48,7 @@ import {
   isMerged,
 } from "./lib/git";
 import { scopesOverlap } from "./lib/glob-overlap";
+import { rememberProject } from "./lib/globalstate";
 import {
   createGoal,
   currentlyMergedTaskIds,
@@ -1746,6 +1747,11 @@ async function cmdInit(
         return written;
       },
     });
+    // Best-effort, and deliberately after the repository is already correct:
+    // user-global state is optional context, so a home directory that cannot
+    // be written must not turn a successful init into a failure.
+    rememberProject(plan.root);
+
     reporter.success(
       `initialized: ${result.written.length} file(s) written${
         result.packageOps.length > 0 ? `, ran ${result.packageOps.join(", ")}` : ""

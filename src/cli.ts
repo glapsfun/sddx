@@ -78,6 +78,7 @@ import {
   planIsNoop,
   repositoryRoot,
 } from "./lib/init";
+import { confirmPlan, InitCancelled, isInteractive, promptInitOptions } from "./lib/initprompt";
 import { parseQuestionBatch, QUESTION_CAP } from "./lib/intake";
 import { detectRunState, renderMenu, resolveSelection, runActions } from "./lib/next-actions";
 import { type OutputFormat, parseOutputFlag, printError, printLine, Reporter } from "./lib/output";
@@ -1624,11 +1625,19 @@ function renderInitPlan(plan: InitPlan): string {
  * prompt looks identical to a hang, and the flags that would have made it
  * deterministic are named in the error.
  */
-function cmdInit(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
+async function cmdInit(
+  cwd: string,
+  args: string[],
+  format: OutputFormat,
+  noColor: boolean,
+): Promise<void> {
   currentCommand = "init";
   const dryRun = args.includes("--dry-run");
   const assumeYes = args.includes("--yes");
-  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY) && !assumeYes;
+  // Prompting requires a real terminal on BOTH ends and no --yes. Anything
+  // else — a pipe, CI, a subprocess — must be deterministic or fail, never
+  // block: a command waiting on input it can never receive is a hang.
+  const interactive = isInteractive() && !assumeYes && format === "terminal";
 
   const runtimeScope = choice(args, RUNTIME_CHOICE);
   const packageManager = choice(args, PM_CHOICE);
@@ -1659,12 +1668,34 @@ function cmdInit(cwd: string, args: string[], format: OutputFormat, noColor: boo
     );
   }
 
-  const opts: InitOptions = {
+  let opts: InitOptions = {
     runtimeScope: runtimeScope ?? "global",
     packageManager: packageManager ?? "npm",
     adapters,
     interactionMode: interactionMode ?? "human",
   };
+
+  if (interactive) {
+    try {
+      // Flags supplied alongside the prompts become the pre-selected defaults,
+      // so `--runtime global` plus a terminal is a shortcut, not a conflict.
+      opts = await promptInitOptions(
+        {
+          ...(runtimeScope !== undefined ? { runtimeScope } : {}),
+          ...(packageManager !== undefined ? { packageManager } : {}),
+          ...(interactionMode !== undefined ? { interactionMode } : {}),
+          ...(adapters.length > 0 ? { adapters } : {}),
+        },
+        KNOWN_ADAPTERS,
+      );
+    } catch (e) {
+      if (e instanceof InitCancelled) {
+        printLine("cancelled — nothing was changed");
+        return;
+      }
+      throw e;
+    }
+  }
 
   const reporter = makeReporter("init", format, noColor);
   let plan: InitPlan;
@@ -1686,6 +1717,13 @@ function cmdInit(cwd: string, args: string[], format: OutputFormat, noColor: boo
   if (planIsNoop(plan)) {
     reporter.success("already initialized — no changes");
     reporter.finish({ plan, applied: false, dryRun: false });
+    return;
+  }
+
+  // The confirmation comes AFTER the plan exists, so what the user approves is
+  // the real file list. Declining is identical to --dry-run: zero mutations.
+  if (interactive && !(await confirmPlan(renderInitPlan(plan)))) {
+    printLine("cancelled — nothing was changed");
     return;
   }
 
@@ -1900,7 +1938,7 @@ function cmdGraphCancel(cwd: string, args: string[], format: OutputFormat, noCol
   reporter.finish({ removed });
 }
 
-function main(argv: string[]): void {
+async function main(argv: string[]): Promise<void> {
   const cwd = process.cwd();
   // `hook` speaks the harness's protocol — event JSON on stdin, decision JSON
   // on stdout, always exit 0 — not sddx's. It is intercepted ahead of output-
@@ -2105,7 +2143,7 @@ function main(argv: string[]): void {
       runHook(rest[0]);
     }
     if (cmd === "init") {
-      cmdInit(cwd, rest, format, noColor);
+      await cmdInit(cwd, rest, format, noColor);
       return;
     }
     if (cmd === "doctor") {
@@ -2134,4 +2172,8 @@ function main(argv: string[]): void {
   }
 }
 
-main(process.argv.slice(2));
+// Top-level await would change the bundle's module semantics; an explicit
+// catch keeps the failure path identical to the synchronous one it replaced.
+main(process.argv.slice(2)).catch((e: unknown) => {
+  fail((e as Error).message);
+});

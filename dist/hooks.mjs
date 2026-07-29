@@ -1,5 +1,49 @@
 import { createRequire } from "node:module";
+var __create = Object.create;
+var __getProtoOf = Object.getPrototypeOf;
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+function __accessProp(key) {
+  return this[key];
+}
+var __toESMCache_node;
+var __toESMCache_esm;
+var __toESM = (mod, isNodeMode, target) => {
+  var canCache = mod != null && typeof mod === "object";
+  if (canCache) {
+    var cache = isNodeMode ? __toESMCache_node ??= new WeakMap : __toESMCache_esm ??= new WeakMap;
+    var cached = cache.get(mod);
+    if (cached)
+      return cached;
+  }
+  target = mod != null ? __create(__getProtoOf(mod)) : {};
+  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  for (let key of __getOwnPropNames(mod))
+    if (!__hasOwnProp.call(to, key))
+      __defProp(to, key, {
+        get: __accessProp.bind(mod, key),
+        enumerable: true
+      });
+  if (canCache)
+    cache.set(mod, to);
+  return to;
+};
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
+var __returnValue = (v) => v;
+function __exportSetter(name, newValue) {
+  this[name] = __returnValue.bind(null, newValue);
+}
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, {
+      get: all[name],
+      enumerable: true,
+      configurable: true,
+      set: __exportSetter.bind(all, name)
+    });
+};
+var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
 // node_modules/yaml/dist/nodes/identity.js
@@ -6943,7 +6987,7 @@ var require_public_api = __commonJS((exports) => {
   exports.stringify = stringify;
 });
 
-// src/hooks.ts
+// src/lib/hookdispatch.ts
 import { existsSync as existsSync11, readdirSync as readdirSync7, readFileSync as readFileSync10 } from "node:fs";
 import { join as join12 } from "node:path";
 
@@ -6955,6 +6999,9 @@ import { join as join4 } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 var INTERACTION_MODES = ["human", "auto"];
+var RUNTIME_SCOPES = ["global", "project"];
+var PACKAGE_MANAGERS = ["npm", "bun"];
+var CONFIG_SCHEMA_VERSION = "1.0";
 var DEFAULT_AUTO_MAX_TASKS = 6;
 function readConfig(root) {
   const path = join(root, ".sddx", "config.json");
@@ -7045,6 +7092,8 @@ function parseAgentModel(raw) {
   return { models, warnings };
 }
 var bool = (v) => typeof v === "boolean" ? v : null;
+var asRuntimeScope = (v) => typeof v === "string" && RUNTIME_SCOPES.includes(v) ? v : null;
+var asPackageManager = (v) => typeof v === "string" && PACKAGE_MANAGERS.includes(v) ? v : null;
 function resolveConfig(root, env = process.env) {
   const cfg = readConfig(root);
   return {
@@ -7099,29 +7148,157 @@ function resolveConfig(root, env = process.env) {
     agent_model: parseAgentModel(cfg.agent_model).models,
     verbose: resolveValue({ configValue: cfg.verbose, configParse: bool, fallback: false }),
     interaction_mode: interactionMode(root),
-    auto_max_tasks: autoMaxTasks(root)
+    auto_max_tasks: autoMaxTasks(root),
+    runtime_scope: asRuntimeScope(cfg.runtime_scope) ?? "global",
+    package_manager: asPackageManager(cfg.package_manager) ?? "npm",
+    adapters: Array.isArray(cfg.adapters) ? cfg.adapters.filter((a) => typeof a === "string") : [],
+    schema_version: typeof cfg.schema_version === "string" ? cfg.schema_version : null
   };
 }
 var isString = (v) => typeof v === "string";
 var isBoolean = (v) => typeof v === "boolean";
 var isPositiveInt = (v) => positiveInt(v) !== null;
 var isOneOf = (values) => (v) => typeof v === "string" && values.includes(v);
-var CONFIG_SCHEMA = [
-  ["test_globs", isString, "a string"],
-  ["exempt_globs", isString, "a string"],
-  ["max_iterations_default", isPositiveInt, "a positive integer"],
-  ["board_enabled", isBoolean, "a boolean"],
-  ["oracle_runs_default", isPositiveInt, "a positive integer"],
-  ["red_bash_allow", isString, "a string"],
-  ["stuck_threshold", isPositiveInt, "a positive integer"],
-  ["pr_host", isOneOf(["gh", "glab"]), "one of gh|glab"],
-  ["agent_model", isString, "a string"],
-  ["verbose", isBoolean, "a boolean"],
-  ["interaction_mode", isOneOf(INTERACTION_MODES), `one of ${INTERACTION_MODES.join("|")}`],
-  ["execution_mode", isOneOf(INTERACTION_MODES), `one of ${INTERACTION_MODES.join("|")}`],
-  ["auto_max_tasks", isPositiveInt, "a positive integer"]
+var CONFIG_KEYS = [
+  {
+    key: "test_globs",
+    isValid: isString,
+    expectation: "a string",
+    default: "",
+    title: "Test globs",
+    description: "Space-separated extra globs classified as test files by the TDD gate"
+  },
+  {
+    key: "exempt_globs",
+    isValid: isString,
+    expectation: "a string",
+    default: "",
+    title: "Exempt globs",
+    description: "Space-separated extra globs exempt from the RED-phase write block"
+  },
+  {
+    key: "max_iterations_default",
+    isValid: isPositiveInt,
+    expectation: "a positive integer",
+    default: 5,
+    title: "Max iterations",
+    description: "Default stop rule: max loop iterations per task"
+  },
+  {
+    key: "board_enabled",
+    isValid: isBoolean,
+    expectation: "a boolean",
+    default: true,
+    title: "Board enabled",
+    description: "Regenerate .sddx/BOARD.md automatically"
+  },
+  {
+    key: "oracle_runs_default",
+    isValid: isPositiveInt,
+    expectation: "a positive integer",
+    default: 1,
+    title: "Oracle runs",
+    description: "How many times verify executes the oracle; every run must pass (flakiness detection)"
+  },
+  {
+    key: "red_bash_allow",
+    isValid: isString,
+    expectation: "a string",
+    default: "",
+    title: "RED Bash allow-list",
+    description: "Space-separated extra commands the RED-phase Bash gate allows (extends the built-in list, never replaces it)"
+  },
+  {
+    key: "stuck_threshold",
+    isValid: isPositiveInt,
+    expectation: "a positive integer",
+    default: 3,
+    title: "Stuck threshold",
+    description: "Consecutive identical test failures before a task is flagged stuck and escalation is requested"
+  },
+  {
+    key: "pr_host",
+    isValid: isOneOf(["gh", "glab"]),
+    expectation: "one of gh|glab",
+    default: "",
+    title: "PR host",
+    description: "PR-host CLI for `sddx pr create`: gh | glab. Empty auto-detects from the origin remote"
+  },
+  {
+    key: "agent_model",
+    isValid: isString,
+    expectation: "a string",
+    default: "",
+    title: "Agent model overrides",
+    description: "Comma-separated role=model pairs (roles: orchestrator, planner, tddExecutor, verifier) — advisory, read by /sddx:run when dispatching subagents"
+  },
+  {
+    key: "verbose",
+    isValid: isBoolean,
+    expectation: "a boolean",
+    default: false,
+    title: "Verbose CLI output",
+    description: "When true, sddx config show also prints which source (env var, .sddx/config.json, or built-in default) resolved each key"
+  },
+  {
+    key: "interaction_mode",
+    isValid: isOneOf(INTERACTION_MODES),
+    expectation: `one of ${INTERACTION_MODES.join("|")}`,
+    default: "human",
+    title: "Interaction mode",
+    description: "Whether a human is consulted before anything is created: human (one question round, then plan approval) | auto (unattended up to the run branch, refusing rather than prompting at any autonomy bound)"
+  },
+  {
+    key: "execution_mode",
+    isValid: isOneOf(INTERACTION_MODES),
+    expectation: `one of ${INTERACTION_MODES.join("|")}`,
+    default: "human",
+    title: "Interaction mode (deprecated spelling)",
+    description: "Renamed to interaction_mode. Still read; never written.",
+    deprecated: true
+  },
+  {
+    key: "auto_max_tasks",
+    isValid: isPositiveInt,
+    expectation: "a positive integer",
+    default: DEFAULT_AUTO_MAX_TASKS,
+    title: "Auto-mode task ceiling",
+    description: "In auto mode, a plan with more nodes than this is refused rather than run"
+  },
+  {
+    key: "runtime_scope",
+    isValid: isOneOf(RUNTIME_SCOPES),
+    expectation: `one of ${RUNTIME_SCOPES.join("|")}`,
+    default: "global",
+    title: "Runtime scope",
+    description: "How generated adapter content invokes sddx: global (an `sddx` on PATH) | project (a lockfile-backed project dependency run through the package manager)"
+  },
+  {
+    key: "package_manager",
+    isValid: isOneOf(PACKAGE_MANAGERS),
+    expectation: `one of ${PACKAGE_MANAGERS.join("|")}`,
+    default: "npm",
+    title: "Package manager",
+    description: "Which package manager runs the project-local binary when runtime_scope=project"
+  },
+  {
+    key: "adapters",
+    isValid: (v) => Array.isArray(v) && v.every((a) => typeof a === "string"),
+    expectation: "an array of strings",
+    default: "",
+    title: "Enabled adapters",
+    description: "Project adapters `sddx init`/`sync` maintain (currently: claude)"
+  },
+  {
+    key: "schema_version",
+    isValid: isString,
+    expectation: "a string",
+    default: CONFIG_SCHEMA_VERSION,
+    title: "Config schema version",
+    description: "The config schema this file was written against"
+  }
 ];
-var KNOWN_CONFIG_KEYS = new Set(CONFIG_SCHEMA.map(([key]) => key));
+var KNOWN_CONFIG_KEYS = new Set(CONFIG_KEYS.map((k) => k.key));
 var REMOVED_CONFIG_KEYS = new Map([
   [
     "workspace_mode",
@@ -7143,10 +7320,14 @@ function validateConfigObject(obj) {
     if (!KNOWN_CONFIG_KEYS.has(key))
       warnings.push(`unrecognized key "${key}"`);
   }
-  for (const [key, isValid, expectation] of CONFIG_SCHEMA) {
+  for (const { key, isValid, expectation } of CONFIG_KEYS) {
     if (key in obj && !isValid(obj[key])) {
       warnings.push(`"${key}" must be ${expectation} — got ${JSON.stringify(obj[key])}`);
     }
+  }
+  const version = obj.schema_version;
+  if (typeof version === "string" && version !== CONFIG_SCHEMA_VERSION) {
+    warnings.push(`"schema_version" is "${version}" but this sddx writes "${CONFIG_SCHEMA_VERSION}" — re-run \`sddx init\` to reconcile it`);
   }
   if (typeof obj.agent_model === "string") {
     warnings.push(...parseAgentModel(obj.agent_model).warnings);
@@ -8160,13 +8341,201 @@ function computeBoard(cwd) {
   return { path, changed, data: boardDataFromRows(cwd, rows, flags) };
 }
 
+// src/tdd-gate.ts
+import { relative as relative2, resolve } from "node:path";
+
+// src/lib/resolve.ts
+import { existsSync as existsSync5, readdirSync as readdirSync3, readFileSync as readFileSync5, statSync as statSync2 } from "node:fs";
+import { basename, dirname as dirname2, join as join5, resolve as resolvePath } from "node:path";
+function workspaceRoot(startPath) {
+  let dir = resolvePath(startPath);
+  try {
+    if (statSync2(dir).isFile())
+      dir = dirname2(dir);
+  } catch {
+    dir = dirname2(dir);
+  }
+  while (true) {
+    if (existsSync5(join5(dir, ".git")))
+      return dir;
+    const parent = dirname2(dir);
+    if (parent === dir)
+      return null;
+    dir = parent;
+  }
+}
+function headBranch(root) {
+  try {
+    const dotGit = join5(root, ".git");
+    let gitDir = dotGit;
+    if (statSync2(dotGit).isFile()) {
+      const m = /^gitdir:\s*(.+)\s*$/m.exec(readFileSync5(dotGit, "utf8"));
+      if (!m)
+        return null;
+      gitDir = resolvePath(root, m[1].trim());
+    }
+    const head = readFileSync5(join5(gitDir, "HEAD"), "utf8").trim();
+    const ref = /^ref:\s*refs\/heads\/(.+)$/.exec(head);
+    return ref ? ref[1] : null;
+  } catch {
+    return null;
+  }
+}
+function readTaskFile(root, id) {
+  const path = join5(root, ".sddx", "tasks", `${id}.json`);
+  if (!existsSync5(path))
+    return null;
+  try {
+    return { kind: "task", root, task: JSON.parse(readFileSync5(path, "utf8")) };
+  } catch (e) {
+    return { kind: "corrupt", root, path, error: e.message };
+  }
+}
+function resolutionFailureReason(res, action) {
+  if (res.kind === "ambiguous") {
+    return `sddx TDD gate: ambiguous governing task — ${res.ids.join(" and ")} are both active in this workspace. ` + "The gate refuses to guess. Abandon or finish one, or work in each task's own worktree.";
+  }
+  if (res.kind === "corrupt") {
+    return `sddx TDD gate: task state at ${res.path} is unreadable (${res.error}). Fix or remove it before ${action} — a broken state file must not silently disable the gate.`;
+  }
+  return null;
+}
+function resolveTask(startPath) {
+  const root = workspaceRoot(startPath);
+  if (!root || !existsSync5(join5(root, ".sddx")))
+    return { kind: "none" };
+  if (basename(dirname2(root)) === ".sddx-worktrees") {
+    const byName = readTaskFile(root, basename(root));
+    if (byName)
+      return byName;
+  }
+  const branch = headBranch(root);
+  if (branch?.startsWith("sddx/")) {
+    const byBranch = readTaskFile(root, branch.slice("sddx/".length));
+    if (byBranch)
+      return byBranch;
+  }
+  const tasksDir = join5(root, ".sddx", "tasks");
+  if (!existsSync5(tasksDir))
+    return { kind: "none" };
+  const candidates = [];
+  for (const file of readdirSync3(tasksDir).filter((f) => f.endsWith(".json"))) {
+    const path = join5(tasksDir, file);
+    let task;
+    try {
+      task = JSON.parse(readFileSync5(path, "utf8"));
+    } catch (e) {
+      return { kind: "corrupt", root, path, error: e.message };
+    }
+    if (!isTerminal(task.phase) && !isDeferred(task))
+      candidates.push(task);
+  }
+  if (candidates.length === 0)
+    return { kind: "none" };
+  if (candidates.length === 1)
+    return { kind: "task", root, task: candidates[0] };
+  return { kind: "ambiguous", root, ids: candidates.map((t) => t.id).sort() };
+}
+
+// src/tdd-gate.ts
+function loadGateConfig(root, env = process.env) {
+  const fileConfig = readConfig(root);
+  return {
+    testGlobs: env.SDDX_TEST_GLOBS ?? fileConfig.test_globs,
+    exemptGlobs: env.SDDX_EXEMPT_GLOBS ?? fileConfig.exempt_globs
+  };
+}
+function blockMessage(task, relPath, config) {
+  const testGlobs = [
+    ...BUILTIN_TEST_GLOBS,
+    ...(config.testGlobs ?? "").split(/\s+/).filter((g) => g !== "")
+  ];
+  return [
+    `sddx TDD gate: blocked write to ${relPath} — task ${task.id} is in ${task.phase} (rule: implementation path).`,
+    `Before GREEN, only test files may change. Do this instead:`,
+    `  1. Write a failing test for "${task.task}" under a test path (${testGlobs.slice(0, 4).join(", ")}, …).`,
+    "  2. Run the test runner so the failure is recorded (the gate lifts in GREEN).",
+    `  3. Only for files that genuinely cannot be test-driven: sddx task allow ${task.id} ${relPath} — the exemption is audited in the receipt.`
+  ].join(`
+`);
+}
+function inScope(relPath, scope) {
+  const path = normalizeRelPath(relPath);
+  return scope.some((glob) => globMatch(normalizeRelPath(glob), path));
+}
+function scopeBlockMessage(task, relPath, scope) {
+  return [
+    `sddx TDD gate: blocked write to ${relPath} — outside task ${task.id}'s declared scope.`,
+    `This task may only write: ${scope.join(", ")}.`,
+    "Do one of:",
+    "  1. Write inside the declared scope.",
+    `  2. If this file genuinely belongs to the task, widen its spec's scope and re-create the task.`,
+    `  3. For a one-off exception: sddx task allow ${task.id} ${relPath} — audited in the receipt.`
+  ].join(`
+`);
+}
+var APPROVALS_PATH = /(^|\/)\.sddx\/approvals\//;
+var CONFIG_PATH = /(^|\/)\.sddx\/config\.json$/;
+function approvalWriteBlock(relOrAbs) {
+  const path = normalizeRelPath(relOrAbs);
+  if (APPROVALS_PATH.test(path)) {
+    return [
+      `sddx approval gate: blocked write to ${relOrAbs} — approval tokens are not editable.`,
+      "A token records that a human approved a plan, so writing one directly would forge that.",
+      "Approve a plan the only way that counts (it raises your own permission dialog):",
+      "  sddx graph create --graph <path> --dry-run   # review it first",
+      "  sddx graph approve --graph <path>"
+    ].join(`
+`);
+  }
+  if (CONFIG_PATH.test(path)) {
+    return [
+      `sddx approval gate: blocked write to ${relOrAbs} — sddx configuration is not tool-editable.`,
+      "It carries interaction_mode, which decides whether a plan needs your approval at all,",
+      "so a tool that could rewrite it could switch off the gate that constrains it.",
+      "Edit it yourself, or inspect the effective values with: sddx config show"
+    ].join(`
+`);
+  }
+  return null;
+}
+function tddGate(input, env = process.env) {
+  const anchor = input.filePath ? resolve(input.cwd ?? process.cwd(), input.filePath) : input.cwd ?? process.cwd();
+  if (input.filePath) {
+    const forged = approvalWriteBlock(input.filePath) ?? approvalWriteBlock(anchor);
+    if (forged)
+      return { allow: false, reason: forged };
+  }
+  const res = resolveTask(anchor);
+  if (res.kind === "none")
+    return { allow: true };
+  const failure = resolutionFailureReason(res, "writing");
+  if (failure)
+    return { allow: false, reason: failure };
+  if (res.kind !== "task")
+    return { allow: true };
+  if (!input.filePath)
+    return { allow: true };
+  const relPath = relative2(res.root, anchor);
+  const config = input.config ?? loadGateConfig(res.root, env);
+  const cls = classify(relPath, res.task.allow, config);
+  if ((res.task.phase === "PLAN" || res.task.phase === "RED") && cls.rule === "implementation") {
+    return { allow: false, reason: blockMessage(res.task, relPath, config) };
+  }
+  const scope = res.task.scope ?? [];
+  if (cls.rule === "implementation" && scope.length > 0 && !inScope(relPath, scope)) {
+    return { allow: false, reason: scopeBlockMessage(res.task, relPath, scope) };
+  }
+  return { allow: true };
+}
+
 // src/lib/approvalgate.ts
-import { existsSync as existsSync8, readFileSync as readFileSync8 } from "node:fs";
-import { dirname as dirname3, isAbsolute as isAbsolute3, join as join9, resolve as resolve2 } from "node:path";
+import { existsSync as existsSync9, readFileSync as readFileSync9 } from "node:fs";
+import { dirname as dirname4, isAbsolute as isAbsolute3, join as join10, resolve as resolve3 } from "node:path";
 
 // src/lib/approval.ts
-import { existsSync as existsSync7, mkdirSync as mkdirSync6, readdirSync as readdirSync5, readFileSync as readFileSync7, writeFileSync as writeFileSync7 } from "node:fs";
-import { dirname as dirname2, join as join8, resolve } from "node:path";
+import { existsSync as existsSync8, mkdirSync as mkdirSync6, readdirSync as readdirSync6, readFileSync as readFileSync8, writeFileSync as writeFileSync7 } from "node:fs";
+import { dirname as dirname3, join as join9, resolve as resolve2 } from "node:path";
 
 // node_modules/yaml/dist/index.js
 var composer = require_composer();
@@ -8474,20 +8843,20 @@ import { spawnSync as spawnSync5 } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
-  existsSync as existsSync6,
+  existsSync as existsSync7,
   mkdirSync as mkdirSync5,
-  readdirSync as readdirSync4,
-  readFileSync as readFileSync6,
+  readdirSync as readdirSync5,
+  readFileSync as readFileSync7,
   writeFileSync as writeFileSync5
 } from "node:fs";
-import { join as join6 } from "node:path";
+import { join as join7 } from "node:path";
 
 // src/lib/goal.ts
 import { spawnSync as spawnSync4 } from "node:child_process";
-import { existsSync as existsSync5, mkdirSync as mkdirSync4, readdirSync as readdirSync3, readFileSync as readFileSync5, writeFileSync as writeFileSync4 } from "node:fs";
-import { isAbsolute as isAbsolute2, join as join5 } from "node:path";
-var goalsDir = (cwd) => join5(sddxDir(cwd), "goals");
-var goalPath = (cwd, id) => join5(goalsDir(cwd), `${id}.json`);
+import { existsSync as existsSync6, mkdirSync as mkdirSync4, readdirSync as readdirSync4, readFileSync as readFileSync6, writeFileSync as writeFileSync4 } from "node:fs";
+import { isAbsolute as isAbsolute2, join as join6 } from "node:path";
+var goalsDir = (cwd) => join6(sddxDir(cwd), "goals");
+var goalPath = (cwd, id) => join6(goalsDir(cwd), `${id}.json`);
 var goalRef = (id) => `refs/sddx/goals/${id}`;
 var sh = (cwd, args, env) => spawnSync4("git", args, { cwd, encoding: "utf8", env: { ...process.env, ...env } });
 function mainRoot(cwd) {
@@ -8495,7 +8864,7 @@ function mainRoot(cwd) {
   if (r.status !== 0)
     return cwd;
   const dir = (r.stdout ?? "").trim();
-  const abs = isAbsolute2(dir) ? dir : join5(cwd, dir);
+  const abs = isAbsolute2(dir) ? dir : join6(cwd, dir);
   return abs.replace(/\/\.git\/?$/, "").replace(/\/\.git$/, "") || cwd;
 }
 function writeGoalBlob(root, id, content, expected) {
@@ -8543,7 +8912,7 @@ function createGoal(cwd, goalSentence, taskIds, opts) {
   const id = opts.id ?? goalId(goalSentence);
   const root = mainRoot(cwd);
   const path = goalPath(root, id);
-  if (existsSync5(path))
+  if (existsSync6(path))
     throw new Error(`goal ${id} already exists at ${path}`);
   if (goalBlobSha(root, id) !== null) {
     throw new Error(`goal ${id} already exists at ${goalRef(id)}`);
@@ -8578,7 +8947,7 @@ function createGoal(cwd, goalSentence, taskIds, opts) {
 function readGoal(cwd, id) {
   const root = mainRoot(cwd);
   const path = goalPath(root, id);
-  const g = readGoalFromBranch(root, id) ?? (existsSync5(path) ? JSON.parse(readFileSync5(path, "utf8")) : null);
+  const g = readGoalFromBranch(root, id) ?? (existsSync6(path) ? JSON.parse(readFileSync6(path, "utf8")) : null);
   if (!g)
     throw new Error(`no such goal: ${id} (${goalRef(id)} or ${path})`);
   if (typeof g.run_branch !== "string" || typeof g.base_sha !== "string" || !g.merges) {
@@ -8588,7 +8957,7 @@ function readGoal(cwd, id) {
 }
 function goalExists(cwd, id) {
   const root = mainRoot(cwd);
-  return goalBlobSha(root, id) !== null || existsSync5(goalPath(root, id));
+  return goalBlobSha(root, id) !== null || existsSync6(goalPath(root, id));
 }
 function writeGoal(cwd, g) {
   const root = mainRoot(cwd);
@@ -8598,7 +8967,7 @@ function writeGoal(cwd, g) {
   const current = goalBlobSha(root, g.id);
   if (current === null) {
     const legacy = goalPath(root, g.id);
-    if (existsSync5(legacy)) {
+    if (existsSync6(legacy)) {
       writeFileSync4(legacy, content);
       return;
     }
@@ -8609,12 +8978,12 @@ function writeGoal(cwd, g) {
 function findGoalForTask(cwd, id) {
   const root = mainRoot(cwd);
   const dir = goalsDir(root);
-  if (existsSync5(dir)) {
-    for (const f of readdirSync3(dir)) {
+  if (existsSync6(dir)) {
+    for (const f of readdirSync4(dir)) {
       if (!f.endsWith(".json"))
         continue;
       try {
-        const g = JSON.parse(readFileSync5(join5(dir, f), "utf8"));
+        const g = JSON.parse(readFileSync6(join6(dir, f), "utf8"));
         if (g.task_ids.includes(id))
           return g;
       } catch {}
@@ -8644,15 +9013,15 @@ function goalCounts(g) {
 
 // src/lib/receipt.ts
 var sha256 = (data) => createHash("sha256").update(data).digest("hex");
-var receiptsDir = (cwd) => join6(cwd, ".sddx", "receipts");
-var receiptPath = (cwd, taskId2) => join6(receiptsDir(cwd), `${taskId2}.json`);
+var receiptsDir = (cwd) => join7(cwd, ".sddx", "receipts");
+var receiptPath = (cwd, taskId2) => join7(receiptsDir(cwd), `${taskId2}.json`);
 function listReceipts(cwd) {
   const dir = receiptsDir(cwd);
-  if (!existsSync6(dir))
+  if (!existsSync7(dir))
     return [];
-  return readdirSync4(dir).filter((f) => f.endsWith(".json")).map((f) => ({
-    file: join6(dir, f),
-    receipt: JSON.parse(readFileSync6(join6(dir, f), "utf8"))
+  return readdirSync5(dir).filter((f) => f.endsWith(".json")).map((f) => ({
+    file: join7(dir, f),
+    receipt: JSON.parse(readFileSync7(join7(dir, f), "utf8"))
   })).sort((a, b) => a.receipt.seq - b.receipt.seq);
 }
 function chainHead(cwd) {
@@ -8660,7 +9029,7 @@ function chainHead(cwd) {
   const last = receipts.at(-1);
   if (!last)
     return { seq: 0, prevHash: "genesis" };
-  return { seq: last.receipt.seq, prevHash: sha256(readFileSync6(last.file)) };
+  return { seq: last.receipt.seq, prevHash: sha256(readFileSync7(last.file)) };
 }
 function writeReceipt(cwd, r) {
   const schemaErrors = validateReceipt(r);
@@ -8668,7 +9037,7 @@ function writeReceipt(cwd, r) {
     throw new Error(`refusing to write invalid receipt: ${schemaErrors.join("; ")}`);
   }
   const path = receiptPath(cwd, r.task_id);
-  if (existsSync6(path)) {
+  if (existsSync7(path)) {
     throw new Error(`receipt for ${r.task_id} already exists — receipts are immutable`);
   }
   mkdirSync5(receiptsDir(cwd), { recursive: true });
@@ -8738,7 +9107,7 @@ function validateReceipt(raw) {
 }
 function readReceiptRawFrom(dir, id) {
   try {
-    return readFileSync6(receiptPath(dir, id));
+    return readFileSync7(receiptPath(dir, id));
   } catch {
     return null;
   }
@@ -8748,18 +9117,18 @@ function readReceiptRawFromRef(cwd, ref, id) {
   return r.status === 0 ? r.stdout : null;
 }
 function resolveReceiptRaw(cwd, id) {
-  const direct = readReceiptRawFrom(join6(cwd, ".sddx-worktrees", id), id) ?? readReceiptRawFrom(cwd, id) ?? readReceiptRawFromRef(cwd, `sddx/${id}`, id);
+  const direct = readReceiptRawFrom(join7(cwd, ".sddx-worktrees", id), id) ?? readReceiptRawFrom(cwd, id) ?? readReceiptRawFromRef(cwd, `sddx/${id}`, id);
   if (direct)
     return direct;
   const goal = findGoalForTask(cwd, id);
   return goal ? readReceiptRawFromRef(cwd, goal.run_branch, id) : null;
 }
 function resolveReceiptPath(cwd, id) {
-  const wt = join6(cwd, ".sddx-worktrees", id, ".sddx", "receipts", `${id}.json`);
-  if (existsSync6(wt))
+  const wt = join7(cwd, ".sddx-worktrees", id, ".sddx", "receipts", `${id}.json`);
+  if (existsSync7(wt))
     return wt;
-  const local = join6(cwd, ".sddx", "receipts", `${id}.json`);
-  if (existsSync6(local))
+  const local = join7(cwd, ".sddx", "receipts", `${id}.json`);
+  if (existsSync7(local))
     return local;
   if (readReceiptRawFromRef(cwd, `sddx/${id}`, id)) {
     return `sddx/${id}:.sddx/receipts/${id}.json`;
@@ -8785,7 +9154,7 @@ function verifyChain(cwd) {
   const receipts = listReceipts(cwd);
   const seqByHash = new Map;
   for (const { file, receipt } of receipts) {
-    seqByHash.set(sha256(readFileSync6(file)), receipt.seq);
+    seqByHash.set(sha256(readFileSync7(file)), receipt.seq);
   }
   for (const { file, receipt } of receipts) {
     for (const e of validateReceipt(receipt))
@@ -8810,7 +9179,7 @@ function verifyChain(cwd) {
 import { spawnSync as spawnSync6 } from "node:child_process";
 import { mkdtempSync, rmSync as rmSync2, writeFileSync as writeFileSync6 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join as join7 } from "node:path";
+import { join as join8 } from "node:path";
 var DEFAULT_NAMESPACE = "sddx-receipt";
 var gitConfigCache = new Map;
 function gitConfig(cwd, key) {
@@ -8824,7 +9193,7 @@ function gitConfig(cwd, key) {
   gitConfigCache.set(cacheKey, result);
   return result;
 }
-var expandHome = (p) => p.startsWith("~/") ? join7(homedir(), p.slice(2)) : p;
+var expandHome = (p) => p.startsWith("~/") ? join8(homedir(), p.slice(2)) : p;
 function signPayload(cwd, payload, namespace = DEFAULT_NAMESPACE) {
   if (gitConfig(cwd, "gpg.format") !== "ssh")
     return null;
@@ -8848,9 +9217,9 @@ function verifySignature(cwd, payload, sig, namespace = DEFAULT_NAMESPACE) {
   const allowed = gitConfig(cwd, "gpg.ssh.allowedSignersFile");
   if (!allowed)
     return "unverifiable";
-  const tmp = mkdtempSync(join7(tmpdir(), "sddx-sig-"));
+  const tmp = mkdtempSync(join8(tmpdir(), "sddx-sig-"));
   try {
-    const sigFile = join7(tmp, "receipt.sig");
+    const sigFile = join8(tmp, "receipt.sig");
     writeFileSync6(sigFile, `${sig.signature}
 `);
     const r = spawnSync6("ssh-keygen", ["-Y", "verify", "-f", expandHome(allowed), "-I", sig.signer, "-n", namespace, "-s", sigFile], { cwd, input: payload, encoding: "utf8" });
@@ -8862,31 +9231,31 @@ function verifySignature(cwd, payload, sig, namespace = DEFAULT_NAMESPACE) {
 
 // src/lib/approval.ts
 var WORKSPACE = "worktree";
-var approvalsDir = (cwd) => join8(sddxDir(cwd), "approvals");
-var approvalPath = (cwd, hash) => join8(approvalsDir(cwd), `${hash}.json`);
+var approvalsDir = (cwd) => join9(sddxDir(cwd), "approvals");
+var approvalPath = (cwd, hash) => join9(approvalsDir(cwd), `${hash}.json`);
 function planHash(graphPath) {
   const files = [];
-  if (!existsSync7(graphPath)) {
+  if (!existsSync8(graphPath)) {
     return { hash: "", files, errors: [`plan: ${graphPath} not found`] };
   }
   let graphText;
   try {
-    graphText = readFileSync7(graphPath, "utf8");
+    graphText = readFileSync8(graphPath, "utf8");
   } catch (e) {
     return { hash: "", files, errors: [`plan: ${graphPath} unreadable: ${e.message}`] };
   }
   const { graph, errors: errors2 } = parseGraph(graphText);
   if (!graph)
     return { hash: "", files, errors: errors2 };
-  const graphDir = dirname2(graphPath);
+  const graphDir = dirname3(graphPath);
   const parts = [`graph\x00${sha256(graphText)}`];
   files.push(graphPath);
   const nodes = [...graph.tasks].sort((a, b) => a.alias < b.alias ? -1 : a.alias > b.alias ? 1 : 0);
   const specErrors = [];
   for (const node of nodes) {
-    const specPath = resolve(graphDir, node.spec);
+    const specPath = resolve2(graphDir, node.spec);
     try {
-      parts.push(`spec\x00${node.alias}\x00${sha256(readFileSync7(specPath, "utf8"))}`);
+      parts.push(`spec\x00${node.alias}\x00${sha256(readFileSync8(specPath, "utf8"))}`);
       files.push(specPath);
     } catch {
       specErrors.push(`plan: node "${node.alias}" spec ${node.spec} is missing or unreadable`);
@@ -8914,10 +9283,10 @@ function writeApproval(cwd, input) {
 }
 function readApproval(cwd, hash) {
   const path = approvalPath(cwd, hash);
-  if (!existsSync7(path))
+  if (!existsSync8(path))
     return null;
   try {
-    const parsed = JSON.parse(readFileSync7(path, "utf8"));
+    const parsed = JSON.parse(readFileSync8(path, "utf8"));
     if (typeof parsed !== "object" || parsed === null)
       return null;
     const a = parsed;
@@ -9079,7 +9448,7 @@ function autoRefusal(nodes, ceiling, overlaps2, unresolved = []) {
 }
 function unresolvedOf(graphPath) {
   try {
-    return parseGraph(readFileSync7(graphPath, "utf8")).graph?.unresolved ?? [];
+    return parseGraph(readFileSync8(graphPath, "utf8")).graph?.unresolved ?? [];
   } catch {
     return [];
   }
@@ -9326,7 +9695,7 @@ var WRAPPERS = new Set([
   "command",
   "exec"
 ]);
-var basename = (word) => word.slice(word.lastIndexOf("/") + 1);
+var basename2 = (word) => word.slice(word.lastIndexOf("/") + 1);
 function allSegments(command, depth = 0) {
   const segs = segments2(command);
   if (depth >= 3)
@@ -9334,7 +9703,7 @@ function allSegments(command, depth = 0) {
   const out = [...segs];
   for (const tokens of segs) {
     const head = tokens[0];
-    if (!head || !WRAPPERS.has(basename(head)))
+    if (!head || !WRAPPERS.has(basename2(head)))
       continue;
     for (const token of tokens.slice(1)) {
       if (/\s/.test(token))
@@ -9353,15 +9722,15 @@ function gatedAction(command) {
   return null;
 }
 function readNodes(graphPath) {
-  if (!existsSync8(graphPath))
+  if (!existsSync9(graphPath))
     return null;
-  const { graph } = parseGraph(readFileSync8(graphPath, "utf8"));
+  const { graph } = parseGraph(readFileSync9(graphPath, "utf8"));
   if (!graph)
     return null;
-  const graphDir = dirname3(graphPath);
+  const graphDir = dirname4(graphPath);
   const nodes = [];
   for (const node of graph.tasks) {
-    const { spec } = parseSpec(readFileSync8(resolve2(graphDir, node.spec), "utf8"));
+    const { spec } = parseSpec(readFileSync9(resolve3(graphDir, node.spec), "utf8"));
     if (!spec)
       return null;
     nodes.push({
@@ -9393,7 +9762,7 @@ function approvalGate(event) {
     const tokens = allSegments(command).find(owns) ?? [];
     const graphArg = tokenValue(tokens, "--graph");
     if (action === "approve") {
-      const plan = graphArg ? planHash(isAbsolute3(graphArg) ? graphArg : join9(cwd, graphArg)) : null;
+      const plan = graphArg ? planHash(isAbsolute3(graphArg) ? graphArg : join10(cwd, graphArg)) : null;
       return ask([
         `sddx: this records YOUR approval of plan ${plan?.hash ? plan.hash.slice(0, 12) : "(unreadable)"}.`,
         "Approve only if you have reviewed it:",
@@ -9404,7 +9773,7 @@ function approvalGate(event) {
     if (!graphArg) {
       return ask("sddx: plan creation without a --graph argument — cannot verify what would run");
     }
-    const graphPath = isAbsolute3(graphArg) ? graphArg : join9(cwd, graphArg);
+    const graphPath = isAbsolute3(graphArg) ? graphArg : join10(cwd, graphArg);
     const nodes = readNodes(graphPath);
     if (!nodes) {
       return ask(`sddx: plan at ${graphArg} could not be read — approval cannot be verified`);
@@ -9424,99 +9793,6 @@ function approvalGate(event) {
   } catch (e) {
     return ask(`sddx: approval could not be verified (${e.message}) — asking instead`);
   }
-}
-
-// src/lib/resolve.ts
-import { existsSync as existsSync9, readdirSync as readdirSync6, readFileSync as readFileSync9, statSync as statSync2 } from "node:fs";
-import { basename as basename2, dirname as dirname4, join as join10, resolve as resolvePath } from "node:path";
-function workspaceRoot(startPath) {
-  let dir = resolvePath(startPath);
-  try {
-    if (statSync2(dir).isFile())
-      dir = dirname4(dir);
-  } catch {
-    dir = dirname4(dir);
-  }
-  while (true) {
-    if (existsSync9(join10(dir, ".git")))
-      return dir;
-    const parent = dirname4(dir);
-    if (parent === dir)
-      return null;
-    dir = parent;
-  }
-}
-function headBranch(root) {
-  try {
-    const dotGit = join10(root, ".git");
-    let gitDir = dotGit;
-    if (statSync2(dotGit).isFile()) {
-      const m = /^gitdir:\s*(.+)\s*$/m.exec(readFileSync9(dotGit, "utf8"));
-      if (!m)
-        return null;
-      gitDir = resolvePath(root, m[1].trim());
-    }
-    const head = readFileSync9(join10(gitDir, "HEAD"), "utf8").trim();
-    const ref = /^ref:\s*refs\/heads\/(.+)$/.exec(head);
-    return ref ? ref[1] : null;
-  } catch {
-    return null;
-  }
-}
-function readTaskFile(root, id) {
-  const path = join10(root, ".sddx", "tasks", `${id}.json`);
-  if (!existsSync9(path))
-    return null;
-  try {
-    return { kind: "task", root, task: JSON.parse(readFileSync9(path, "utf8")) };
-  } catch (e) {
-    return { kind: "corrupt", root, path, error: e.message };
-  }
-}
-function resolutionFailureReason(res, action) {
-  if (res.kind === "ambiguous") {
-    return `sddx TDD gate: ambiguous governing task — ${res.ids.join(" and ")} are both active in this workspace. ` + "The gate refuses to guess. Abandon or finish one, or work in each task's own worktree.";
-  }
-  if (res.kind === "corrupt") {
-    return `sddx TDD gate: task state at ${res.path} is unreadable (${res.error}). Fix or remove it before ${action} — a broken state file must not silently disable the gate.`;
-  }
-  return null;
-}
-function resolveTask(startPath) {
-  const root = workspaceRoot(startPath);
-  if (!root || !existsSync9(join10(root, ".sddx")))
-    return { kind: "none" };
-  if (basename2(dirname4(root)) === ".sddx-worktrees") {
-    const byName = readTaskFile(root, basename2(root));
-    if (byName)
-      return byName;
-  }
-  const branch = headBranch(root);
-  if (branch?.startsWith("sddx/")) {
-    const byBranch = readTaskFile(root, branch.slice("sddx/".length));
-    if (byBranch)
-      return byBranch;
-  }
-  const tasksDir = join10(root, ".sddx", "tasks");
-  if (!existsSync9(tasksDir))
-    return { kind: "none" };
-  const candidates = [];
-  for (const file of readdirSync6(tasksDir).filter((f) => f.endsWith(".json"))) {
-    const path = join10(tasksDir, file);
-    let task;
-    try {
-      task = JSON.parse(readFileSync9(path, "utf8"));
-    } catch (e) {
-      return { kind: "corrupt", root, path, error: e.message };
-    }
-    if (!isTerminal(task.phase) && !isDeferred(task))
-      candidates.push(task);
-  }
-  if (candidates.length === 0)
-    return { kind: "none" };
-  if (candidates.length === 1)
-    return { kind: "task", root, task: candidates[0] };
-  return { kind: "ambiguous", root, ids: candidates.map((t) => t.id).sort() };
 }
 
 // src/lib/bashgate.ts
@@ -9654,7 +9930,7 @@ function checkBashCommand(command, extraAllow) {
   }
   return { allow: true };
 }
-function blockMessage(task, why) {
+function blockMessage2(task, why) {
   return [
     `sddx TDD gate: blocked Bash command — task ${task.id} is in ${task.phase} (${why}).`,
     `Pre-GREEN, Bash may only run tests or read state: ${BASH_ALLOW_BASE.join(", ")}, git ${GIT_READ_SUBCOMMANDS.join("|")}, and the sddx CLI itself.`,
@@ -9686,7 +9962,7 @@ function bashGate(input, env = process.env) {
   const decision = checkBashCommand(input.command, extra);
   if (decision.allow)
     return decision;
-  return { allow: false, reason: blockMessage(res.task, decision.reason) };
+  return { allow: false, reason: blockMessage2(res.task, decision.reason) };
 }
 
 // src/lib/recorder.ts
@@ -9809,100 +10085,7 @@ function stopGate(event) {
   };
 }
 
-// src/tdd-gate.ts
-import { relative as relative2, resolve as resolve3 } from "node:path";
-function loadGateConfig(root, env = process.env) {
-  const fileConfig = readConfig(root);
-  return {
-    testGlobs: env.SDDX_TEST_GLOBS ?? fileConfig.test_globs,
-    exemptGlobs: env.SDDX_EXEMPT_GLOBS ?? fileConfig.exempt_globs
-  };
-}
-function blockMessage2(task, relPath, config) {
-  const testGlobs = [
-    ...BUILTIN_TEST_GLOBS,
-    ...(config.testGlobs ?? "").split(/\s+/).filter((g) => g !== "")
-  ];
-  return [
-    `sddx TDD gate: blocked write to ${relPath} — task ${task.id} is in ${task.phase} (rule: implementation path).`,
-    `Before GREEN, only test files may change. Do this instead:`,
-    `  1. Write a failing test for "${task.task}" under a test path (${testGlobs.slice(0, 4).join(", ")}, …).`,
-    "  2. Run the test runner so the failure is recorded (the gate lifts in GREEN).",
-    `  3. Only for files that genuinely cannot be test-driven: sddx task allow ${task.id} ${relPath} — the exemption is audited in the receipt.`
-  ].join(`
-`);
-}
-function inScope(relPath, scope) {
-  const path = normalizeRelPath(relPath);
-  return scope.some((glob) => globMatch(normalizeRelPath(glob), path));
-}
-function scopeBlockMessage(task, relPath, scope) {
-  return [
-    `sddx TDD gate: blocked write to ${relPath} — outside task ${task.id}'s declared scope.`,
-    `This task may only write: ${scope.join(", ")}.`,
-    "Do one of:",
-    "  1. Write inside the declared scope.",
-    `  2. If this file genuinely belongs to the task, widen its spec's scope and re-create the task.`,
-    `  3. For a one-off exception: sddx task allow ${task.id} ${relPath} — audited in the receipt.`
-  ].join(`
-`);
-}
-var APPROVALS_PATH = /(^|\/)\.sddx\/approvals\//;
-var CONFIG_PATH = /(^|\/)\.sddx\/config\.json$/;
-function approvalWriteBlock(relOrAbs) {
-  const path = normalizeRelPath(relOrAbs);
-  if (APPROVALS_PATH.test(path)) {
-    return [
-      `sddx approval gate: blocked write to ${relOrAbs} — approval tokens are not editable.`,
-      "A token records that a human approved a plan, so writing one directly would forge that.",
-      "Approve a plan the only way that counts (it raises your own permission dialog):",
-      "  sddx graph create --graph <path> --dry-run   # review it first",
-      "  sddx graph approve --graph <path>"
-    ].join(`
-`);
-  }
-  if (CONFIG_PATH.test(path)) {
-    return [
-      `sddx approval gate: blocked write to ${relOrAbs} — sddx configuration is not tool-editable.`,
-      "It carries interaction_mode, which decides whether a plan needs your approval at all,",
-      "so a tool that could rewrite it could switch off the gate that constrains it.",
-      "Edit it yourself, or inspect the effective values with: sddx config show"
-    ].join(`
-`);
-  }
-  return null;
-}
-function tddGate(input, env = process.env) {
-  const anchor = input.filePath ? resolve3(input.cwd ?? process.cwd(), input.filePath) : input.cwd ?? process.cwd();
-  if (input.filePath) {
-    const forged = approvalWriteBlock(input.filePath) ?? approvalWriteBlock(anchor);
-    if (forged)
-      return { allow: false, reason: forged };
-  }
-  const res = resolveTask(anchor);
-  if (res.kind === "none")
-    return { allow: true };
-  const failure = resolutionFailureReason(res, "writing");
-  if (failure)
-    return { allow: false, reason: failure };
-  if (res.kind !== "task")
-    return { allow: true };
-  if (!input.filePath)
-    return { allow: true };
-  const relPath = relative2(res.root, anchor);
-  const config = input.config ?? loadGateConfig(res.root, env);
-  const cls = classify(relPath, res.task.allow, config);
-  if ((res.task.phase === "PLAN" || res.task.phase === "RED") && cls.rule === "implementation") {
-    return { allow: false, reason: blockMessage2(res.task, relPath, config) };
-  }
-  const scope = res.task.scope ?? [];
-  if (cls.rule === "implementation" && scope.length > 0 && !inScope(relPath, scope)) {
-    return { allow: false, reason: scopeBlockMessage(res.task, relPath, scope) };
-  }
-  return { allow: true };
-}
-
-// src/hooks.ts
+// src/lib/hookdispatch.ts
 function readEvent() {
   try {
     const raw = readFileSync10(0, "utf8");
@@ -10034,9 +10217,7 @@ function cmdSessionStart(event) {
 `) }
   });
 }
-function main() {
-  const sub = process.argv[2];
-  const event = readEvent();
+function dispatchHook(sub, event) {
   try {
     if (sub === "tdd-gate")
       cmdTddGate(event);
@@ -10055,6 +10236,11 @@ function main() {
   } catch (e) {
     emit({ systemMessage: `sddx hook error (${sub}): ${e.message}` });
   }
+}
+function runHook(sub) {
+  dispatchHook(sub, readEvent());
   process.exit(0);
 }
-main();
+
+// src/hooks.ts
+runHook(process.argv[2]);

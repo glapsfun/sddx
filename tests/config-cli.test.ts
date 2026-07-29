@@ -134,7 +134,7 @@ describe("sddx config validate", () => {
   });
 });
 
-describe("execution mode surfaced through the config CLI", () => {
+describe("interaction mode surfaced through the config CLI", () => {
   test("config show reports both keys in json and terminal output", () => {
     const cwd = fixtureRepo();
     const json = cli(cwd, process.env, "config", "show", "--output", "json");

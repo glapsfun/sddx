@@ -12,7 +12,7 @@ Your model may be overridden by the dispatching skill's `agent_model`
 config (`orchestrator=<model>`, read via `... config show --json`) — advisory,
 set by whoever dispatches you, not read by this agent itself.
 
-## Execution mode
+## Interaction mode
 
 Read `.data.interaction_mode` from `... config show --output json`.
 

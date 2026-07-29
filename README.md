@@ -86,7 +86,7 @@ below) is also a copy-paste-able scaffold under
 - [Design principles](docs/explanation/design-principles.md)
 - [How it compares](docs/explanation/how-it-compares.md)
 - [Architecture](docs/explanation/architecture.md)
-- [Execution modes: human-in-the-loop and unattended](docs/explanation/execution-modes.md)
+- [Interaction modes: human-in-the-loop and unattended](docs/explanation/interaction-modes.md)
 
 **Runnable examples**
 

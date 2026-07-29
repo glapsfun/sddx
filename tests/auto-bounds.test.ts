@@ -11,7 +11,7 @@ const CLI_SRC = join(repoRoot, "src/cli.ts");
 function cli(cwd: string, env: NodeJS.ProcessEnv, ...args: string[]) {
   return spawnSync("bun", [CLI_SRC, ...args], { cwd, encoding: "utf8", env });
 }
-// Execution mode is config-only by design (see config.ts interactionMode): the
+// Interaction mode is config-only by design (see config.ts interactionMode): the
 // environment is part of the command line the agent composes, so it must not be
 // able to switch the gate. Tests therefore write config, exactly as a user does.
 const auto = process.env;

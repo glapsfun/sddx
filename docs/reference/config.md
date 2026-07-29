@@ -74,7 +74,7 @@ var. There is no `--mode` flag on any command.
 
 `interaction_mode` never falls through to `auto`: an unreadable config, a typo, or
 an out-of-domain value all resolve to `human`. See
-[execution-modes.md](../explanation/execution-modes.md).
+[interaction-modes.md](../explanation/interaction-modes.md).
 
 ## Migrating `execution_mode` → `interaction_mode`
 

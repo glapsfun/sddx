@@ -15,7 +15,7 @@ check `.data.prefer_solo` — when true, lean toward suggesting
 explicitly. This is advisory only: no hook enforces it, it's a steer for this
 skill's own judgment.
 
-## Execution modes
+## Interaction modes
 
 Two modes, **one** execution engine: they differ only in whether the
 plan-approval gate is armed. `human` (the default) pauses for approval before

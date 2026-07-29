@@ -1,6 +1,6 @@
-# Execution modes: human-in-the-loop and unattended
+# Interaction modes: human-in-the-loop and unattended
 
-sddx has two execution modes. They are **not** two workflows — there is one
+sddx has two interaction modes. They are **not** two workflows — there is one
 execution engine, one receipt format, one completion summary. They differ only
 in whether the plan-approval gate is armed.
 

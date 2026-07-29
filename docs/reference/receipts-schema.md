@@ -122,4 +122,4 @@ self-reported unless you see that cross-check confirmed.
 
 **What this proves:** which plan a receipt descends from and which mode it ran
 under. **Not** who approved it — see
-[execution-modes.md](../explanation/execution-modes.md#what-sddx-can-and-cannot-prove).
+[interaction-modes.md](../explanation/interaction-modes.md#what-sddx-can-and-cannot-prove).

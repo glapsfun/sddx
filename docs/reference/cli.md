@@ -256,7 +256,7 @@ In `human` mode (the default), creation requires a matching approval token and
 exits **3** without one, having written nothing. Validation runs first, so an
 invalid plan exits 1 and is never presented for approval. `auto` self-approves
 within its bounds; see
-[execution-modes.md](../explanation/execution-modes.md#auto-modes-bounds).
+[interaction-modes.md](../explanation/interaction-modes.md#auto-modes-bounds).
 
 ## sddx graph approve
 
@@ -291,7 +291,7 @@ during an audit, and neither is written any more.
 Signed best-effort under the `sddx-approval` SSH namespace when git signing is
 configured; an unsigned token is normal, never an error. A signature only binds
 approval to a person when the key is touch-required — see
-[what sddx can and cannot prove](../explanation/execution-modes.md#what-sddx-can-and-cannot-prove).
+[what sddx can and cannot prove](../explanation/interaction-modes.md#what-sddx-can-and-cannot-prove).
 
 ## sddx graph regenerate
 

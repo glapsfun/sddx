@@ -37,6 +37,7 @@ import {
   resolveConfig,
   validateConfigObject,
 } from "./lib/config";
+import { runDoctor } from "./lib/doctor";
 import {
   branchExists,
   createBranchAt,
@@ -117,6 +118,7 @@ import {
 const USAGE = `usage:
   sddx init [--runtime <global|project>] [--package-manager <npm|bun>]
             [--adapter <name>]... [--interaction-mode <human|auto>] [--yes] [--dry-run]
+  sddx doctor
   sddx sync --adapter <name> [--yes] [--force]
   sddx uninstall --adapter <name>
   sddx task phase <id> <PHASE> [--test-exit <n>]
@@ -1434,6 +1436,49 @@ function cmdSync(cwd: string, args: string[], format: OutputFormat, noColor: boo
   reporter.finish({ adapter: adapter.name, changed: result.written, applied: true });
 }
 
+/**
+ * `sddx doctor` — read-only diagnosis with an exact fix per failure.
+ *
+ * Runs outside an initialized repository, and outside a repository at all: the
+ * moment a user most needs it is when nothing is set up correctly, so every
+ * check degrades to a reportable state rather than throwing.
+ */
+function cmdDoctor(cwd: string, format: OutputFormat, noColor: boolean): void {
+  currentCommand = "doctor";
+  const reporter = makeReporter("doctor", format, noColor);
+
+  let root: string | null = null;
+  try {
+    root = repositoryRoot(cwd);
+  } catch {
+    root = null;
+  }
+
+  const config = root === null ? null : resolveConfig(root);
+  const report = runDoctor({
+    cwd,
+    root,
+    config,
+    adapters: ADAPTERS,
+    adapterContext: root === null ? null : adapterContext(root),
+    runningVersion: sddxVersion(),
+  });
+
+  for (const check of report.checks) {
+    const line = `${check.status.toUpperCase().padEnd(4)} ${check.id}: ${check.detail}`;
+    if (check.status === "fail") reporter.error(line);
+    else if (check.status === "warn") reporter.warn(line);
+    else reporter.success(line);
+    if (check.fix) reporter.success(`     fix: ${check.fix}`);
+  }
+
+  const failures = report.checks.filter((c) => c.status === "fail").length;
+  const warnings = report.checks.filter((c) => c.status === "warn").length;
+  reporter.success(`${report.checks.length} check(s): ${failures} failed, ${warnings} warning(s)`);
+  reporter.finish(report, report.failed ? { status: "error" } : {});
+  if (report.failed) process.exit(1);
+}
+
 /** `sddx uninstall --adapter <name>` — remove only manifest-owned artifacts. */
 function cmdUninstall(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
   currentCommand = "uninstall";
@@ -2061,6 +2106,10 @@ function main(argv: string[]): void {
     }
     if (cmd === "init") {
       cmdInit(cwd, rest, format, noColor);
+      return;
+    }
+    if (cmd === "doctor") {
+      cmdDoctor(cwd, format, noColor);
       return;
     }
     if (cmd === "sync") {

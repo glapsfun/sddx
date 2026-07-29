@@ -14,6 +14,12 @@ import {
 import {
   autoMaxTasks,
   gateInteractionMode,
+  INTERACTION_MODES,
+  type InteractionMode,
+  PACKAGE_MANAGERS,
+  type PackageManager,
+  RUNTIME_SCOPES,
+  type RuntimeScope,
   readConfig,
   resolveConfig,
   validateConfigObject,
@@ -46,6 +52,15 @@ import {
   truncateToHeader,
   validateSchedule,
 } from "./lib/graph";
+import {
+  applyInit,
+  InitApplyError,
+  type InitOptions,
+  type InitPlan,
+  NotAGitRepositoryError,
+  planInit,
+  planIsNoop,
+} from "./lib/init";
 import { parseQuestionBatch, QUESTION_CAP } from "./lib/intake";
 import { detectRunState, renderMenu, resolveSelection, runActions } from "./lib/next-actions";
 import { type OutputFormat, parseOutputFlag, printError, printLine, Reporter } from "./lib/output";
@@ -83,6 +98,8 @@ import {
 } from "./lib/worktree";
 
 const USAGE = `usage:
+  sddx init [--runtime <global|project>] [--package-manager <npm|bun>]
+            [--adapter <name>]... [--interaction-mode <human|auto>] [--yes] [--dry-run]
   sddx task phase <id> <PHASE> [--test-exit <n>]
   sddx task allow <id> <path>
   sddx task show <id>
@@ -1330,6 +1347,175 @@ function cmdConfigShow(cwd: string, args: string[], format: OutputFormat, noColo
   reporter.finish(cfg);
 }
 
+/** One choice `init` needs, and the flag that supplies it non-interactively. */
+interface InitChoice<T> {
+  flag: string;
+  values: readonly T[];
+}
+
+const RUNTIME_CHOICE: InitChoice<RuntimeScope> = { flag: "--runtime", values: RUNTIME_SCOPES };
+const PM_CHOICE: InitChoice<PackageManager> = {
+  flag: "--package-manager",
+  values: PACKAGE_MANAGERS,
+};
+const MODE_CHOICE: InitChoice<InteractionMode> = {
+  flag: "--interaction-mode",
+  values: INTERACTION_MODES,
+};
+
+function choice<T extends string>(args: string[], spec: InitChoice<T>): T | undefined {
+  const raw = flag(args, spec.flag);
+  if (raw === undefined) return undefined;
+  if (!(spec.values as readonly string[]).includes(raw)) {
+    fail(`${spec.flag} must be one of ${spec.values.join("|")} — got "${raw}"`, 2);
+  }
+  return raw as T;
+}
+
+/** `--adapter` is repeatable: `--adapter claude --adapter other`. */
+function adapterFlags(args: string[]): string[] {
+  const adapters: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--adapter") {
+      const v = args[i + 1];
+      if (v === undefined) fail("--adapter requires a value", 2);
+      adapters.push(v as string);
+    }
+  }
+  return [...new Set(adapters)];
+}
+
+const KNOWN_ADAPTERS = ["claude"] as const;
+
+/**
+ * Renders a plan as the preview a user approves. Every file, every command,
+ * every config value — a preview that omitted one would be worse than none,
+ * because it would be trusted.
+ */
+function renderInitPlan(plan: InitPlan): string {
+  const lines: string[] = [];
+  const changing = plan.files.filter((f) => f.kind !== "unchanged");
+  lines.push(`repository: ${plan.root}`, "");
+
+  lines.push("files:");
+  if (changing.length === 0) {
+    lines.push("  (none — everything is already in place)");
+  } else {
+    for (const f of changing) lines.push(`  ${f.kind.padEnd(6)} ${f.path}    # ${f.reason}`);
+  }
+  const unchanged = plan.files.length - changing.length;
+  if (unchanged > 0) lines.push(`  (${unchanged} already up to date)`);
+
+  lines.push("", "package manager:");
+  if (plan.packageOps.length === 0) {
+    lines.push("  (nothing to run)");
+  } else {
+    for (const op of plan.packageOps) lines.push(`  ${op.command.join(" ")}    # ${op.reason}`);
+  }
+
+  lines.push("", "config (.sddx/config.json):");
+  for (const [key, value] of Object.entries(plan.config)) {
+    lines.push(`  ${key}: ${JSON.stringify(value)}`);
+  }
+  return lines.join("\n");
+}
+
+/**
+ * `sddx init` — non-interactive core.
+ *
+ * On a non-TTY this refuses rather than waiting: a CI run that blocks on a
+ * prompt looks identical to a hang, and the flags that would have made it
+ * deterministic are named in the error.
+ */
+function cmdInit(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
+  currentCommand = "init";
+  const dryRun = args.includes("--dry-run");
+  const assumeYes = args.includes("--yes");
+  const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY) && !assumeYes;
+
+  const runtimeScope = choice(args, RUNTIME_CHOICE);
+  const packageManager = choice(args, PM_CHOICE);
+  const interactionMode = choice(args, MODE_CHOICE);
+  const adapters = adapterFlags(args);
+  for (const a of adapters) {
+    if (!(KNOWN_ADAPTERS as readonly string[]).includes(a)) {
+      failWith(
+        [
+          `unknown adapter "${a}" — known adapters: ${KNOWN_ADAPTERS.join(", ")}`,
+          "An adapter sddx does not implement cannot be installed, synced, or removed safely.",
+        ],
+        2,
+      );
+    }
+  }
+
+  if (!interactive && runtimeScope === undefined && !dryRun) {
+    failWith(
+      [
+        "sddx init needs its choices as flags when stdin/stdout is not an interactive terminal.",
+        "Required: --runtime <global|project>",
+        "Optional: --package-manager <npm|bun> (project scope), --adapter <name> (repeatable), --interaction-mode <human|auto>",
+        "Add --yes to skip the confirmation, or --dry-run to preview without writing.",
+        "Example: sddx init --yes --runtime global --adapter claude",
+      ],
+      2,
+    );
+  }
+
+  const opts: InitOptions = {
+    runtimeScope: runtimeScope ?? "global",
+    packageManager: packageManager ?? "npm",
+    adapters,
+    interactionMode: interactionMode ?? "human",
+  };
+
+  const reporter = makeReporter("init", format, noColor);
+  let plan: InitPlan;
+  try {
+    plan = planInit(cwd, opts);
+  } catch (e) {
+    if (e instanceof NotAGitRepositoryError) failWith(e.message.split("\n"), 1);
+    throw e;
+  }
+
+  reporter.success(renderInitPlan(plan));
+
+  if (dryRun) {
+    reporter.success("dry run: nothing was written");
+    reporter.finish({ plan, applied: false, dryRun: true });
+    return;
+  }
+
+  if (planIsNoop(plan)) {
+    reporter.success("already initialized — no changes");
+    reporter.finish({ plan, applied: false, dryRun: false });
+    return;
+  }
+
+  try {
+    const result = applyInit(plan);
+    reporter.success(
+      `initialized: ${result.written.length} file(s) written${
+        result.packageOps.length > 0 ? `, ran ${result.packageOps.join(", ")}` : ""
+      }`,
+    );
+    reporter.finish({ plan, applied: true, dryRun: false, result });
+  } catch (e) {
+    if (e instanceof InitApplyError) {
+      failWith(
+        [
+          e.message,
+          ...(e.rolledBack.length > 0
+            ? ["rolled back:", ...e.rolledBack.map((s) => `  ${s}`)]
+            : ["nothing had been written yet"]),
+        ],
+        1,
+      );
+    }
+    throw e;
+  }
+}
+
 function cmdConfigValidate(cwd: string, format: OutputFormat, noColor: boolean): void {
   const reporter = makeReporter("config validate", format, noColor);
   const path = join(sddxDir(cwd), "config.json");
@@ -1692,6 +1878,10 @@ function main(argv: string[]): void {
     }
     if (cmd === "next-actions") {
       cmdNextActions(cwd, rest, format, noColor);
+      return;
+    }
+    if (cmd === "init") {
+      cmdInit(cwd, rest, format, noColor);
       return;
     }
     if (cmd === "config" && rest[0] === "show") {

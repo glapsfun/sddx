@@ -5,8 +5,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Receipt } from "../src/lib/receipt";
-import { fixtureClone, fixtureRepo } from "./fixtures";
-import { fakeRedCheck, repoRoot } from "./helpers";
+import { fixtureClone } from "./fixtures";
+import { createRun, fakeRedCheck, repoRoot } from "./helpers";
 
 const HOOKS = join(repoRoot, "dist", "hooks.mjs");
 const CLI = join(repoRoot, "src", "cli.ts");
@@ -54,15 +54,13 @@ stop_rules:
 out_of_scope: []
 `;
 
-/** Fixture repo with one registered no-workspace task; returns [repo, taskId]. */
-function repoWithTask(): { repo: string; id: string } {
-  const repo = fixtureRepo();
-  writeFileSync(join(repo, "spec.yaml"), SPEC_YAML);
-  const r = sddx(repo, "task", "create", "--spec", "spec.yaml", "--workspace", "none");
-  expect(r.status).toBe(0);
-  const id = /created (\S+) /.exec(r.stdout)?.[1] as string;
-  expect(id).toBeDefined();
-  return { repo, id };
+/** Fixture repo with one registered task, in its own worktree; returns the main
+ * checkout, the task id, and the worktree the task actually lives in. */
+function repoWithTask(): { repo: string; id: string; wt: string } {
+  const { clone: repo } = fixtureClone();
+  const { taskIds } = createRun(repo, sddx, "gate fixture", [{ alias: "only", spec: SPEC_YAML }]);
+  const id = taskIds[0] as string;
+  return { repo, id, wt: join(repo, ".sddx-worktrees", id) };
 }
 
 const editEvent = (cwd: string, filePath: string) => ({
@@ -83,7 +81,7 @@ const bashEvent = (cwd: string, command: string, exitCode: number) => ({
 
 describe("hook I/O contract (5.1)", () => {
   test("deny decision is JSON on stdout with exit 0", () => {
-    const { repo } = repoWithTask();
+    const { wt: repo } = repoWithTask();
     const res = runHook("tdd-gate", editEvent(repo, join(repo, "src", "api.ts")));
     expect(res.exitCode).toBe(0);
     expect(denyReason(res)).toContain("failing test");
@@ -102,7 +100,7 @@ describe("hook I/O contract (5.1)", () => {
   });
 
   test("gate decisions are identical under plain node (launcher fallback)", () => {
-    const { repo } = repoWithTask();
+    const { wt: repo } = repoWithTask();
     const bunRes = runHook("tdd-gate", editEvent(repo, join(repo, "src", "api.ts")), "bun");
     const nodeRes = runHook("tdd-gate", editEvent(repo, join(repo, "src", "api.ts")), "node");
     expect(nodeRes.exitCode).toBe(0);
@@ -111,8 +109,8 @@ describe("hook I/O contract (5.1)", () => {
 });
 
 describe("implementation-first is hard-blocked (5.2)", () => {
-  test("blocked in the main checkout, in PLAN and in RED", () => {
-    const { repo, id } = repoWithTask();
+  test("blocked in the task's worktree, in PLAN and in RED", () => {
+    const { wt: repo, id } = repoWithTask();
     expect(denyReason(runHook("tdd-gate", editEvent(repo, join(repo, "src", "api.ts"))))).toContain(
       id,
     );
@@ -121,14 +119,16 @@ describe("implementation-first is hard-blocked (5.2)", () => {
     expect(denyReason(res)).toContain("RED");
   });
 
-  test("identical block inside a task worktree", () => {
-    const { clone } = fixtureClone();
-    writeFileSync(join(clone, "spec.yaml"), SPEC_YAML);
-    const r = sddx(clone, "task", "create", "--spec", "spec.yaml", "--workspace", "worktree");
-    expect(r.status).toBe(0);
-    const id = /created (\S+) /.exec(r.stdout)?.[1] as string;
-    const wt = join(clone, ".sddx-worktrees", id);
+  test("the gate is inert in the main checkout, where no task lives", () => {
+    // A canonical run puts every root task in its own worktree, so the user's
+    // own checkout has no governing task and must stay writable.
+    const { repo, id, wt } = repoWithTask();
     expect(existsSync(wt)).toBe(true);
+    expect(isPassThrough(runHook("tdd-gate", editEvent(repo, join(repo, "src", "api.ts"))))).toBe(
+      true,
+    );
+    // ...while the same write inside the worktree is denied, naming the task
+    expect(denyReason(runHook("tdd-gate", editEvent(wt, join(wt, "src", "api.ts"))))).toContain(id);
     const res = runHook("tdd-gate", editEvent(wt, join(wt, "src", "api.ts")));
     expect(denyReason(res)).toContain(id);
     // test paths remain writable in the same worktree
@@ -140,7 +140,7 @@ describe("implementation-first is hard-blocked (5.2)", () => {
 
 describe("test-first path passes (5.3)", () => {
   test("red → green → verify, phases earned from observed exit codes", () => {
-    const { repo, id } = repoWithTask();
+    const { wt: repo, id } = repoWithTask();
 
     // writing the test is allowed in PLAN
     expect(
@@ -188,7 +188,7 @@ describe("test-first path passes (5.3)", () => {
 
 describe("allow exemption is audited (5.4)", () => {
   test("allowed file writable pre-GREEN; exemption lands in the receipt", () => {
-    const { repo, id } = repoWithTask();
+    const { wt: repo, id } = repoWithTask();
     expect(sddx(repo, "task", "allow", id, "src/migration.sql").status).toBe(0);
 
     expect(
@@ -214,7 +214,7 @@ describe("allow exemption is audited (5.4)", () => {
 
 describe("stop gate (5.5)", () => {
   test("unfinished task blocks stop; loop flag and DONE allow it", () => {
-    const { repo, id } = repoWithTask();
+    const { wt: repo, id } = repoWithTask();
     runHook("record-test", bashEvent(repo, "bun test", 1));
     runHook("record-test", bashEvent(repo, "bun test", 0));
 
@@ -235,7 +235,7 @@ describe("stop gate (5.5)", () => {
 
 describe("latency budget (5.6)", () => {
   test("gate and session-start round-trips stay inside budget", () => {
-    const { repo } = repoWithTask();
+    const { wt: repo } = repoWithTask();
     const timings = {
       "tdd-gate": Number.POSITIVE_INFINITY,
       "session-start": Number.POSITIVE_INFINITY,
@@ -252,7 +252,7 @@ describe("latency budget (5.6)", () => {
   });
 
   test("session-start surfaces active tasks", () => {
-    const { repo, id } = repoWithTask();
+    const { wt: repo, id } = repoWithTask();
     const res = runHook("session-start", { hook_event_name: "SessionStart", cwd: repo });
     const h = res.output.hookSpecificOutput as Record<string, unknown>;
     expect(String(h.additionalContext)).toContain(id);

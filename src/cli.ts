@@ -1,12 +1,4 @@
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { auditReceipts } from "./audit";
 import { computeBoard } from "./board";
@@ -28,13 +20,11 @@ import {
 } from "./lib/config";
 import {
   branchExists,
-  createBranch,
   createBranchAt,
   currentBranch,
   defaultBranch,
   deleteBranch,
   forceDeleteBranch,
-  headSha,
   isMerged,
 } from "./lib/git";
 import { scopesOverlap } from "./lib/glob-overlap";
@@ -68,7 +58,6 @@ import {
   abandonOrRetry,
   allowPath,
   createTask,
-  dependsOnList,
   type Phase,
   readTask,
   resolveTaskState,
@@ -80,7 +69,6 @@ import {
 import { verifyTask } from "./lib/verify";
 import {
   createWorktree,
-  hasSubmodules,
   isDirty,
   materializeDependent,
   removeWorktree,
@@ -95,18 +83,16 @@ import {
 } from "./lib/worktree";
 
 const USAGE = `usage:
-  sddx task create --spec <path> [--workspace auto|worktree|branch|none] [--no-branch] [--depends-on <id>]...
   sddx task phase <id> <PHASE> [--test-exit <n>]
   sddx task allow <id> <path>
   sddx task show <id>
   sddx task materialize <id>
   sddx red-check <id>
   sddx verify <id> [--model <m>] [--harness <h>]
-  sddx goal create --goal <sentence> --tasks <id1,id2,...>
   sddx goal show <id>
   sddx intake check --batch <path>
-  sddx graph create --graph <path> [--workspace auto|worktree|branch|none] [--dry-run]
-  sddx graph approve --graph <path> [--workspace auto|worktree|branch|none]
+  sddx graph create --graph <path> [--dry-run]
+  sddx graph approve --graph <path>
   sddx graph regenerate --graph <path>
   sddx graph cancel --graph <path>
   sddx pr create --goal <goal-id> [--title <title>]
@@ -160,16 +146,6 @@ function makeReporter(command: string, format: OutputFormat, noColor: boolean): 
   });
 }
 
-/** Task ids with a state file in the main checkout's `.sddx/tasks/` (deferred and
- * branch/none-mode tasks live here; worktree tasks live in their worktrees). */
-function mainTaskIds(cwd: string): string[] {
-  const dir = join(sddxDir(cwd), "tasks");
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
-    .filter((f) => f.endsWith(".json"))
-    .map((f) => f.slice(0, -".json".length));
-}
-
 function flag(args: string[], name: string): string | undefined {
   const i = args.indexOf(name);
   if (i === -1) return undefined;
@@ -178,17 +154,32 @@ function flag(args: string[], name: string): string | undefined {
   return v;
 }
 
-/** Every occurrence of a repeatable flag, in order (e.g. multiple `--depends-on`). */
-function flags(args: string[], name: string): string[] {
-  const out: string[] = [];
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === name) {
-      const v = args[i + 1];
-      if (v === undefined) fail(`${name} requires a value`, 2);
-      out.push(v);
+/**
+ * Flags removed in 4.0, refused by name.
+ *
+ * Silently ignoring one is the worst option: `--workspace none` is a request
+ * for NO isolation, so dropping it without a word would hand the caller the
+ * opposite of what they asked for and never say so. Every other removed
+ * surface (`task create`, `goal create`, the retired config keys) names itself;
+ * this keeps the flags consistent with them.
+ */
+const REMOVED_FLAGS: ReadonlyMap<string, string> = new Map([
+  [
+    "--workspace",
+    "worktree is the only workspace strategy in sddx 4.0, so there is nothing to select. Drop the flag.",
+  ],
+  [
+    "--no-branch",
+    "in-place execution was removed in sddx 4.0 — every task runs in its own worktree. Drop the flag.",
+  ],
+]);
+
+function rejectRemovedFlags(args: string[]): void {
+  for (const [flagName, why] of REMOVED_FLAGS) {
+    if (args.includes(flagName)) {
+      failWith([`\`${flagName}\` was removed: ${why}`, "See docs/how-to/migrate-to-v4.md."], 2);
     }
   }
-  return out;
 }
 
 function readVersionField(relativePath: string): string {
@@ -206,41 +197,6 @@ function pluginVersion(): string {
 
 function packageVersion(): string {
   return readVersionField("../package.json");
-}
-
-const WORKSPACE_MODES = ["auto", "worktree", "branch", "none"] as const;
-type WorkspaceFlag = (typeof WORKSPACE_MODES)[number];
-
-/** Workspace selection, with any auto-downgrade recorded into `notices` rather
- * than printed directly — so a dry run can report the same downgrade a real
- * create would apply, from the same code. */
-function pickWorkspaceMode(
-  cwd: string,
-  requested: WorkspaceFlag,
-  notices: string[],
-): "worktree" | "branch" | "none" {
-  if (requested !== "auto") return requested;
-  if (!worktreeAvailable(cwd)) {
-    notices.push("git worktree unavailable → branch mode");
-    return "branch";
-  }
-  const base = resolveBaseRef(cwd);
-  if (hasSubmodules(cwd, base.sha)) {
-    notices.push("submodules detected → branch mode");
-    return "branch";
-  }
-  return "worktree";
-}
-
-function pickWorkspace(
-  cwd: string,
-  requested: WorkspaceFlag,
-  reporter: Reporter,
-): "worktree" | "branch" | "none" {
-  const notices: string[] = [];
-  const mode = pickWorkspaceMode(cwd, requested, notices);
-  for (const n of notices) reporter.success(n);
-  return mode;
 }
 
 /**
@@ -303,77 +259,52 @@ class Rollback {
   }
 }
 
-/** Create a root task with a real workspace (worktree/branch/none). `specSrc` is
- * the absolute path of the spec file to copy into the task's `.sddx/specs/`.
- * `forkSha`, when given (a goal's run branch tip), is used as the worktree's
- * fork point instead of resolving `origin/HEAD` independently per task —
- * every root task in a run forks from the same run branch state. */
+/** Create a root task in its own worktree. `specSrc` is the absolute path of the
+ * spec file to copy into the task's `.sddx/specs/`. `forkSha`, when given (a
+ * goal's run branch tip), is used as the worktree's fork point instead of
+ * resolving `origin/HEAD` independently per task — every root task in a run
+ * forks from the same run branch state.
+ *
+ * Worktree is the invariant: there is no mode parameter because there is
+ * nothing to select. A repository that cannot host a worktree is refused in
+ * `resolvePlan`'s preconditions, loudly, rather than downgraded here. */
 function createRootTask(
   cwd: string,
   spec: Spec,
   specSrc: string,
-  mode: "worktree" | "branch" | "none",
   reporter: Reporter,
   forkSha?: string,
 ): { id: string; line: string } {
   const id = taskId(spec.task);
-  if (mode === "worktree") {
-    let baseSha: string;
-    if (forkSha) {
-      baseSha = forkSha;
-    } else {
-      const base = resolveBaseRef(cwd);
-      if (base.source === "HEAD") reporter.success("no origin remote — forking from local HEAD");
-      baseSha = base.sha;
-    }
-    const wtPath = createWorktree(cwd, id, baseSha);
-    const relPath = join(".sddx-worktrees", id);
-    mkdirSync(join(sddxDir(wtPath), "specs"), { recursive: true });
-    const specPath = join(".sddx", "specs", `${id}.yaml`);
-    copyFileSync(specSrc, join(wtPath, specPath));
-    createTask(wtPath, spec, specPath, {
-      mode: "worktree",
-      branch: `sddx/${id}`,
-      base_sha: baseSha,
-      path: relPath,
-    });
-    return {
-      id,
-      line: `created ${id} phase=PLAN worktree=${relPath} branch=sddx/${id} base=${baseSha}`,
-    };
+  let baseSha: string;
+  if (forkSha) {
+    baseSha = forkSha;
+  } else {
+    const base = resolveBaseRef(cwd);
+    if (base.source === "HEAD") reporter.success("no origin remote — forking from local HEAD");
+    baseSha = base.sha;
   }
-  const useBranch = mode === "branch";
-  const base = headSha(cwd);
-  if (useBranch) createBranch(cwd, `sddx/${id}`);
-  mkdirSync(join(sddxDir(cwd), "specs"), { recursive: true });
+  const wtPath = createWorktree(cwd, id, baseSha);
+  const relPath = join(".sddx-worktrees", id);
+  mkdirSync(join(sddxDir(wtPath), "specs"), { recursive: true });
   const specPath = join(".sddx", "specs", `${id}.yaml`);
-  copyFileSync(specSrc, join(cwd, specPath));
-  createTask(cwd, spec, specPath, {
-    mode,
-    branch: useBranch ? `sddx/${id}` : null,
-    base_sha: base,
+  copyFileSync(specSrc, join(wtPath, specPath));
+  createTask(wtPath, spec, specPath, {
+    mode: "worktree",
+    branch: `sddx/${id}`,
+    base_sha: baseSha,
+    path: relPath,
   });
-  return { id, line: `created ${id} phase=PLAN branch=${useBranch ? `sddx/${id}` : "none"}` };
+  return {
+    id,
+    line: `created ${id} phase=PLAN worktree=${relPath} branch=sddx/${id} base=${baseSha}`,
+  };
 }
 
 /** Create a deferred dependent task in the main checkout — no worktree yet, base
  * `pending:<parent-id>[,<parent-id>...]`. Materialized once every named parent
  * is DONE (single fork, or a sequential merge for fan-in — see worktree.ts). */
-function createDeferredTask(
-  cwd: string,
-  spec: Spec,
-  specSrc: string,
-  mode: "worktree" | "branch" | "none",
-  dependsOn: string[],
-): string {
-  // A dependent forks from its parent's DONE commit (the tip of `sddx/<parent>`).
-  // `none` mode never creates that branch, so the dependent could never be
-  // materialized — refuse it here rather than stranding an un-dispatchable task.
-  if (mode === "none") {
-    throw new Error(
-      "dependent tasks require worktree or branch mode — `none` has no isolatable base to fork from",
-    );
-  }
+function createDeferredTask(cwd: string, spec: Spec, specSrc: string, dependsOn: string[]): string {
   const id = taskId(spec.task);
   mkdirSync(join(sddxDir(cwd), "specs"), { recursive: true });
   const specPath = join(".sddx", "specs", `${id}.yaml`);
@@ -384,72 +315,13 @@ function createDeferredTask(
     specPath,
     {
       mode: "deferred",
-      materialize_as: mode as "worktree" | "branch",
+      materialize_as: "worktree",
       branch: null,
       base_sha: `pending:${dependsOn.join(",")}`,
     },
     { dependsOn },
   );
   return id;
-}
-
-function cmdTaskCreate(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
-  const reporter = makeReporter("task create", format, noColor);
-  const specArg = flag(args, "--spec");
-  if (!specArg) fail(USAGE, 2);
-  const requested = (flag(args, "--workspace") ??
-    (args.includes("--no-branch") ? "none" : "auto")) as WorkspaceFlag;
-  if (!WORKSPACE_MODES.includes(requested)) fail(USAGE, 2);
-  let yamlText: string;
-  try {
-    yamlText = readFileSync(join(cwd, specArg), "utf8");
-  } catch {
-    fail(`cannot read spec file: ${specArg}`);
-  }
-  const { spec, errors } = parseSpec(yamlText);
-  if (!spec) {
-    failWith(errors.map((e) => `spec error: ${e}`));
-  }
-  const mode = pickWorkspace(cwd, requested, reporter);
-  const specSrc = join(cwd, specArg);
-
-  // A dependent task cannot fork now — its parents' DONE commits do not exist
-  // yet. Record it deferred (base `pending:<parent-id>[,...]`, no worktree); its
-  // workspace is materialized once every named parent verifies.
-  const dependsOn = flags(args, "--depends-on");
-  if (dependsOn.length > 0) {
-    for (const parentId of dependsOn) {
-      if (!resolveTaskState(cwd, parentId)) fail(`--depends-on: no such task ${parentId}`);
-    }
-    // Apply the overlap ⟹ ordered gate against true siblings (tasks sharing at
-    // least one parent — they may run concurrently), so an individually-created
-    // dependent can't slip an overlapping sibling past the graph/goal gates.
-    // The prospective task joins the sibling set for the check.
-    const newId = taskId(spec.task);
-    const siblings: Array<{ id: string; dependsOn: string[]; scope: string[] }> = [
-      { id: newId, dependsOn, scope: spec.scope },
-    ];
-    for (const tid of mainTaskIds(cwd)) {
-      const t = resolveTaskState(cwd, tid);
-      if (t && t.id !== newId && dependsOnList(t).some((p) => dependsOn.includes(p))) {
-        siblings.push({ id: t.id, dependsOn: dependsOnList(t), scope: t.scope ?? [] });
-      }
-    }
-    const sibErrs = validateSchedule(siblings);
-    if (sibErrs.length > 0) {
-      failWith(sibErrs.map((e) => `task error: ${e}`));
-    }
-    const id = createDeferredTask(cwd, spec, specSrc, mode, dependsOn);
-    reporter.success(
-      `created ${id} phase=PLAN depends_on=${dependsOn.join(",")} workspace=deferred(${mode})`,
-    );
-    reporter.finish({ id, phase: "PLAN", dependsOn, workspace: "deferred", mode });
-    return;
-  }
-
-  const { id, line } = createRootTask(cwd, spec, specSrc, mode, reporter);
-  reporter.success(line);
-  reporter.finish({ id, phase: "PLAN", mode });
 }
 
 /** Roots first, a node only after every one of its parents — cherry-pick/commit
@@ -473,8 +345,11 @@ function topoOrder(nodes: GraphNode[]): GraphNode[] {
 /**
  * Everything `graph create` resolves and validates before it is entitled to
  * write anything. `--dry-run` and a real create both go through this and only
- * this, so the facts a human approves (workspace mode, base SHA, node set)
- * cannot drift from the facts creation acts on.
+ * this, so the facts a human approves (base SHA, node set) cannot drift from
+ * the facts creation acts on.
+ *
+ * There is no workspace mode here. Worktree is the invariant; a repository that
+ * cannot host one is refused below with a stated precondition, never downgraded.
  */
 interface ResolvedPlan {
   graph: Graph;
@@ -483,14 +358,12 @@ interface ResolvedPlan {
   idByAlias: Map<string, string>;
   goalId: string;
   base: ReturnType<typeof resolveBaseRef>;
-  /** The workspace mode creation would actually use, downgrades applied. */
-  mode: "worktree" | "branch" | "none";
-  /** Notices produced while resolving (e.g. "submodules detected → branch mode"). */
+  /** Notices produced while resolving (e.g. "no origin remote — forking from local HEAD"). */
   notices: string[];
   errors: string[];
 }
 
-function resolvePlan(cwd: string, graphArg: string, requested: WorkspaceFlag): ResolvedPlan {
+function resolvePlan(cwd: string, graphArg: string): ResolvedPlan {
   let graphText: string;
   try {
     graphText = readFileSync(join(cwd, graphArg), "utf8");
@@ -507,12 +380,6 @@ function resolvePlan(cwd: string, graphArg: string, requested: WorkspaceFlag): R
   // ordered. Specs are resolved relative to the graph file's directory.
   const graphDir = dirname(join(cwd, graphArg));
   const errs: string[] = [];
-  // `none` mode can't isolate a dependent's base (no `sddx/<parent>` branch to
-  // fork from), so a graph with any edge is incompatible with it — catch it here,
-  // atomically, rather than mid-creation.
-  if (requested === "none" && graph.tasks.some((n) => n.depends_on.length > 0)) {
-    errs.push("workspace none is incompatible with dependent tasks — use worktree or branch mode");
-  }
   const loaded = new Map<string, { spec: Spec; src: string }>();
   const idByAlias = new Map<string, string>();
   for (const node of graph.tasks) {
@@ -562,33 +429,26 @@ function resolvePlan(cwd: string, graphArg: string, requested: WorkspaceFlag): R
   const notices: string[] = [];
   const base = resolveBaseRef(cwd);
   if (base.source === "HEAD") notices.push("no origin remote — forking from local HEAD");
-  // The canonical path does NOT downgrade. `auto` means worktree; when a
-  // worktree precondition fails the run is refused, not quietly moved into a
-  // weaker isolation model the user never asked for. `pickWorkspaceMode` stays
-  // for the legacy `task create` entry point, which `retire-alternate-flows`
-  // removes — the invariant binds this initializer, not the binary.
-  const mode: "worktree" | "branch" | "none" = requested === "auto" ? "worktree" : requested;
-
-  // Worktree preconditions, checked here so a dry run reports exactly what a
-  // real create would refuse. Scope-scoped rather than repository-wide: a
-  // vendored submodule no task touches is not a reason to refuse the run.
-  if (mode === "worktree") {
-    if (!worktreeAvailable(cwd)) {
-      errs.push(
-        "worktree unavailable: git cannot create worktrees for this repository. No run was started. Use a checkout where `git worktree list` succeeds.",
-      );
-    }
-    for (const c of submoduleScopeConflicts(
-      cwd,
-      base.sha,
-      graph.tasks.map((n) => ({ alias: n.alias, scope: loaded.get(n.alias)?.spec.scope ?? [] })),
-    )) {
-      errs.push(
-        c.scope
-          ? `unsupported layout: task "${c.alias}" declares scope ${c.scope}, which reaches the submodule ${c.submodule}. A worktree crossing a submodule boundary is unsafe, and no run was started.`
-          : `unsupported layout: task "${c.alias}" declares no scope, so it cannot be proven disjoint from the submodule ${c.submodule}. Declare a scope, or use a checkout without submodules. No run was started.`,
-      );
-    }
+  // Worktree preconditions. There is no downgrade to fall back to, so these are
+  // refusals: a failed precondition names itself and states that no run was
+  // started. Checked here so a dry run reports exactly what a real create would
+  // refuse. Scope-scoped rather than repository-wide: a vendored submodule no
+  // task touches is not a reason to refuse the run.
+  if (!worktreeAvailable(cwd)) {
+    errs.push(
+      "worktree unavailable: git cannot create worktrees for this repository. No run was started. Use a checkout where `git worktree list` succeeds.",
+    );
+  }
+  for (const c of submoduleScopeConflicts(
+    cwd,
+    base.sha,
+    graph.tasks.map((n) => ({ alias: n.alias, scope: loaded.get(n.alias)?.spec.scope ?? [] })),
+  )) {
+    errs.push(
+      c.scope
+        ? `unsupported layout: task "${c.alias}" declares scope ${c.scope}, which reaches the submodule ${c.submodule}. A worktree crossing a submodule boundary is unsafe, and no run was started.`
+        : `unsupported layout: task "${c.alias}" declares no scope, so it cannot be proven disjoint from the submodule ${c.submodule}. Declare a scope, or use a checkout without submodules. No run was started.`,
+    );
   }
 
   // Name and destination availability. These used to surface DURING creation —
@@ -603,12 +463,12 @@ function resolvePlan(cwd: string, graphArg: string, requested: WorkspaceFlag): R
     if (branchExists(cwd, `sddx/${id}`)) {
       errs.push(`${alias}: task branch sddx/${id} already exists`);
     }
-    if (mode === "worktree" && existsSync(join(worktreesDir(resolveMainRepoRoot(cwd)), id))) {
+    if (existsSync(join(worktreesDir(resolveMainRepoRoot(cwd)), id))) {
       errs.push(`${alias}: worktree destination .sddx-worktrees/${id} already exists`);
     }
   }
 
-  return { graph, loaded, idByAlias, goalId: gid, base, mode, notices, errors: errs };
+  return { graph, loaded, idByAlias, goalId: gid, base, notices, errors: errs };
 }
 
 /**
@@ -676,28 +536,6 @@ function planBriefSummary(graph: Graph): Record<string, string> {
 }
 
 /**
- * The fork point the render must report. `createRootTask` honours the passed
- * `forkSha` only on the worktree path; in branch and none mode it branches from
- * local HEAD instead, and branch mode is auto-selected whenever submodules are
- * present. Printing the run branch's `origin/HEAD` base as "the" base would then
- * be a lie about where every task actually starts — so when the two differ, say
- * both. (The divergence itself is pre-existing `createRootTask` behaviour, not
- * something this render can fix.)
- */
-function forkPointLines(cwd: string, plan: ResolvedPlan): string[] {
-  const runBranchBase = `run branch base: ${plan.base.sha} (${plan.base.source})`;
-  if (plan.mode === "worktree") {
-    return [`base: ${plan.base.sha} (${plan.base.source})`];
-  }
-  const taskBase = headSha(cwd);
-  if (taskBase === plan.base.sha) return [`base: ${plan.base.sha} (${plan.base.source})`];
-  return [
-    runBranchBase,
-    `task base: ${taskBase} (local HEAD — ${plan.mode} mode branches from your checkout)`,
-  ];
-}
-
-/**
  * The plan-review stage offers these and nothing else. A fifth action here
  * would be one taken before the plan was authorized, which is the one thing
  * this stage exists to prevent; the post-run handoff is a different menu at a
@@ -745,19 +583,15 @@ function renderPlan(cwd: string, graphArg: string, plan: ResolvedPlan, reporter:
   // reporting one worktree per task would overstate what is about to happen.
   const targetBranch = defaultBranch(cwd);
   const runBranch = runBranchName(plan.goalId);
-  const rootCount = plan.graph.tasks.filter((n) => n.depends_on.length === 0).length;
-  const worktreeCount = plan.mode === "worktree" ? rootCount : 0;
+  const worktreeCount = plan.graph.tasks.filter((n) => n.depends_on.length === 0).length;
 
   const lines: string[] = [
     `goal: ${plan.graph.goal}`,
     `plan: ${hash.slice(0, 12)} (${order.length} node${order.length === 1 ? "" : "s"})`,
-    `workspace: ${plan.mode}`,
     `target branch: ${targetBranch}`,
     `run branch: ${runBranch} (not created yet)`,
-    plan.mode === "worktree"
-      ? `worktrees: ${worktreeCount} at creation, ${order.length} once every dependent materializes`
-      : `worktrees: none (${plan.mode} mode)`,
-    ...forkPointLines(cwd, plan),
+    `worktrees: ${worktreeCount} at creation, ${order.length} once every dependent materializes`,
+    `base: ${plan.base.sha} (${plan.base.source})`,
     "validation: passed",
     "",
   ];
@@ -910,7 +744,7 @@ function renderPlan(cwd: string, graphArg: string, plan: ResolvedPlan, reporter:
     goal: plan.graph.goal,
     goalId: plan.goalId,
     planSha256: hash,
-    workspaceMode: plan.mode,
+    workspaceMode: "worktree",
     baseSha: plan.base.sha,
     // The task ids and run branch a real create WOULD produce. Both are
     // resolved during preflight already; omitting them left the dry run unable
@@ -963,8 +797,6 @@ function resolveApproval(cwd: string, graphArg: string, plan: ResolvedPlan): Gat
     gateInteractionMode(cwd),
     autoMaxTasks(cwd),
     scopesOverlap,
-    // the RESOLVED mode, matching what the token recorded
-    plan.mode,
   );
 }
 
@@ -977,12 +809,9 @@ function cmdGraphApprove(
   const reporter = makeReporter("graph approve", format, noColor);
   const graphArg = flag(args, "--graph");
   if (!graphArg) fail(USAGE, 2);
-  const requested = (flag(args, "--workspace") ?? "auto") as WorkspaceFlag;
-  if (!WORKSPACE_MODES.includes(requested)) fail(USAGE, 2);
-
   // Never approve a plan that would be rejected — the same validation creation
   // runs, so approval can't be granted to something that cannot execute.
-  const plan = resolvePlan(cwd, graphArg, requested);
+  const plan = resolvePlan(cwd, graphArg);
   if (plan.errors.length > 0) {
     failWith(plan.errors.map((e) => `graph approve: ${e}`));
   }
@@ -1000,7 +829,6 @@ function cmdGraphApprove(
     gateInteractionMode(cwd),
     autoMaxTasks(cwd),
     scopesOverlap,
-    plan.mode,
   );
   if (decision.refusal) {
     failWith([`graph approve: ${decision.refusal}`], 1, { blocker: decision.blocker });
@@ -1017,7 +845,7 @@ function cmdGraphApprove(
   const approval = writeApproval(cwd, {
     plan_sha256: hash,
     mode: "human",
-    workspace_mode: plan.mode,
+    workspace_mode: "worktree",
   });
   reporter.success(`approved plan ${hash} (mode ${approval.mode})`);
   reporter.success(`token: ${approvalPath(cwd, hash)}`);
@@ -1040,11 +868,8 @@ function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noCol
   );
   const graphArg = flag(args, "--graph");
   if (!graphArg) fail(USAGE, 2);
-  const requested = (flag(args, "--workspace") ?? "auto") as WorkspaceFlag;
-  if (!WORKSPACE_MODES.includes(requested)) fail(USAGE, 2);
-
-  const plan = resolvePlan(cwd, graphArg, requested);
-  const { graph, loaded, base, mode } = plan;
+  const plan = resolvePlan(cwd, graphArg);
+  const { graph, loaded, base } = plan;
   const gid = plan.goalId;
   const errs = plan.errors;
   if (errs.length > 0) {
@@ -1111,9 +936,9 @@ function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noCol
         // first to be undone last.
         const id = plan.idByAlias.get(node.alias) as string;
         undo.branch(`sddx/${id}`);
-        if (mode === "worktree") undo.worktree(join(worktreesDir(mainRepoRoot), id));
+        undo.worktree(join(worktreesDir(mainRepoRoot), id));
         undo.taskState(id);
-        const created0 = createRootTask(cwd, spec, src, mode, reporter, base.sha);
+        const created0 = createRootTask(cwd, spec, src, reporter, base.sha);
         aliasToId.set(node.alias, created0.id);
         created.push(created0.id);
         reporter.success(created0.line);
@@ -1121,12 +946,12 @@ function cmdGraphCreate(cwd: string, args: string[], format: OutputFormat, noCol
         const parentIds = node.depends_on.map((alias) => aliasToId.get(alias) as string);
         const id = plan.idByAlias.get(node.alias) as string;
         undo.taskState(id);
-        createDeferredTask(cwd, spec, src, mode, parentIds);
+        createDeferredTask(cwd, spec, src, parentIds);
         aliasToId.set(node.alias, id);
         created.push(id);
         deps[id] = parentIds;
         reporter.success(
-          `created ${id} phase=PLAN depends_on=${parentIds.join(",")} workspace=deferred(${mode})`,
+          `created ${id} phase=PLAN depends_on=${parentIds.join(",")} workspace=deferred(worktree)`,
         );
       }
     }
@@ -1249,7 +1074,7 @@ function cmdVerify(cwd: string, args: string[], format: OutputFormat, noColor: b
       );
     } else if (integration.reason === "no-branch") {
       reporter.error(
-        `warning: ${id} belongs to goal (run branch ${integration.runBranch}) but was created with --workspace none — it has no branch and can never be merged into the run branch`,
+        `warning: ${id} belongs to goal (run branch ${integration.runBranch}) but records no branch of its own — it can never be merged into the run branch. This shape is only produced by sddx 3.x in-place mode; see docs/how-to/migrate-to-v4.md`,
         { stream: "stdout" },
       );
     }
@@ -1328,46 +1153,6 @@ function cmdCleanup(cwd: string, args: string[], format: OutputFormat, noColor: 
   deleteBranch(cwd, branch);
   reporter.success(`deleted merged branch ${branch}`);
   reporter.finish({ id, branch, removed: true, viaRunBranch: false });
-}
-
-function cmdGoalCreate(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
-  const reporter = makeReporter("goal create", format, noColor);
-  const goalSentence = flag(args, "--goal");
-  const tasksArg = flag(args, "--tasks");
-  if (!goalSentence || !tasksArg) fail(USAGE, 2);
-  const taskIds = tasksArg
-    .split(",")
-    .map((s) => s.trim())
-    .filter((s) => s !== "");
-  // Same overlap ⟹ ordered gate as `graph create`, over the listed tasks' own
-  // depends_on/scope — so the single-task/`--solo` path can't register a goal
-  // whose concurrent tasks would collide.
-  const scheduleErrs = validateSchedule(
-    taskIds.map((tid) => {
-      const t = resolveTaskState(cwd, tid);
-      return { id: tid, dependsOn: t ? dependsOnList(t) : [], scope: t?.scope ?? [] };
-    }),
-  );
-  if (scheduleErrs.length > 0) {
-    failWith(scheduleErrs.map((e) => `goal error: ${e}`));
-  }
-  const gid = goalId(goalSentence);
-  if (existsSync(goalPath(cwd, gid))) fail(`goal ${gid} already exists at ${goalPath(cwd, gid)}`);
-  const base = resolveBaseRef(cwd);
-  if (base.source === "HEAD") reporter.success("no origin remote — forking from local HEAD");
-  const runBranch = runBranchName(gid);
-  createBranchAt(cwd, runBranch, base.sha);
-  reporter.success(`created run branch ${runBranch} at ${base.sha}`);
-  // NOTE: this run branch starts empty — any of the listed tasks already DONE
-  // before this goal existed do not retroactively appear merged. That's a
-  // real, narrow limitation of grouping pre-existing tasks after the fact;
-  // the flagship `/sddx:run` path (`graph create`) never hits it, since its
-  // run branch always exists before any task's own worktree does.
-  // `.sddx/goals/<id>.json` is deliberately plain, never-committed local
-  // coordination state (like `.sddx/sweep.json`) — see `runbranch.ts`.
-  const g = createGoal(cwd, goalSentence, taskIds, { id: gid, runBranch, baseSha: base.sha });
-  reporter.success(`created goal ${g.id} tasks=[${g.task_ids.join(", ")}] run_branch=${runBranch}`);
-  reporter.finish({ id: g.id, taskIds: g.task_ids, runBranch, baseSha: base.sha });
 }
 
 function cmdPrCreate(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
@@ -1504,7 +1289,6 @@ function cmdConfigShow(cwd: string, args: string[], format: OutputFormat, noColo
           .join(",")
       : "(none)";
   const lines = [
-    `workspace_mode: ${cfg.workspace_mode}`,
     `test_globs: ${cfg.test_globs || "(empty)"}`,
     `exempt_globs: ${cfg.exempt_globs || "(empty)"}`,
     `max_iterations_default: ${cfg.max_iterations_default}`,
@@ -1514,7 +1298,6 @@ function cmdConfigShow(cwd: string, args: string[], format: OutputFormat, noColo
     `stuck_threshold: ${cfg.stuck_threshold}`,
     `pr_host: ${cfg.pr_host ?? "(auto-detected from origin remote)"}`,
     `agent_model: ${agentModel}`,
-    `prefer_solo: ${cfg.prefer_solo}`,
     `verbose: ${cfg.verbose}`,
     `interaction_mode: ${cfg.interaction_mode}`,
     `auto_max_tasks: ${cfg.auto_max_tasks}`,
@@ -1723,10 +1506,28 @@ function main(argv: string[]): void {
     printLine(USAGE);
     return;
   }
+  // Before dispatch, so every command answers the same way — a removed flag is
+  // refused wherever it is typed, not only on the commands that once took it.
+  rejectRemovedFlags(rest);
   try {
+    // Removed in 4.0. Named rather than falling through to "unknown command",
+    // because a user hitting this has a working muscle memory and needs the
+    // replacement, not a usage dump. See docs/how-to/migrate-to-v4.md.
     if (cmd === "task" && rest[0] === "create") {
-      cmdTaskCreate(cwd, rest.slice(1), format, noColor);
-      return;
+      failWith(
+        [
+          "`sddx task create` was removed: it produced a task with no goal and no run branch, outside the canonical lifecycle.",
+          "Use a one-node graph instead — a single task is a one-node run:",
+          "",
+          "  goal: <one sentence>",
+          "  tasks:",
+          "    - alias: <name>",
+          "      spec: <path-to-spec.yaml>",
+          "",
+          "then: sddx graph create --graph <path-to-graph.yaml>",
+        ],
+        2,
+      );
     }
     if (cmd === "task" && rest[0] === "phase") {
       cmdTaskPhase(cwd, rest.slice(1), format, noColor);
@@ -1822,9 +1623,15 @@ function main(argv: string[]): void {
       reporter.finish({ receipts: res.receipts, findings: [], notes: res.notes });
       return;
     }
+    // Removed in 4.0 — see the `task create` note above.
     if (cmd === "goal" && rest[0] === "create") {
-      cmdGoalCreate(cwd, rest.slice(1), format, noColor);
-      return;
+      failWith(
+        [
+          "`sddx goal create` was removed: it assembled already-created tasks into a goal after execution had begun, producing a run branch that did not exist when those tasks started.",
+          "Goals are materialized before their tasks. `sddx graph create --graph <path>` creates the run branch first, then every task's workspace, and registers the goal with its dependency edges atomically.",
+        ],
+        2,
+      );
     }
     if (cmd === "goal" && rest[0] === "show") {
       currentCommand = "goal show";

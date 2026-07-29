@@ -16,7 +16,7 @@ bash examples/09-config-tuning/setup.sh
 
 ```sh
 ./sddx config show | grep -q "^stuck_threshold: 3$"
-./sddx config show | grep -q "^workspace_mode: auto$"
+./sddx config show | grep -q "^oracle_runs_default: 1$"
 ```
 
 ## Override via `.sddx/config.json`
@@ -25,12 +25,12 @@ bash examples/09-config-tuning/setup.sh
 mkdir -p .sddx
 cat > .sddx/config.json <<'EOF'
 {
-  "workspace_mode": "branch",
+  "oracle_runs_default": 3,
   "stuck_threshold": 5,
   "verbose": true
 }
 EOF
-./sddx config show | grep -q "^workspace_mode: branch$"
+./sddx config show | grep -q "^oracle_runs_default: 3$"
 ./sddx config show | grep -q "^stuck_threshold: 5$"
 ```
 
@@ -53,16 +53,39 @@ SDDX_STUCK_THRESHOLD=7 ./sddx config show | grep -q "^stuck_threshold: 7$"
 ```sh
 cat > .sddx/config.json <<'EOF'
 {
-  "workspace_mode": "sideways",
+  "stuck_threshold": -2,
   "totally_unknown_key": true
 }
 EOF
 ```
 
 ```sh
-./sddx config validate 2>&1 | grep -q 'warning: "workspace_mode" must be one of'
+./sddx config validate 2>&1 | grep -q 'warning: "stuck_threshold" must be a positive integer'
 ./sddx config validate 2>&1 | grep -q 'warning: unrecognized key "totally_unknown_key"'
 ```
+
+## A removed key is named as removed, not as a typo
+
+`workspace_mode` and `prefer_solo` were real settings until 4.0. A key that
+used to work and silently stopped is a different problem from a misspelling, so
+validation says which one it is:
+
+```sh
+cat > .sddx/config.json <<'EOF'
+{
+  "workspace_mode": "branch",
+  "prefer_solo": true
+}
+EOF
+```
+
+```sh
+./sddx config validate 2>&1 | grep -q '"workspace_mode" removed in sddx 4.0'
+./sddx config validate 2>&1 | grep -q '"prefer_solo" removed in sddx 4.0'
+```
+
+Neither changes how anything runs — worktree is the only workspace strategy,
+and a trivial task is a one-node run. Delete them.
 
 ## Unparseable JSON is the one case that fails outright
 

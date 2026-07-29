@@ -19,7 +19,11 @@ describe("audit --ci", () => {
     const spec = parseSpec(
       "task: ci fixture\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: x\n",
     ).spec!;
-    const t = createTask(cwd, spec, "s", { mode: "none", branch: null, base_sha: headSha(cwd) });
+    const t = createTask(cwd, spec, "s", {
+      mode: "worktree",
+      branch: null,
+      base_sha: headSha(cwd),
+    });
     // forge DONE without a receipt — exactly what the gate must catch
     t.phase = "DONE";
     writeTask(cwd, t);
@@ -35,7 +39,7 @@ describe("audit --ci", () => {
       'task: ci ok\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\n',
     ).spec!;
     let t = createTask(cwd, spec, ".sddx/specs/x.yaml", {
-      mode: "none",
+      mode: "worktree",
       branch: null,
       base_sha: headSha(cwd),
     });

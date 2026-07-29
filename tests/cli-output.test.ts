@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fixtureRepo } from "./fixtures";
-import { fakeRedCheck, repoRoot } from "./helpers";
+import { createRun, fakeRedCheck, repoRoot } from "./helpers";
 
 const CLI_SRC = join(repoRoot, "src/cli.ts");
 
@@ -19,18 +19,49 @@ oracle:
   run: "exit 0"
 `;
 
-/** Creates, red/green/verify-transitions, and verifies one task in `--no-branch`
- * mode; returns its id. Mirrors the create→RED→GREEN→VERIFY→verify pipeline
- * `cli.test.ts` already exercises, reused here to reach a real receipt quickly. */
+/** Creates a one-node run and drives its task to a real receipt. Mirrors the
+ * create→RED→GREEN→VERIFY→verify pipeline `cli.test.ts` already exercises,
+ * reused here to reach a receipt quickly. Returns the task id; the task lives
+ * in its own worktree, so callers that need the path derive it from the id. */
+/** Where a task's receipt lives: inside its own worktree. */
+const worktreeOf = (cwd: string, id: string) => join(cwd, ".sddx-worktrees", id);
+const receiptOf = (cwd: string, id: string) =>
+  join(worktreeOf(cwd, id), ".sddx", "receipts", `${id}.json`);
+
+/** One task in its own one-node run, phases driven from inside its worktree. */
+function makeTask(cwd: string, sentence: string, seq: number): { id: string; wt: string } {
+  const { taskIds } = createRun(
+    cwd,
+    cli,
+    `output demo ${seq}`,
+    [{ alias: "only", spec: sentence }],
+    {
+      graphName: `graph-${seq}.yaml`,
+    },
+  );
+  const id = taskIds[0] as string;
+  return { id, wt: join(cwd, ".sddx-worktrees", id) };
+}
+
+let runSeq = 0;
 function createAndVerify(cwd: string, sentence = SPEC): string {
-  writeFileSync(join(cwd, "spec.yaml"), sentence);
-  const created = cli(cwd, "task", "create", "--spec", "spec.yaml", "--no-branch");
-  const id = /created (\S+)/.exec(created.stdout)?.[1] as string;
-  cli(cwd, "task", "phase", id, "RED", "--test-exit", "1");
-  cli(cwd, "task", "phase", id, "GREEN", "--test-exit", "0");
-  cli(cwd, "task", "phase", id, "VERIFY");
-  fakeRedCheck(cwd, id);
-  const v = cli(cwd, "verify", id);
+  // A distinct goal per call: two runs in one repo would otherwise collide on
+  // the run branch, which is derived from the goal sentence.
+  runSeq += 1;
+  const { taskIds } = createRun(
+    cwd,
+    cli,
+    `produce a receipt ${runSeq}`,
+    [{ alias: "only", spec: sentence }],
+    { graphName: `graph-${runSeq}.yaml` },
+  );
+  const id = taskIds[0] as string;
+  const wt = join(cwd, ".sddx-worktrees", id);
+  cli(wt, "task", "phase", id, "RED", "--test-exit", "1");
+  cli(wt, "task", "phase", id, "GREEN", "--test-exit", "0");
+  cli(wt, "task", "phase", id, "VERIFY");
+  fakeRedCheck(wt, id);
+  const v = cli(wt, "verify", id);
   if (v.status !== 0) throw new Error(`verify failed: ${v.stderr}${v.stdout}`);
   return id;
 }
@@ -73,34 +104,26 @@ describe("sddx board --output json", () => {
 describe("sddx verify --output terminal vs --output json", () => {
   test("same verdict, exit code, and receipt presence/shape regardless of --output", () => {
     const cwdA = fixtureRepo();
-    writeFileSync(join(cwdA, "spec.yaml"), SPEC);
-    const createdA = cli(cwdA, "task", "create", "--spec", "spec.yaml", "--no-branch");
-    const idA = /created (\S+)/.exec(createdA.stdout)?.[1] as string;
-    cli(cwdA, "task", "phase", idA, "RED", "--test-exit", "1");
-    cli(cwdA, "task", "phase", idA, "GREEN", "--test-exit", "0");
-    cli(cwdA, "task", "phase", idA, "VERIFY");
-    fakeRedCheck(cwdA, idA);
-    const terminalRun = cli(cwdA, "verify", idA);
+    const { id: idA, wt: wtA } = makeTask(cwdA, SPEC, 1);
+    cli(wtA, "task", "phase", idA, "RED", "--test-exit", "1");
+    cli(wtA, "task", "phase", idA, "GREEN", "--test-exit", "0");
+    cli(wtA, "task", "phase", idA, "VERIFY");
+    fakeRedCheck(wtA, idA);
+    const terminalRun = cli(wtA, "verify", idA);
     expect(terminalRun.status).toBe(0);
-    const receiptA = JSON.parse(
-      readFileSync(join(cwdA, ".sddx", "receipts", `${idA}.json`), "utf8"),
-    );
+    const receiptA = JSON.parse(readFileSync(receiptOf(cwdA, idA), "utf8"));
 
     const cwdB = fixtureRepo();
-    writeFileSync(join(cwdB, "spec.yaml"), SPEC);
-    const createdB = cli(cwdB, "task", "create", "--spec", "spec.yaml", "--no-branch");
-    const idB = /created (\S+)/.exec(createdB.stdout)?.[1] as string;
-    cli(cwdB, "task", "phase", idB, "RED", "--test-exit", "1");
-    cli(cwdB, "task", "phase", idB, "GREEN", "--test-exit", "0");
-    cli(cwdB, "task", "phase", idB, "VERIFY");
-    fakeRedCheck(cwdB, idB);
-    const jsonRun = cli(cwdB, "verify", idB, "--output", "json");
+    const { id: idB, wt: wtB } = makeTask(cwdB, SPEC, 1);
+    cli(wtB, "task", "phase", idB, "RED", "--test-exit", "1");
+    cli(wtB, "task", "phase", idB, "GREEN", "--test-exit", "0");
+    cli(wtB, "task", "phase", idB, "VERIFY");
+    fakeRedCheck(wtB, idB);
+    const jsonRun = cli(wtB, "verify", idB, "--output", "json");
     expect(jsonRun.status).toBe(0);
     const envelope = JSON.parse(jsonRun.stdout);
     expect(envelope.data.verdict).toBe("pass");
-    const receiptB = JSON.parse(
-      readFileSync(join(cwdB, ".sddx", "receipts", `${idB}.json`), "utf8"),
-    );
+    const receiptB = JSON.parse(readFileSync(receiptOf(cwdB, idB), "utf8"));
 
     // Two independently-created repos never share a base/tree SHA or timestamp —
     // what must match is the semantic outcome: same exit code, same verdict,
@@ -115,33 +138,29 @@ describe("sddx verify --output terminal vs --output json", () => {
     const failSpec = `task: failing demo\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 1"\n`;
 
     const cwdA = fixtureRepo();
-    writeFileSync(join(cwdA, "spec.yaml"), failSpec);
-    const createdA = cli(cwdA, "task", "create", "--spec", "spec.yaml", "--no-branch");
-    const idA = /created (\S+)/.exec(createdA.stdout)?.[1] as string;
-    cli(cwdA, "task", "phase", idA, "RED", "--test-exit", "1");
-    cli(cwdA, "task", "phase", idA, "GREEN", "--test-exit", "0");
-    cli(cwdA, "task", "phase", idA, "VERIFY");
-    fakeRedCheck(cwdA, idA);
-    const terminalRun = cli(cwdA, "verify", idA);
+    const { id: idA, wt: wtA } = makeTask(cwdA, failSpec, 1);
+    cli(wtA, "task", "phase", idA, "RED", "--test-exit", "1");
+    cli(wtA, "task", "phase", idA, "GREEN", "--test-exit", "0");
+    cli(wtA, "task", "phase", idA, "VERIFY");
+    fakeRedCheck(wtA, idA);
+    const terminalRun = cli(wtA, "verify", idA);
     expect(terminalRun.status).toBe(1);
 
     const cwdB = fixtureRepo();
-    writeFileSync(join(cwdB, "spec.yaml"), failSpec);
-    const createdB = cli(cwdB, "task", "create", "--spec", "spec.yaml", "--no-branch");
-    const idB = /created (\S+)/.exec(createdB.stdout)?.[1] as string;
-    cli(cwdB, "task", "phase", idB, "RED", "--test-exit", "1");
-    cli(cwdB, "task", "phase", idB, "GREEN", "--test-exit", "0");
-    cli(cwdB, "task", "phase", idB, "VERIFY");
-    fakeRedCheck(cwdB, idB);
-    const jsonRun = cli(cwdB, "verify", idB, "--output", "json");
+    const { id: idB, wt: wtB } = makeTask(cwdB, failSpec, 1);
+    cli(wtB, "task", "phase", idB, "RED", "--test-exit", "1");
+    cli(wtB, "task", "phase", idB, "GREEN", "--test-exit", "0");
+    cli(wtB, "task", "phase", idB, "VERIFY");
+    fakeRedCheck(wtB, idB);
+    const jsonRun = cli(wtB, "verify", idB, "--output", "json");
     expect(jsonRun.status).toBe(1);
     const envelope = JSON.parse(jsonRun.stdout);
     expect(envelope.status).toBe("error");
     expect(envelope.data.verdict).toBe("fail");
     expect(envelope.data.receiptPath).toBeNull();
 
-    expect(existsSync(join(cwdA, ".sddx", "receipts", `${idA}.json`))).toBe(false);
-    expect(existsSync(join(cwdB, ".sddx", "receipts", `${idB}.json`))).toBe(false);
+    expect(existsSync(receiptOf(cwdA, idA))).toBe(false);
+    expect(existsSync(receiptOf(cwdB, idB))).toBe(false);
   });
 });
 
@@ -149,16 +168,18 @@ describe("sddx audit --output terminal vs --output json", () => {
   test("tampered chain exits 1 under both formats; JSON names the offending path", () => {
     const cwd = fixtureRepo();
     const id = createAndVerify(cwd);
-    const receiptPath = join(cwd, ".sddx", "receipts", `${id}.json`);
+    const receiptPath = receiptOf(cwd, id);
     chmodSync(receiptPath, 0o644);
     const original = JSON.parse(readFileSync(receiptPath, "utf8"));
     writeFileSync(receiptPath, JSON.stringify({ ...original, exit_code: 99 }, null, 2));
 
-    const terminalRun = cli(cwd, "audit");
+    // audit reads the receipt chain where it lives — inside the task's worktree
+    const wt = worktreeOf(cwd, id);
+    const terminalRun = cli(wt, "audit");
     expect(terminalRun.status).toBe(1);
     expect(terminalRun.stderr).toContain(`${id}.json`);
 
-    const jsonRun = cli(cwd, "audit", "--output", "json");
+    const jsonRun = cli(wt, "audit", "--output", "json");
     expect(jsonRun.status).toBe(1);
     const envelope = JSON.parse(jsonRun.stdout);
     expect(envelope.status).toBe("error");

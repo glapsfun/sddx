@@ -1,8 +1,10 @@
 # Example: a single task, start to finish
 
-The base loop for one task with no worktree — `sddx task create --workspace
-none`, the same primitive `--solo`/`/sddx:quick` drive inside Claude Code.
-Every other example builds on this one.
+**A single task is a one-node run.** There is no separate small-task mode — the
+same graph, run branch, worktree, oracle, and receipt apply whether the plan has
+one node or ten. This example walks that one-node run by hand, one command at a
+time; it is what `/sddx:run` drives for you inside Claude Code. Every other
+example builds on it.
 
 ## Setup
 
@@ -17,6 +19,14 @@ running anything below. Installed sddx globally instead (see
 [install-sddx.md](../../docs/how-to/install-sddx.md))? Use plain `sddx`
 throughout.
 
+```sh
+SDDX="$PWD/sddx"
+ROOT="$PWD"
+```
+
+`$SDDX` is an absolute path because the TDD loop below runs inside the task's
+own worktree, where the `./sddx` shim at the repo root is not on the path.
+
 ## Write the spec
 
 ```sh
@@ -25,6 +35,9 @@ task: health check returns ok
 context: []
 success_criteria:
   - "bun test tests/health.test.ts exits 0"
+scope:
+  - "health.ts"
+  - "tests/**"
 oracle:
   type: command
   run: "bun test tests/health.test.ts"
@@ -35,16 +48,57 @@ out_of_scope: []
 EOF
 ```
 
-## Register the task
+`scope` is this task's write lane. Declaring it is what lets the graph gate
+prove tasks can run concurrently without colliding.
+
+## Write the graph
+
+Even one task needs a goal, because the goal is what owns the run branch:
 
 ```sh
-OUT=$(./sddx task create --spec spec.yaml --workspace none)
-echo "$OUT"
-ID=$(echo "$OUT" | awk '{print $2}')
+cat > graph.yaml <<'EOF'
+schema_version: "1.0"
+interaction_mode: human
+goal: health endpoint reports ok
+tasks:
+  - alias: health
+    spec: spec.yaml
+EOF
 ```
 
-`task create` prints `created <id> phase=PLAN ...`; `$ID` carries the id
-(`YYYYMMDD-<slug>`) into every command below.
+## Check the plan without creating anything
+
+```sh
+"$SDDX" graph create --graph graph.yaml --dry-run
+```
+
+`--dry-run` validates every spec, resolves the base SHA, and reports exactly
+what a real create would produce — writing nothing. A missing oracle, an id
+collision, or a scope overlap the graph does not order is refused here.
+
+## Approve and create the run
+
+```sh
+"$SDDX" graph approve --graph graph.yaml
+```
+
+```sh
+OUT=$("$SDDX" graph create --graph graph.yaml)
+echo "$OUT"
+ID=$(echo "$OUT" | grep -o 'created [0-9]\{8\}-[a-z0-9-]*' | head -1 | awk '{print $2}')
+WT="$ROOT/.sddx-worktrees/$ID"
+```
+
+That one command created the run branch, the task's `sddx/<id>` branch, its
+worktree, and the goal record — atomically. If any step had failed, none of it
+would exist.
+
+```sh
+cd "$WT"
+```
+
+The rest of the loop runs **inside the worktree**. Your own checkout is
+untouched and stays writable throughout.
 
 ## Write the failing test first
 
@@ -69,7 +123,7 @@ bun test tests/health.test.ts
 ## Move to RED, with real proof
 
 ```sh
-./sddx task phase "$ID" RED --test-exit 1
+"$SDDX" task phase "$ID" RED --test-exit 1
 ```
 
 `--test-exit` is checked, not trusted — a `0` here is refused. Now record
@@ -78,7 +132,7 @@ implementation still doesn't exist — `sddx verify` later refuses without
 this:
 
 ```sh
-./sddx red-check "$ID"
+"$SDDX" red-check "$ID"
 ```
 
 ## Implement, watch it go green
@@ -96,32 +150,43 @@ bun test tests/health.test.ts
 ```
 
 ```sh
-./sddx task phase "$ID" GREEN --test-exit 0
+"$SDDX" task phase "$ID" GREEN --test-exit 0
 ```
 
 ## Verify
 
 ```sh
-./sddx task phase "$ID" VERIFY
+"$SDDX" task phase "$ID" VERIFY
 ```
 
 ```sh
-./sddx verify "$ID"
+"$SDDX" verify "$ID"
 ```
 
-On success this writes `.sddx/receipts/$ID.json` and makes one atomic commit
-containing `health.ts`, `tests/health.test.ts`, `spec.yaml`, and the receipt.
+On success this writes `.sddx/receipts/$ID.json`, makes one atomic commit
+containing `health.ts`, `tests/health.test.ts`, the spec, and the receipt, and
+merges the task into its run branch.
 
 ## Check the board and the chain
 
 ```sh
-./sddx board
+"$SDDX" board
 ```
 
 ```sh
-./sddx audit
+"$SDDX" audit
 ```
 
 `audit` re-walks the receipt chain and exits 0 on `chain intact`. See
 [examples/07-receipts-and-audit](../07-receipts-and-audit/) for what happens
 when it isn't.
+
+## What was NOT touched
+
+```sh
+cd "$ROOT"
+git rev-parse --abbrev-ref HEAD
+```
+
+Still `main`. A run ends on its own branch with a receipt chain — merging into
+your target branch is always your decision, in every mode.

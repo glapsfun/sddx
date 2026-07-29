@@ -14,7 +14,7 @@ function taskInVerify(cwd: string, oracleRun: string) {
     `task: fixture task\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "${oracleRun}"\n`,
   ).spec!;
   let t = createTask(cwd, spec, ".sddx/specs/x.yaml", {
-    mode: "none",
+    mode: "worktree",
     branch: null,
     base_sha: headSha(cwd),
   });
@@ -71,7 +71,11 @@ describe("verifyTask", () => {
     const spec = parseSpec(
       "task: t2\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: x\n",
     ).spec!;
-    const t = createTask(cwd, spec, "s", { mode: "none", branch: null, base_sha: headSha(cwd) });
+    const t = createTask(cwd, spec, "s", {
+      mode: "worktree",
+      branch: null,
+      base_sha: headSha(cwd),
+    });
     writeTask(cwd, t);
     expect(() => verifyTask(cwd, t.id, { pluginVersion: "0" })).toThrow(/VERIFY/);
   });

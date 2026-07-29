@@ -7,16 +7,14 @@ the current directory.
 
 ```
 usage:
-  sddx task create --spec <path> [--workspace auto|worktree|branch|none] [--no-branch]
   sddx task phase <id> <PHASE> [--test-exit <n>]
   sddx task allow <id> <path>
   sddx task show <id>
   sddx red-check <id>
   sddx verify <id> [--model <m>] [--harness <h>]
-  sddx goal create --goal <sentence> --tasks <id1,id2,...>
   sddx goal show <id>
-  sddx graph create --graph <path> [--workspace auto|worktree|branch|none] [--dry-run]
-  sddx graph approve --graph <path> [--workspace auto|worktree|branch|none]
+  sddx graph create --graph <path> [--dry-run]
+  sddx graph approve --graph <path>
   sddx graph regenerate --graph <path>
   sddx graph cancel --graph <path>
   sddx pr create --goal <goal-id> [--title <title>]
@@ -80,34 +78,17 @@ outcome is displayed.
 (never overwriting an existing file — a numeric suffix is appended instead),
 printing both paths as a final line.
 
-## sddx task create
+## Creating tasks
 
-```sh
-sddx task create --spec <path> [--workspace auto|worktree|branch|none] [--no-branch]
-```
+There is no `sddx task create`. **`sddx graph create` is the only creation
+surface**, and a single task is a one-node graph. Every task therefore belongs
+to a goal and forks its own worktree from that goal's run branch — there is no
+workspace strategy to choose, because worktree is the invariant.
 
-Parses the spec ([spec-reference.md](spec-reference.md)) and registers the
-task. A spec that fails validation prints one `spec error: …` line per problem
-and exits 1 — a spec without an oracle never becomes a task.
-
-`--workspace` (default `auto`):
-
-- `auto` — worktree when possible; prints `submodules detected → branch mode`
-  or `git worktree unavailable → branch mode` when downgrading. **`graph create`
-  does not downgrade**: there `auto` means worktree, and a failed worktree
-  precondition refuses the run rather than silently moving it into a weaker
-  isolation model. The downgrade survives only on this legacy `task create`
-  path, which `retire-alternate-flows` removes.
-- `worktree` — fresh worktree at `.sddx-worktrees/<id>` on branch `sddx/<id>`,
-  forked from `origin/HEAD` (falls back to local HEAD with a notice when there
-  is no origin). The spec is copied to `.sddx/specs/<id>.yaml` *inside the
-  worktree*, and the task file lives in the worktree's own `.sddx/tasks/`.
-- `branch` — creates and switches to `sddx/<id>` in the current checkout.
-- `none` — run in place; no branch, no worktree. `--no-branch` is shorthand
-  for `--workspace none`.
-
-Output: `created <id> phase=PLAN …` with the worktree path, branch, and base
-SHA as applicable. The id is `YYYYMMDD-<slug>`.
+`sddx task create` and `sddx goal create` were removed in 4.0. Both still
+resolve as commands and exit non-zero naming their replacement, rather than
+falling through to a usage dump. See
+[migrate-to-v4.md](../how-to/migrate-to-v4.md).
 
 ## sddx task phase
 
@@ -201,24 +182,22 @@ fails when a task marked `DONE` has no receipt (tamper-only CI gate — see
 to stderr and exits 1 on any finding — CI-friendly. Clean run:
 `audit: <n> receipt(s) verified, chain intact`.
 
-## sddx goal create
+## Goal records
 
-```sh
-sddx goal create --goal <sentence> --tasks <id1,id2,...>
-```
+Goals are created by `graph create`, which registers the goal and its run
+branch (`sddx/run-<goal-id>`, forked from the resolved `origin/HEAD`) **before**
+any task workspace exists. `sddx pr create --goal <goal-id>` later reads that
+record to know what to push.
 
-Persists the goal record listing the given task ids, and creates
-its run branch (`sddx/run-<goal-id>`, forked from the resolved `origin/HEAD`)
-— the record `sddx pr create --goal <goal-id>` later reads to know what to
-push. Refuses if any listed task id doesn't exist, or if the derived goal id
-already exists. `/sddx:run` calls this automatically (via `graph create`,
-which creates the run branch *before* any task starts); invoke it directly
-only when assembling a goal from tasks created outside `/sddx:run` — in that
-case the run branch starts empty, since tasks already `DONE` before the goal
-existed don't retroactively appear merged. Prints
-`created goal <id> tasks=[...] run_branch=<branch>`. The goal file itself is
-plain, never-committed local state (like `.sddx/sweep.json`), so it stays
-visible across branch switches regardless of workspace mode.
+The removed `sddx goal create` assembled already-created tasks into a goal
+*after* execution had begun, producing a run branch that did not exist when
+those tasks started and whose base could not describe them — so tasks already
+`DONE` before the goal existed never retroactively appeared merged. `graph
+create` cannot hit that: its run branch always exists before any task's
+workspace does.
+
+The goal record itself is plain, never-committed local state (like
+`.sddx/sweep.json`), so it stays visible across branch switches.
 
 ## sddx goal show
 
@@ -233,7 +212,7 @@ Prints the goal state file as JSON — task ids, run branch, base SHA, the
 ## sddx graph create
 
 ```sh
-sddx graph create --graph <path> [--workspace auto|worktree|branch|none] [--dry-run]
+sddx graph create --graph <path> [--dry-run]
 ```
 
 The atomic gate between a draft plan and a materialized one. Validates every
@@ -244,10 +223,9 @@ goal's run branch, every task file, and `.sddx/goals/<goal-id>.json` — or writ
 
 `--dry-run` runs the identical resolve-and-validate path and writes nothing,
 printing the goal, node list with each oracle and scope, dependency edges,
-topological execution order, the **effective workspace mode** (downgrades
-applied), the **resolved base SHA**, and the validation verdict. This is the
-approval screen: those last three are decided inside `graph create` and are
-absent from the drafts. A second `--dry-run` of a revised plan prints only what
+topological execution order, the worktree count, the **resolved base SHA**, and
+the validation verdict. This is the approval screen: the base SHA and node set
+are decided inside `graph create` and are absent from the drafts. A second `--dry-run` of a revised plan prints only what
 changed — over every node's spec **and** over the Goal Brief header, so an
 edited constraint, acceptance criterion, or unresolved item is never reported as
 "none".
@@ -261,7 +239,7 @@ within its bounds; see
 ## sddx graph approve
 
 ```sh
-sddx graph approve --graph <path> [--workspace auto|worktree|branch|none]
+sddx graph approve --graph <path>
 ```
 
 Records approval of the plan **as it currently stands on disk**, writing
@@ -274,11 +252,11 @@ so any subsequent edit — including a semantically-neutral reorder — invalida
 the token and re-arms the gate. Tokens are content-addressed, so a plan
 regenerated byte-identically reuses its approval.
 
-A token records the **workspace strategy** it was approved under, so pass the
-same `--workspace` you intend to create with. Approving a `worktree` render does
-not authorize `--workspace none`, which would move every task into your live
-checkout instead of an isolated worktree; `graph create` exits 3 on the mismatch
-rather than silently dropping the isolation you approved.
+A token records the **workspace strategy** it was approved under. Worktree is
+now the only strategy, so this can only mismatch for a token written by an older
+sddx under `branch` or `none` — which must not authorize a canonical run it was
+never rendered for. `graph create` refuses on the mismatch and names it; re-render
+and re-approve the plan.
 
 A token always records `mode: human` — approving *is* the deliberate act, so a
 receipt reading `mode: auto` always means no human saw that plan. An autonomy
@@ -479,8 +457,8 @@ run `sddx config validate` to see why). `pr_host` prints
 means inspecting the git remote (see [sddx pr create](#sddx-pr-create)) — this
 command doesn't shell out to git just to show config.
 
-`/sddx:run` and `/sddx:quick` call `config show --output json` once at the
-start of their flow and use `.data.agent_model` / `.data.prefer_solo` from the
+`/sddx:run` calls `config show --output json` once at the
+start of its flow and uses `.data.agent_model` from the
 result — advisory only, since no hook enforces a skill's own instructions.
 
 When `verbose` is true, an extra `resolution detail` block follows the
@@ -504,9 +482,12 @@ sddx config validate
 Checks `.sddx/config.json` against the known schema and reports, as warnings
 (exit 0): unrecognized top-level keys, values that fail their key's domain
 rule (not just a `typeof` mismatch — `stuck_threshold`/`oracle_runs_default`/
-`max_iterations_default` must be positive integers, `workspace_mode` must be
-one of `auto|worktree|branch|none`, `pr_host` one of `gh|glab`), and malformed
-`agent_model` segments. Missing `.sddx/config.json` is not an
+`max_iterations_default` must be positive integers, `interaction_mode` must be
+one of `human|auto`, `pr_host` one of `gh|glab`), and malformed
+`agent_model` segments. Keys removed in 4.0 (`workspace_mode`, `prefer_solo`)
+are reported **as removed**, naming the replacement — not as an unrecognized
+typo, since a setting that used to work and silently stopped is a different
+problem from a misspelling. Missing `.sddx/config.json` is not an
 error — it just means built-in defaults apply. Unparseable JSON (or JSON
 that isn't an object) is the one case that fails loudly (exit 1): that's a
 broken file, not a schema mismatch.

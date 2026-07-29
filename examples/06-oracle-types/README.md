@@ -35,17 +35,32 @@ e2e/login.spec.ts` — this example substitutes a dependency-free stand-in so
 it runs fully offline; the mechanics below are identical either way, since
 `type` never changes how `run` executes.)
 
+Each is its own one-node run, so the three stay independent:
+
 ```sh
+SDDX="$PWD/sddx"
 for TYPE in command test-suite browser; do
-  OUT=$(./sddx task create --spec "spec-$TYPE.yaml" --workspace none)
-  ID=$(echo "$OUT" | awk '{print $2}')
+  cat > "graph-$TYPE.yaml" <<EOF
+schema_version: "1.0"
+interaction_mode: human
+goal: demonstrate the $TYPE oracle
+tasks:
+  - alias: demo
+    spec: spec-$TYPE.yaml
+EOF
+  "$SDDX" graph approve --graph "graph-$TYPE.yaml"
+  OUT=$("$SDDX" graph create --graph "graph-$TYPE.yaml")
+  ID=$(echo "$OUT" | grep -o 'created [0-9]\{8\}-[a-z0-9-]*' | head -1 | awk '{print $2}')
   echo "$ID" > "id-$TYPE.txt"
-  ./sddx task phase "$ID" RED --test-exit 1
-  ./sddx red-check "$ID"
+  WT="$ROOT/.sddx-worktrees/$ID"
+  cd "$WT"
+  "$SDDX" task phase "$ID" RED --test-exit 1
+  "$SDDX" red-check "$ID"
   touch "ok-$TYPE.txt"
-  ./sddx task phase "$ID" GREEN --test-exit 0
-  ./sddx task phase "$ID" VERIFY
-  ./sddx verify "$ID"
+  "$SDDX" task phase "$ID" GREEN --test-exit 0
+  "$SDDX" task phase "$ID" VERIFY
+  "$SDDX" verify "$ID"
+  cd "$ROOT"
 done
 ```
 
@@ -65,15 +80,25 @@ oracle:
   run: ""
   expect: "human approves the rendered page"
 EOF
-OUT=$(./sddx task create --spec spec-manual.yaml --workspace none)
-MANUAL_ID=$(echo "$OUT" | awk '{print $2}')
-./sddx task phase "$MANUAL_ID" RED --test-exit 1
-./sddx task phase "$MANUAL_ID" GREEN --test-exit 0
-./sddx task phase "$MANUAL_ID" VERIFY
+cat > graph-manual.yaml <<'EOF'
+schema_version: "1.0"
+interaction_mode: human
+goal: demonstrate the manual oracle
+tasks:
+  - alias: manual
+    spec: spec-manual.yaml
+EOF
+"$SDDX" graph approve --graph graph-manual.yaml
+OUT=$("$SDDX" graph create --graph graph-manual.yaml)
+MANUAL_ID=$(echo "$OUT" | grep -o 'created [0-9]\{8\}-[a-z0-9-]*' | head -1 | awk '{print $2}')
+cd "$ROOT/.sddx-worktrees/$MANUAL_ID"
+"$SDDX" task phase "$MANUAL_ID" RED --test-exit 1
+"$SDDX" task phase "$MANUAL_ID" GREEN --test-exit 0
+"$SDDX" task phase "$MANUAL_ID" VERIFY
 ```
 
 ```sh
-./sddx verify "$MANUAL_ID" 2>&1 | grep -q "manual oracles need a human decision"
+"$SDDX" verify "$MANUAL_ID" 2>&1 | grep -q "manual oracles need a human decision"
 ```
 
 The spec parser accepts `type: manual` with an empty `run` — registration

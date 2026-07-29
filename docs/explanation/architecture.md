@@ -12,7 +12,7 @@ design choice is in [design-principles.md](design-principles.md) and
 ```
 sddx/
 ├── .claude-plugin/plugin.json   # ONLY the manifest lives here (name, version, userConfig)
-├── skills/                      # /sddx:run, quick, plan, verify, board, audit
+├── skills/                      # /sddx:run, plan, verify, board, audit, pr
 ├── agents/                      # intake, orchestrator, planner, tdd-executor, verifier
 ├── hooks/hooks.json             # the five hook registrations
 ├── bin/sddx-run                 # POSIX launcher: prefer bun, fall back to node ≥18

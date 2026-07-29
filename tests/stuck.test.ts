@@ -12,7 +12,7 @@ function repoWithRedTask() {
   const spec = parseSpec(
     "task: stuck fixture\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: x\n",
   ).spec!;
-  let t = createTask(cwd, spec, "s", { mode: "none", branch: null, base_sha: headSha(cwd) });
+  let t = createTask(cwd, spec, "s", { mode: "worktree", branch: null, base_sha: headSha(cwd) });
   t = transition(t, "RED", { testExit: 1 });
   writeTask(cwd, t);
   return { cwd, id: t.id };

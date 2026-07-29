@@ -18,6 +18,11 @@ import { sha256 } from "./receipt";
 import { signPayload } from "./sign";
 import { sddxDir } from "./task";
 
+/** The only workspace strategy. Tokens still RECORD the value — a wider read
+ * type than the write type, so a token written by an older sddx under `branch`
+ * or `none` parses rather than throwing, and is then refused by name. */
+const WORKSPACE = "worktree";
+
 export interface Approval {
   plan_sha256: string;
   /** The mode the plan was approved to run under. */
@@ -360,12 +365,6 @@ export function decideGate(
   requestedMode: InteractionMode,
   ceiling: number,
   overlaps: (a: string[], b: string[]) => boolean,
-  /** The RESOLVED effective workspace strategy (downgrades applied), not the raw
-   * `--workspace` flag — the token records a resolved value, so comparing a flag
-   * against it would mismatch on every `auto`. Omit to skip the check: the hook
-   * cannot resolve it without git, and the CLI predicate enforces it either way.
-   */
-  workspaceMode?: string,
 ): GateDecision {
   const { hash, errors } = planHash(graphPath);
   const base = { hash, requestedMode, nodeCount: nodes.length };
@@ -382,7 +381,7 @@ export function decideGate(
   if (requestedMode === "auto") {
     // The header is read here rather than passed in, so the CLI predicate and
     // the PreToolUse hook cannot disagree about what the plan declared.
-    const blocker = autoRefusal(nodes, ceiling, overlaps, workspaceMode, unresolvedOf(graphPath));
+    const blocker = autoRefusal(nodes, ceiling, overlaps, unresolvedOf(graphPath));
     if (blocker) {
       return { ...base, ok: false, mode: "auto", refusal: renderBlocker(blocker), blocker };
     }
@@ -391,19 +390,16 @@ export function decideGate(
   const approval = readApproval(cwd, hash);
   if (approval) {
     // A token vouches for the plan AND the workspace strategy it was rendered
-    // under. `--workspace none` runs every task in the user's live checkout
-    // instead of an isolated worktree — approving a `worktree` render must not
-    // silently authorize that.
-    if (
-      workspaceMode !== undefined &&
-      approval.workspace_mode !== undefined &&
-      approval.workspace_mode !== workspaceMode
-    ) {
+    // under. Worktree is now the only strategy, so this can only fire for a
+    // token written by an older sddx under `branch` or `none` — which must not
+    // silently authorize a canonical run it was never rendered for. The value is
+    // read as a loose string precisely so those legacy tokens still parse.
+    if (approval.workspace_mode !== undefined && approval.workspace_mode !== WORKSPACE) {
       return {
         ...base,
         ok: false,
         mode: "human",
-        reason: `plan ${hash.slice(0, 12)} was approved for workspace "${approval.workspace_mode}", not "${workspaceMode}" — re-render and re-approve to change the workspace strategy`,
+        reason: `plan ${hash.slice(0, 12)} was approved for workspace "${approval.workspace_mode}", which is no longer supported — re-render and re-approve this plan`,
       };
     }
     return { ...base, ok: true, mode: approval.mode, hash };
@@ -434,7 +430,6 @@ function autoRefusal(
   nodes: GateNode[],
   ceiling: number,
   overlaps: (a: string[], b: string[]) => boolean,
-  workspaceMode?: string,
   unresolved: string[] = [],
 ): Blocker | undefined {
   // Nobody is present to observe a manual oracle. Incoherence, not risk appetite.
@@ -464,19 +459,6 @@ function autoRefusal(
       impact:
         "the plan rests on a choice nobody has made, and an unattended run would make it by accident",
       next_step: `Decide them and record them as answers in the Goal Brief header, or run in human mode. ${REMEDY}`,
-    };
-  }
-
-  // Isolation is a bound, not a preference. `--workspace none` runs every task
-  // in the user's live checkout, mutating the branch they are sitting on —
-  // unattended — and the strategy comes from the command line the agent composes.
-  if (workspaceMode === "none") {
-    return {
-      bound: "workspace",
-      decision: 'workspace "none" was requested',
-      impact:
-        "every task would run directly in the working checkout instead of an isolated worktree, mutating the branch you are sitting on",
-      next_step: `Use the default worktree isolation, or run in human mode. ${REMEDY}`,
     };
   }
 

@@ -4,12 +4,15 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { verifyChain } from "../src/lib/receipt";
 import { fixtureClone } from "./fixtures";
-import { repoRoot } from "./helpers";
+import { createRun, repoRoot } from "./helpers";
 
 const CLI_SRC = join(repoRoot, "src/cli.ts");
 
+const spawnCli = (cwd: string, ...args: string[]) =>
+  spawnSync("bun", [CLI_SRC, ...args], { cwd, encoding: "utf8" });
+
 function cli(cwd: string, ...args: string[]): string {
-  const r = spawnSync("bun", [CLI_SRC, ...args], { cwd, encoding: "utf8" });
+  const r = spawnCli(cwd, ...args);
   if (r.status !== 0) throw new Error(`cli ${args.join(" ")}: ${r.stderr}${r.stdout}`);
   return r.stdout;
 }
@@ -25,16 +28,17 @@ test("M2 oracle: two parallel worktree tasks — chained receipts, clean sweep a
   const baseSha = git(clone, "rev-parse", "origin/HEAD");
 
   // ---- create BOTH tasks up front: two live worktrees, forked from the same base
-  const tasks: Array<{ id: string; wt: string }> = [];
-  for (const n of [1, 2]) {
-    writeFileSync(
-      join(clone, `spec${n}.yaml`),
-      `task: parallel greet ${n}\nsuccess_criteria:\n  - "node check${n}.js exits 0"\noracle:\n  type: command\n  run: "node check${n}.js"\n`,
-    );
-    const out = cli(clone, "task", "create", "--spec", `spec${n}.yaml`);
-    const id = /created (\S+)/.exec(out)![1]!;
-    tasks.push({ id, wt: join(clone, ".sddx-worktrees", id) });
-  }
+  // Two parallel siblings ARE a two-node graph — one run, disjoint scopes.
+  const { taskIds } = createRun(
+    clone,
+    spawnCli,
+    "ship both greets",
+    [1, 2].map((n) => ({
+      alias: `p${n}`,
+      spec: `task: parallel greet ${n}\nsuccess_criteria:\n  - "node check${n}.js exits 0"\nscope:\n  - "greet${n}.js"\n  - "check${n}.js"\noracle:\n  type: command\n  run: "node check${n}.js"\n`,
+    })),
+  );
+  const tasks = taskIds.map((id) => ({ id, wt: join(clone, ".sddx-worktrees", id) }));
   const [t1, t2] = tasks as [(typeof tasks)[0], (typeof tasks)[0]];
   expect(existsSync(t1.wt) && existsSync(t2.wt)).toBe(true);
   expect(git(t1.wt, "rev-parse", "HEAD")).toBe(baseSha);
@@ -63,8 +67,13 @@ test("M2 oracle: two parallel worktree tasks — chained receipts, clean sweep a
     cli(t.wt, "verify", t.id);
   }
 
-  // neither task's state leaked outside its worktree
-  expect(existsSync(join(clone, ".sddx"))).toBe(false);
+  // neither task's state leaked outside its worktree. The main checkout does
+  // hold run-level bookkeeping (goal record, drafts) — what must not be there
+  // is either task's own state.
+  for (const t of tasks) {
+    expect(existsSync(join(clone, ".sddx", "tasks", `${t.id}.json`))).toBe(false);
+    expect(existsSync(join(clone, ".sddx", "receipts", `${t.id}.json`))).toBe(false);
+  }
   expect(existsSync(join(t1.wt, ".sddx", "receipts", `${t2.id}.json`))).toBe(false);
 
   // ---- zero merge conflicts in .sddx/: merge both branches sequentially
@@ -88,12 +97,19 @@ test("M2 oracle: two parallel worktree tasks — chained receipts, clean sweep a
   expect(verifyChain(clone)).toEqual([]);
 
   // ---- simulated crash: session died before cleanup; a third task sits dirty
-  writeFileSync(
-    join(clone, "spec3.yaml"),
-    'task: crashed wip\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\n',
+  const { taskIds: crashed } = createRun(
+    clone,
+    spawnCli,
+    "crashed session goal",
+    [
+      {
+        alias: "wip",
+        spec: 'task: crashed wip\nsuccess_criteria:\n  - a\nscope:\n  - "wip/**"\noracle:\n  type: command\n  run: "exit 0"\n',
+      },
+    ],
+    { graphName: "graph3.yaml" },
   );
-  const id3 = /created (\S+)/.exec(cli(clone, "task", "create", "--spec", "spec3.yaml"))![1]!;
-  const wt3 = join(clone, ".sddx-worktrees", id3);
+  const wt3 = join(clone, ".sddx-worktrees", crashed[0] as string);
   writeFileSync(join(wt3, "half-finished.js"), "// uncommitted work\n");
 
   const sweepOut = cli(clone, "sweep");

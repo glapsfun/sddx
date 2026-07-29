@@ -30,7 +30,11 @@ function tmpCwd(): string {
 const RUN_OPTS = { runBranch: "sddx/run-x", baseSha: "0".repeat(40) };
 
 function doneTaskWithReceipt(cwd: string, sentence: string): string {
-  let t = createTask(cwd, specFor(sentence), "s", { mode: "none", branch: null, base_sha: "a" });
+  let t = createTask(cwd, specFor(sentence), "s", {
+    mode: "worktree",
+    branch: null,
+    base_sha: "a",
+  });
   t = transition(t, "RED", { testExit: 1 });
   t = transition(t, "GREEN", { testExit: 0 });
   t = transition(t, "VERIFY");

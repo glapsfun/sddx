@@ -11,7 +11,7 @@ function taskInVerify(cwd: string, oracleYaml: string) {
   const spec = parseSpec(`task: flaky fixture\nsuccess_criteria:\n  - a\noracle:\n${oracleYaml}`)
     .spec!;
   let t = createTask(cwd, spec, ".sddx/specs/x.yaml", {
-    mode: "none",
+    mode: "worktree",
     branch: null,
     base_sha: headSha(cwd),
   });

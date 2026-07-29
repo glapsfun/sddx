@@ -16,9 +16,11 @@ one. When two things sddx could do conflict, the earlier principle wins.
    per-file, written down (`sddx task allow`), and surfaced in the receipt
    and on the board — see
    [../reference/hooks.md](../reference/hooks.md#the-allow-escape-hatch).
-5. **Pay for what you use.** Subagents and worktrees only when the task
-   warrants them; `--solo` runs a trivial task in the main session under the
-   same hook gates, with no orchestration overhead.
+5. **Pay for what you use.** Orchestration scales with the plan, not with a
+   mode switch: a trivial task is a **one-node run**, so it skips the
+   decomposition and multi-task reporting a larger run needs while getting the
+   identical worktree, gate, oracle, and receipt. There is no cheaper lifecycle
+   to opt into, because a second lifecycle is what costs the most.
 6. **Zero trust in "done".** Completion is a verifier executing the oracle
    and writing a chained receipt — never a model claim. See
    [verify-and-audit-receipts.md](../how-to/verify-and-audit-receipts.md).

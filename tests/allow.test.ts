@@ -18,7 +18,7 @@ const SPEC = {
 
 const makeTask = (repo: string) =>
   createTask(repo, SPEC, ".sddx/specs/x.yaml", {
-    mode: "none",
+    mode: "worktree",
     branch: null,
     base_sha: "0".repeat(40),
   });

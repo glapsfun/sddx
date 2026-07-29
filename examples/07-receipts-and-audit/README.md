@@ -27,16 +27,31 @@ oracle:
   expect: exit 0
 out_of_scope: []
 EOF
-OUT=$(./sddx task create --spec spec.yaml --workspace none)
+SDDX="$PWD/sddx"
+ROOT="$PWD"
+cat > graph.yaml <<'EOF'
+schema_version: "1.0"
+interaction_mode: human
+goal: produce a receipt to inspect
+tasks:
+  - alias: receipts
+    spec: spec.yaml
+EOF
+"$SDDX" graph approve --graph graph.yaml
+OUT=$("$SDDX" graph create --graph graph.yaml)
 echo "$OUT"
-ID=$(echo "$OUT" | awk '{print $2}')
-./sddx task phase "$ID" RED --test-exit 1
-./sddx red-check "$ID"
+ID=$(echo "$OUT" | grep -o 'created [0-9]\{8\}-[a-z0-9-]*' | head -1 | awk '{print $2}')
+cd "$ROOT/.sddx-worktrees/$ID"
+"$SDDX" task phase "$ID" RED --test-exit 1
+"$SDDX" red-check "$ID"
 touch ok.txt
-./sddx task phase "$ID" GREEN --test-exit 0
-./sddx task phase "$ID" VERIFY
-./sddx verify "$ID"
+"$SDDX" task phase "$ID" GREEN --test-exit 0
+"$SDDX" task phase "$ID" VERIFY
+"$SDDX" verify "$ID"
 ```
+
+The task ran in its own worktree, so the receipt below lives there too — the
+rest of this example runs from inside it.
 
 ## Inspect the receipt
 
@@ -56,7 +71,7 @@ this, adjust the grep pattern to match, not the other way round.)
 ## A clean audit
 
 ```sh
-./sddx audit 2>&1 | grep -q "chain intact"
+"$SDDX" audit 2>&1 | grep -q "chain intact"
 ```
 
 ## Tamper with it, and watch audit catch it
@@ -67,7 +82,7 @@ rm -f ".sddx/receipts/$ID.json.bak"
 ```
 
 ```sh
-./sddx audit 2>&1 | grep -q "tampered"
+"$SDDX" audit 2>&1 | grep -q "tampered"
 ```
 
 ## Restore it, and confirm the chain is intact again
@@ -77,7 +92,7 @@ git checkout -- ".sddx/receipts/$ID.json"
 ```
 
 ```sh
-./sddx audit 2>&1 | grep -q "chain intact"
+"$SDDX" audit 2>&1 | grep -q "chain intact"
 ```
 
 The receipt was never re-written to fix the tamper — it was restored to its

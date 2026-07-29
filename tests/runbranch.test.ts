@@ -126,7 +126,7 @@ describe("integrateTaskIntoRunBranch (via verifyTask)", () => {
     ).spec!;
     const id = taskId(spec.task);
     createTask(mainCwd, spec, ".sddx/specs/x.yaml", {
-      mode: "none",
+      mode: "worktree",
       branch: null,
       base_sha: headSha(mainCwd),
     });

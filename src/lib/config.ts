@@ -4,7 +4,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface SddxConfig {
-  workspace_mode?: "auto" | "worktree" | "branch" | "none";
   test_globs?: string;
   exempt_globs?: string;
   max_iterations_default?: number;
@@ -14,7 +13,6 @@ export interface SddxConfig {
   stuck_threshold?: number;
   pr_host?: "gh" | "glab";
   agent_model?: string;
-  prefer_solo?: boolean;
   verbose?: boolean;
   /** Renamed from `execution_mode`. Both are read; the new name wins. */
   interaction_mode?: InteractionMode;
@@ -207,7 +205,6 @@ export function parseAgentModel(raw: string | undefined): {
 }
 
 export interface ResolvedConfig {
-  workspace_mode: "auto" | "worktree" | "branch" | "none";
   test_globs: string;
   exempt_globs: string;
   max_iterations_default: number;
@@ -217,13 +214,11 @@ export interface ResolvedConfig {
   stuck_threshold: number;
   pr_host: "gh" | "glab" | null;
   agent_model: Record<string, string>;
-  prefer_solo: boolean;
   verbose: boolean;
   interaction_mode: InteractionMode;
   auto_max_tasks: number;
 }
 
-const WORKSPACE_MODES = ["auto", "worktree", "branch", "none"] as const;
 const bool = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
 
 /** Every config key, fully resolved (env/config/default precedence applied),
@@ -231,9 +226,6 @@ const bool = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null)
 export function resolveConfig(root: string, env: NodeJS.ProcessEnv = process.env): ResolvedConfig {
   const cfg = readConfig(root);
   return {
-    workspace_mode: (WORKSPACE_MODES as readonly string[]).includes(cfg.workspace_mode ?? "")
-      ? (cfg.workspace_mode as ResolvedConfig["workspace_mode"])
-      : "auto",
     test_globs: resolveValue({
       env,
       envVar: "SDDX_TEST_GLOBS",
@@ -283,7 +275,6 @@ export function resolveConfig(root: string, env: NodeJS.ProcessEnv = process.env
     }),
     pr_host: cfg.pr_host ?? null,
     agent_model: parseAgentModel(cfg.agent_model).models,
-    prefer_solo: resolveValue({ configValue: cfg.prefer_solo, configParse: bool, fallback: false }),
     verbose: resolveValue({ configValue: cfg.verbose, configParse: bool, fallback: false }),
     // both config-only by design — see interactionMode()
     interaction_mode: interactionMode(root),
@@ -309,7 +300,6 @@ const isOneOf =
  * `KNOWN_CONFIG_KEYS` is derived from this list so the two can never drift.
  */
 const CONFIG_SCHEMA: ReadonlyArray<[string, (v: unknown) => boolean, string]> = [
-  ["workspace_mode", isOneOf(WORKSPACE_MODES), `one of ${WORKSPACE_MODES.join("|")}`],
   ["test_globs", isString, "a string"],
   ["exempt_globs", isString, "a string"],
   ["max_iterations_default", isPositiveInt, "a positive integer"],
@@ -319,7 +309,6 @@ const CONFIG_SCHEMA: ReadonlyArray<[string, (v: unknown) => boolean, string]> = 
   ["stuck_threshold", isPositiveInt, "a positive integer"],
   ["pr_host", isOneOf(["gh", "glab"]), "one of gh|glab"],
   ["agent_model", isString, "a string"],
-  ["prefer_solo", isBoolean, "a boolean"],
   ["verbose", isBoolean, "a boolean"],
   ["interaction_mode", isOneOf(INTERACTION_MODES), `one of ${INTERACTION_MODES.join("|")}`],
   ["execution_mode", isOneOf(INTERACTION_MODES), `one of ${INTERACTION_MODES.join("|")}`],
@@ -327,6 +316,30 @@ const CONFIG_SCHEMA: ReadonlyArray<[string, (v: unknown) => boolean, string]> = 
 ];
 
 export const KNOWN_CONFIG_KEYS: ReadonlySet<string> = new Set(CONFIG_SCHEMA.map(([key]) => key));
+
+/**
+ * Keys that were real and are now gone, each with what to do instead.
+ *
+ * These are reported BY NAME rather than as a generic "unrecognized key",
+ * because the two mean different things to whoever is reading the warning: an
+ * unrecognized key is probably a typo, while a removed key is a setting that
+ * used to work and silently stopped. A user who set `workspace_mode: "branch"`
+ * needs to know their isolation strategy changed, not that they misspelled
+ * something.
+ *
+ * Neither key changes behavior any more — worktree is the invariant and there
+ * is no solo path to prefer — so this is a notice, never a hard failure.
+ */
+const REMOVED_CONFIG_KEYS: ReadonlyMap<string, string> = new Map([
+  [
+    "workspace_mode",
+    "removed in sddx 4.0 — worktree is the only workspace strategy, so there is nothing to select. Remove the key; runs are unaffected.",
+  ],
+  [
+    "prefer_solo",
+    "removed in sddx 4.0 along with `--solo` and `/sddx:quick` — a trivial task is a one-node `/sddx:run`. Remove the key; runs are unaffected.",
+  ],
+]);
 
 /**
  * Validates a parsed `.sddx/config.json` object against the known schema:
@@ -338,6 +351,11 @@ export const KNOWN_CONFIG_KEYS: ReadonlySet<string> = new Set(CONFIG_SCHEMA.map(
 export function validateConfigObject(obj: Record<string, unknown>): string[] {
   const warnings: string[] = [];
   for (const key of Object.keys(obj)) {
+    const removed = REMOVED_CONFIG_KEYS.get(key);
+    if (removed !== undefined) {
+      warnings.push(`"${key}" ${removed}`);
+      continue;
+    }
     if (!KNOWN_CONFIG_KEYS.has(key)) warnings.push(`unrecognized key "${key}"`);
   }
   for (const [key, isValid, expectation] of CONFIG_SCHEMA) {

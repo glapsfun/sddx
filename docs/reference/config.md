@@ -12,7 +12,6 @@ validate` commands that read and check it.
 
 | Key                       | Env var                 | Default            | Meaning                                                                                                  |
 | -------------------------- | ------------------------ | ------------------- | ---------------------------------------------------------------------------------------------------------|
-| `workspace_mode`           | —                        | `auto`              | Task workspace strategy: `auto` \| `worktree` \| `branch` \| `none`                                      |
 | `test_globs`                | `SDDX_TEST_GLOBS`        | *(empty)*            | Space-separated extra globs classified as test files by the TDD gate                                     |
 | `exempt_globs`              | `SDDX_EXEMPT_GLOBS`      | *(empty)*            | Space-separated extra globs exempt from the RED-phase write block                                        |
 | `max_iterations_default`   | —                        | `5`                  | Default stop rule: max loop iterations per task                                                           |
@@ -22,7 +21,6 @@ validate` commands that read and check it.
 | `stuck_threshold`           | `SDDX_STUCK_THRESHOLD`   | `3`                  | Consecutive identical test failures before a task is flagged stuck                                        |
 | `pr_host`                   | —                        | *(auto-detected)*     | PR-host CLI for `sddx pr create`: `gh` \| `glab`. Unset detects from the `origin` remote                  |
 | `agent_model`               | —                        | *(empty)*             | Comma-separated `role=model` pairs (`intake`, `orchestrator`, `planner`, `tddExecutor`, `verifier`) — advisory only |
-| `prefer_solo`                | —                        | `false`               | Advisory hint `/sddx:run` reads to steer a single trivial task toward `--solo`/`/sddx:quick`             |
 | `verbose`                    | —                        | `false`               | When true, `sddx config show` also prints which source resolved each key                                  |
 | `interaction_mode`           | — (config only)          | `human`               | Whether a human is consulted before anything is created: `human` (one question round, then plan approval) or `auto` (unattended up to the run branch) |
 | `auto_max_tasks`             | — (config only)          | `6`                   | In `auto`, a plan with more nodes than this is **refused**, not run unattended                             |
@@ -38,7 +36,7 @@ and reports, as **warnings** (exit 0, never a hard failure for a
 structurally-valid file): unrecognized top-level keys, and values that fail
 their key's domain rule — not just a `typeof` mismatch. `stuck_threshold`,
 `oracle_runs_default`, and `max_iterations_default` must be positive
-integers; `workspace_mode` must be one of `auto|worktree|branch|none`;
+integers; `interaction_mode` must be one of `human|auto`;
 `pr_host` one of `gh|glab`; malformed `agent_model` segments (not
 `role=model`, or an unrecognized role) are reported individually. A missing
 `.sddx/config.json` is not an error — built-in defaults apply. The one case
@@ -52,7 +50,7 @@ object — that is a broken file, not a schema mismatch.
 `orchestrator`, `planner`, `tddExecutor`, `verifier`. A malformed segment (no `=`, empty
 model, or an unrecognized role) is dropped individually with a warning
 rather than invalidating the whole value. This key is **advisory only**:
-`/sddx:run` and `/sddx:quick` read it via `sddx config show --output json`
+`/sddx:run` reads it via `sddx config show --output json`
 when dispatching a subagent, but no hook enforces it.
 
 ## The two gate keys are config-only, on purpose

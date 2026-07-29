@@ -34,7 +34,7 @@ function verifiedTask(cwd: string) {
     'task: signed fixture\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\n',
   ).spec!;
   let t = createTask(cwd, spec, ".sddx/specs/x.yaml", {
-    mode: "none",
+    mode: "worktree",
     branch: null,
     base_sha: headSha(cwd),
   });

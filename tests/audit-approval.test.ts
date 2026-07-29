@@ -39,7 +39,7 @@ function verifiedRepo(approval?: { mode: "human" | "auto"; plan_sha256?: string 
   const cwd = fixtureRepo();
   const parsed = parseSpec(SPEC);
   const t = createTask(cwd, parsed.spec as NonNullable<typeof parsed.spec>, ".sddx/specs/x.yaml", {
-    mode: "none",
+    mode: "worktree",
     branch: null,
     base_sha: headSha(cwd),
   });

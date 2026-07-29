@@ -7,13 +7,10 @@ description: Flagship sddx flow — decompose a goal into oracle-backed task spe
 
 CLI: `"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "${CLAUDE_PLUGIN_ROOT}/dist/cli.mjs"` (run from the repo root).
 
-Trivial single task and the user wants it in-session? `--solo` → follow
-/sddx:quick instead (same gates, no subagents, no worktree). If the goal looks
-like a single trivial task, run `... config show --output json` first and
-check `.data.prefer_solo` — when true, lean toward suggesting
-`--solo`/`/sddx:quick` unless the user already asked for `/sddx:run`
-explicitly. This is advisory only: no hook enforces it, it's a steer for this
-skill's own judgment.
+This is the only execution entry point. A trivial single task is a **one-node
+run** — the same graph, run branch, worktree, oracle, and receipt as any other
+run, just with one node. There is no in-session mode, no subagent-free mode,
+and no worktree-free mode to route to.
 
 ## Interaction modes
 
@@ -115,16 +112,14 @@ which is the point.
 2.5 **Render the plan and get approval** — run
    `... graph create --graph <path> --dry-run`. This runs the *same*
    resolve-and-validate path a real create runs and writes nothing, so it
-   reports what the drafts cannot: the effective workspace mode (including any
-   submodule downgrade), the resolved base SHA, and the validation verdict.
-   Relay it. A re-render after a revision prints only what changed, so a second
+   reports what the drafts cannot: the resolved base SHA, the worktree count,
+   and the validation verdict. Relay it. A re-render after a revision prints only what changed, so a second
    read is cheap.
 
    Offer **exactly these four** actions and take none of them unasked. There is
    no fifth: everything else belongs to the goal-scoped Next Actions menu after
    the run summary, and the two menus are never combined.
-   - **Approve** → `... graph approve --graph <path>` (pass the same
-     `--workspace` you will create with — the token records it), then step 3.
+   - **Approve** → `... graph approve --graph <path>`, then step 3.
    - **Edit** → revise the draft YAML (the drafts *are* the plan), re-render.
      Any edit changes the plan hash, so the gate arms again — expected, not a
      bug. An edit to an **answer or the goal** goes back to the header and needs
@@ -151,8 +146,7 @@ which is the point.
    CI workflows) or a protected area (auth, migrations, secrets, credentials,
    billing, `infra/**`, `terraform/**`, `k8s/**`, Dockerfiles, `.env*`); when a
    node declares no `scope` at all (unconfined); when the header carries a
-   non-empty `unresolved` list; when `--workspace none` would run tasks in the
-   live checkout; when a node's `oracle.type` is `manual` (nobody is present to
+   non-empty `unresolved` list; when a node's `oracle.type` is `manual` (nobody is present to
    observe it); or on a `task allow` TDD-gate exemption (an agent that can
    widen its own gate has no gate). Each refusal names the reviewed-configuration
    edit that would let a human run it instead.
@@ -164,9 +158,12 @@ which is the point.
    the goal's run branch (`sddx/run-<goal-id>`, forked from the resolved
    `origin/HEAD`) and writes all task files (worktrees forked from that same
    run branch for roots; dependents deferred) and `.sddx/goals/<goal-id>.json`
-   with its edges — or writes **nothing** and names the offending node. Auto
-   downgrades to branch mode (one notice) when worktrees are unsafe. Record
-   the printed alias→id map, goal id, and run branch name.
+   with its edges — or writes **nothing** and names the offending node. There
+   is **no downgrade**: worktree is the invariant, so a failed worktree
+   precondition (git cannot create worktrees; a task's scope reaches a
+   submodule) refuses the run and starts nothing. Relay that refusal as-is —
+   the remedy is a narrower `scope` or a different checkout, never a flag.
+   Record the printed alias→id map, goal id, and run branch name.
 4. **Execute as a fan-in-aware chain-walk** — dispatch a `tdd-executor` for
    every **ready** task (a root, or one whose parents are *all* DONE) in a
    single message, each given its task id and worktree path. Executors never

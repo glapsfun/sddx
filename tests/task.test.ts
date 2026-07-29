@@ -41,7 +41,7 @@ describe("task state", () => {
   test("create + read roundtrip, starts in PLAN", () => {
     const cwd = tmpCwd();
     const t = createTask(cwd, spec, ".sddx/specs/x.yaml", {
-      mode: "branch",
+      mode: "worktree",
       branch: "sddx/x",
       base_sha: "abc",
     });
@@ -50,7 +50,7 @@ describe("task state", () => {
   });
 
   test("legal path PLAN→RED→GREEN→REFACTOR→VERIFY with evidence", () => {
-    let t = createTask(tmpCwd(), spec, "s", { mode: "none", branch: null, base_sha: "abc" });
+    let t = createTask(tmpCwd(), spec, "s", { mode: "worktree", branch: null, base_sha: "abc" });
     t = transition(t, "RED", { testExit: 1 });
     t = transition(t, "GREEN", { testExit: 0 });
     t = transition(t, "REFACTOR");
@@ -62,7 +62,7 @@ describe("task state", () => {
   });
 
   test("evidence gates: RED needs failing exit, GREEN needs passing exit", () => {
-    let t = createTask(tmpCwd(), spec, "s", { mode: "none", branch: null, base_sha: "a" });
+    let t = createTask(tmpCwd(), spec, "s", { mode: "worktree", branch: null, base_sha: "a" });
     expect(() => transition(t, "RED", { testExit: 0 })).toThrow(/failing test/);
     expect(() => transition(t, "RED")).toThrow(/failing test/);
     t = transition(t, "RED", { testExit: 1 });
@@ -70,7 +70,7 @@ describe("task state", () => {
   });
 
   test("illegal jumps and model-claimed DONE are rejected", () => {
-    const t = createTask(tmpCwd(), spec, "s", { mode: "none", branch: null, base_sha: "a" });
+    const t = createTask(tmpCwd(), spec, "s", { mode: "worktree", branch: null, base_sha: "a" });
     expect(() => transition(t, "GREEN", { testExit: 0 })).toThrow(/PLAN → GREEN/);
     const v = { ...t, phase: "VERIFY" as const };
     expect(() => transition(v, "DONE")).toThrow(/verifier/);
@@ -79,7 +79,7 @@ describe("task state", () => {
 
   test("M1 task files (no workspace.path) still parse; worktree mode records one", () => {
     const cwd = tmpCwd();
-    const m1 = createTask(cwd, spec, "s", { mode: "branch", branch: "sddx/x", base_sha: "a" });
+    const m1 = createTask(cwd, spec, "s", { mode: "worktree", branch: "sddx/x", base_sha: "a" });
     expect(readTask(cwd, m1.id).workspace.path).toBeUndefined();
 
     const cwd2 = tmpCwd();
@@ -96,7 +96,7 @@ describe("task state", () => {
 
   test("writeTask bumps updated_at", async () => {
     const cwd = tmpCwd();
-    const t = createTask(cwd, spec, "s", { mode: "none", branch: null, base_sha: "a" });
+    const t = createTask(cwd, spec, "s", { mode: "worktree", branch: null, base_sha: "a" });
     const before = readTask(cwd, t.id).updated_at;
     await new Promise((r) => setTimeout(r, 5));
     writeTask(cwd, t);
@@ -111,7 +111,7 @@ describe("scope and depends_on", () => {
 
   test("scope copied from the spec; root omits depends_on", () => {
     const cwd = tmpCwd();
-    const t = createTask(cwd, scopedSpec, "s", { mode: "none", branch: null, base_sha: "a" });
+    const t = createTask(cwd, scopedSpec, "s", { mode: "worktree", branch: null, base_sha: "a" });
     const back = readTask(cwd, t.id);
     expect(back.scope).toEqual(["src/api/**"]);
     expect(back.depends_on).toBeUndefined();
@@ -147,7 +147,7 @@ describe("scope and depends_on", () => {
 
   test("legacy single-string depends_on on disk reads as a one-element list", () => {
     const cwd = tmpCwd();
-    const t = createTask(cwd, scopedSpec, "s", { mode: "none", branch: null, base_sha: "a" });
+    const t = createTask(cwd, scopedSpec, "s", { mode: "worktree", branch: null, base_sha: "a" });
     // simulate a pre-DAG task file written with the old scalar shape
     const legacy = { ...readTask(cwd, t.id), depends_on: "20260721-parent" };
     writeTask(cwd, legacy as never);
@@ -156,7 +156,7 @@ describe("scope and depends_on", () => {
 
   test("attempt_count defaults to 1 and on_dependency_failure/retry default via helpers", () => {
     const cwd = tmpCwd();
-    const t = createTask(cwd, scopedSpec, "s", { mode: "none", branch: null, base_sha: "a" });
+    const t = createTask(cwd, scopedSpec, "s", { mode: "worktree", branch: null, base_sha: "a" });
     expect(t.attempt_count).toBe(1);
     expect(failurePolicyOf(t)).toBe("skip");
     expect(retryPolicyOf(t)).toEqual({ max_attempts: 1, workspace: "fresh" });
@@ -167,7 +167,11 @@ describe("scope and depends_on", () => {
       "task: build the api\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: t\non_dependency_failure: block\nretry:\n  max_attempts: 3\n  workspace: reuse\n",
     ).spec!;
     const cwd = tmpCwd();
-    const t = createTask(cwd, specWithPolicy, "s", { mode: "none", branch: null, base_sha: "a" });
+    const t = createTask(cwd, specWithPolicy, "s", {
+      mode: "worktree",
+      branch: null,
+      base_sha: "a",
+    });
     expect(t.on_dependency_failure).toBe("block");
     expect(retryPolicyOf(t)).toEqual({ max_attempts: 3, workspace: "reuse" });
   });
@@ -182,7 +186,7 @@ describe("blockedOn / skippedOn", () => {
       cwd,
       s,
       "s",
-      { mode: "none", branch: null, base_sha: "a" },
+      { mode: "worktree", branch: null, base_sha: "a" },
       dependsOn ? { dependsOn } : {},
     );
   }
@@ -214,7 +218,7 @@ describe("blockedOn / skippedOn", () => {
       cwd,
       bSpec,
       "s",
-      { mode: "none", branch: null, base_sha: "a" },
+      { mode: "worktree", branch: null, base_sha: "a" },
       {
         dependsOn: a.id,
       },
@@ -265,7 +269,7 @@ describe("blockedOn / skippedOn", () => {
 
 describe("abandonOrRetry", () => {
   test("default policy (max_attempts 1) abandons immediately", () => {
-    const t = createTask(tmpCwd(), spec, "s", { mode: "none", branch: null, base_sha: "a" });
+    const t = createTask(tmpCwd(), spec, "s", { mode: "worktree", branch: null, base_sha: "a" });
     const outcome = abandonOrRetry(t);
     expect(outcome).toEqual({ retried: false, attempt_count: 1, max_attempts: 1 });
     expect(t.phase).toBe("ABANDONED");
@@ -275,7 +279,11 @@ describe("abandonOrRetry", () => {
     const retrySpec = parseSpec(
       "task: flaky\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: t\nretry:\n  max_attempts: 3\n",
     ).spec!;
-    const t = createTask(tmpCwd(), retrySpec, "s", { mode: "none", branch: null, base_sha: "a" });
+    const t = createTask(tmpCwd(), retrySpec, "s", {
+      mode: "worktree",
+      branch: null,
+      base_sha: "a",
+    });
     t.phase = "GREEN" as Phase;
 
     const first = abandonOrRetry(t);
@@ -297,7 +305,11 @@ describe("abandonOrRetry", () => {
     const retrySpec = parseSpec(
       "task: flaky\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: t\nretry:\n  max_attempts: 2\n",
     ).spec!;
-    const t = createTask(tmpCwd(), retrySpec, "s", { mode: "none", branch: null, base_sha: "a" });
+    const t = createTask(tmpCwd(), retrySpec, "s", {
+      mode: "worktree",
+      branch: null,
+      base_sha: "a",
+    });
     t.phase = "GREEN" as Phase;
     t.iterations = 4;
     t.evidence.red = { test_exit: 1, at: new Date().toISOString() };
@@ -310,7 +322,7 @@ describe("abandonOrRetry", () => {
   });
 
   test("refuses on an already-terminal task", () => {
-    const t = createTask(tmpCwd(), spec, "s", { mode: "none", branch: null, base_sha: "a" });
+    const t = createTask(tmpCwd(), spec, "s", { mode: "worktree", branch: null, base_sha: "a" });
     t.phase = "DONE";
     expect(() => abandonOrRetry(t)).toThrow(/illegal transition/);
   });
@@ -318,13 +330,13 @@ describe("abandonOrRetry", () => {
 
 describe("integration field", () => {
   test("absent by default", () => {
-    const t = createTask(tmpCwd(), spec, "s", { mode: "none", branch: null, base_sha: "a" });
+    const t = createTask(tmpCwd(), spec, "s", { mode: "worktree", branch: null, base_sha: "a" });
     expect(t.integration).toBeUndefined();
   });
 
   test("round-trips a merged record", () => {
     const cwd = tmpCwd();
-    const t = createTask(cwd, spec, "s", { mode: "none", branch: null, base_sha: "a" });
+    const t = createTask(cwd, spec, "s", { mode: "worktree", branch: null, base_sha: "a" });
     t.integration = {
       run_branch: "sddx/run-g1",
       merge_commit: "a".repeat(40),
@@ -341,13 +353,13 @@ describe("integration field", () => {
 describe("resolveTaskState", () => {
   test("finds a task in the main checkout (branch/none mode)", () => {
     const cwd = tmpCwd();
-    const t = createTask(cwd, spec, "s", { mode: "none", branch: null, base_sha: "a" });
+    const t = createTask(cwd, spec, "s", { mode: "worktree", branch: null, base_sha: "a" });
     expect(resolveTaskState(cwd, t.id)?.id).toBe(t.id);
   });
 
   test("finds a task in a live worktree directory before the main checkout", () => {
     const cwd = tmpCwd();
-    const t = createTask(cwd, spec, "s", { mode: "none", branch: null, base_sha: "a" });
+    const t = createTask(cwd, spec, "s", { mode: "worktree", branch: null, base_sha: "a" });
     const wtTasksDir = join(cwd, ".sddx-worktrees", t.id, ".sddx", "tasks");
     mkdirSync(wtTasksDir, { recursive: true });
     writeFileSync(
@@ -364,7 +376,7 @@ describe("resolveTaskState", () => {
       const r = spawnSync("git", args, { cwd: repo, encoding: "utf8" });
       if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
     };
-    const t = createTask(repo, spec, "s", { mode: "none", branch: "sddx/x", base_sha: "a" });
+    const t = createTask(repo, spec, "s", { mode: "worktree", branch: "sddx/x", base_sha: "a" });
     g("switch", "-c", `sddx/${t.id}`);
     g("add", "-A");
     g("commit", "-qm", "task commit");

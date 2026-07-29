@@ -307,24 +307,28 @@ describe("the gate is not self-grantable", () => {
     ).toBe("ask");
   }, 30_000);
 
-  test("SECURITY: swapping --workspace after approval is refused, not silently applied", () => {
-    // Approving a `worktree` render must not authorize `--workspace none`, which
-    // runs every task in the user's live checkout instead of an isolated worktree.
+  test("SECURITY: a legacy approval token is refused, not silently honored", () => {
+    // A token vouches for the plan AND the workspace strategy it was rendered
+    // under. There is only one strategy now, so this can fire only for a token
+    // written by an older sddx under `branch` or `none` — which must not
+    // authorize a canonical run it was never rendered for. The token's field
+    // stays a loose string precisely so those tokens still parse.
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, 1);
     withMode(cwd, "human");
-    expect(
-      cli(cwd, process.env, "graph", "approve", "--graph", rel, "--workspace", "worktree").status,
-    ).toBe(0);
+    expect(cli(cwd, process.env, "graph", "approve", "--graph", rel).status).toBe(0);
 
-    const swapped = cli(cwd, process.env, "graph", "create", "--graph", rel, "--workspace", "none");
-    expect(swapped.status).toBe(3);
-    expect(swapped.stderr).toContain("approved for workspace");
+    const dir = join(cwd, ".sddx", "approvals");
+    for (const f of readdirSync(dir).filter((n) => n.endsWith(".json"))) {
+      const p = join(dir, f);
+      const t = JSON.parse(readFileSync(p, "utf8"));
+      t.workspace_mode = "none"; // as 3.x would have left it
+      writeFileSync(p, `${JSON.stringify(t, null, 2)}\n`);
+    }
+
+    const refused = cli(cwd, process.env, "graph", "create", "--graph", rel);
+    expect(refused.status).not.toBe(0);
+    expect(refused.stderr).toContain("no longer supported");
     expect(materialized(cwd)).toEqual({ goals: [], branches: "", worktrees: [] });
-
-    // the strategy that WAS approved still works
-    expect(
-      cli(cwd, process.env, "graph", "create", "--graph", rel, "--workspace", "worktree").status,
-    ).toBe(0);
   }, 30_000);
 });

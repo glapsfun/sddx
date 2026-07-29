@@ -22,7 +22,7 @@ function readyTask(cwd: string, spec: string) {
   const parsed = parseSpec(spec);
   expect(parsed.errors).toEqual([]);
   const t = createTask(cwd, parsed.spec as NonNullable<typeof parsed.spec>, ".sddx/specs/x.yaml", {
-    mode: "none",
+    mode: "worktree",
     branch: null,
     base_sha: headSha(cwd),
   });

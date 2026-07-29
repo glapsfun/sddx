@@ -6,7 +6,7 @@ import { runOracle } from "./oracle";
 import { chainHead, type OracleRun, type Receipt, sha256, writeReceipt } from "./receipt";
 import { type IntegrationOutcome, integrateTaskIntoRunBranch } from "./runbranch";
 import { signPayload } from "./sign";
-import { readTask, transition, writeTask } from "./task";
+import { assertAdvanceable, readTask, transition, writeTask } from "./task";
 import { resolveMainRepoRoot } from "./worktree";
 
 function expectedExit(expect: string): number {
@@ -35,6 +35,9 @@ export function verifyTask(
   opts: { model?: string | null; harness?: string; pluginVersion: string },
 ): VerifyResult {
   const task = readTask(cwd, id);
+  // Before the oracle runs, not after: a legacy task must not even execute its
+  // command, let alone produce a receipt this version would chain.
+  assertAdvanceable(task);
   if (task.phase !== "VERIFY") {
     throw new Error(`task ${id} is in ${task.phase}; verify requires phase VERIFY`);
   }

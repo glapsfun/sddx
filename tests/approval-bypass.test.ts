@@ -255,24 +255,10 @@ oracle:
 
   const node = (scope: string[]) => [{ alias: "n0", scope, oracleType: "command" }];
 
-  test("workspace none does not self-approve", () => {
-    // `none` runs every task in the user's live checkout instead of an isolated
-    // worktree. The token path already refused to let a `worktree` render
-    // authorize it, but that check needs a token — on the self-approving auto
-    // path nothing was checking it at all.
-    const cwd = fixtureRepo();
-    const g = planOn(cwd);
-    const d = decideGate(cwd, g, node(["src/n0/**"]), "auto", 99, scopesOverlap, "none");
-    expect(d.ok).toBe(false);
-    // A refusal now, not a degradation into human: the bound fails the plan
-    // rather than offering a token that would run it unattended anyway.
-    expect(d.refusal).toContain("none");
-  });
-
   test("worktree still self-approves within bounds", () => {
     const cwd = fixtureRepo();
     const g = planOn(cwd);
-    const d = decideGate(cwd, g, node(["src/n0/**"]), "auto", 99, scopesOverlap, "worktree");
+    const d = decideGate(cwd, g, node(["src/n0/**"]), "auto", 99, scopesOverlap);
     expect(d.ok).toBe(true);
     expect(d.mode).toBe("auto");
   });
@@ -284,7 +270,7 @@ oracle:
     const cwd = fixtureRepo();
     const g = planOn(cwd);
     for (const scope of ["dist/**", "bin/**", ".claude/**"]) {
-      const d = decideGate(cwd, g, node([scope]), "auto", 99, scopesOverlap, "worktree");
+      const d = decideGate(cwd, g, node([scope]), "auto", 99, scopesOverlap);
       expect(d.ok).toBe(false);
       expect(d.refusal).toContain(scope);
     }

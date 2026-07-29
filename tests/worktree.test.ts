@@ -5,7 +5,6 @@ import { join } from "node:path";
 import {
   createWorktree,
   ensureExcluded,
-  hasSubmodules,
   listSddxWorktrees,
   removeWorktree,
   resolveBaseRef,
@@ -98,14 +97,4 @@ test("removeWorktree refuses a dirty worktree and removes a clean one", () => {
   removeWorktree(clone, path);
   expect(existsSync(path)).toBe(false);
   expect(git(clone, "rev-parse", "--verify", "refs/heads/sddx/rm")).toBeTruthy();
-});
-
-test("hasSubmodules detects .gitmodules in the base tree", () => {
-  const repo = fixtureRepo();
-  const head = git(repo, "rev-parse", "HEAD");
-  expect(hasSubmodules(repo, head)).toBe(false);
-  writeFileSync(join(repo, ".gitmodules"), '[submodule "x"]\n\tpath = x\n\turl = ./x\n');
-  git(repo, "add", "-A");
-  git(repo, "commit", "-qm", "add gitmodules");
-  expect(hasSubmodules(repo, git(repo, "rev-parse", "HEAD"))).toBe(true);
 });

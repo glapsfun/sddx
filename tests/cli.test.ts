@@ -4,7 +4,16 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fixtureClone, fixtureRepo } from "./fixtures";
-import { fakeRedCheck, GRAPH_HEADER, goalIds, readGoalAnywhere, repoRoot } from "./helpers";
+import {
+  createRun,
+  fakeRedCheck,
+  GRAPH_HEADER,
+  goalIds,
+  mutateGoal,
+  readGoalAnywhere,
+  repoRoot,
+  taskStatePath,
+} from "./helpers";
 
 const PACKAGE_VERSION = (
   JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as { version: string }
@@ -21,21 +30,10 @@ function cli(cwd: string, ...args: string[]) {
  * steps a user takes — rather than sidestepping the gate with auto mode. */
 function approveAndCreate(cwd: string, ...args: string[]) {
   const graphIdx = args.indexOf("--graph");
-  const wsIdx = args.indexOf("--workspace");
-  // The token records the workspace strategy it was approved for, so approve
-  // must be given the same one the create will use.
-  const approve = spawnSync(
-    "bun",
-    [
-      CLI_SRC,
-      "graph",
-      "approve",
-      "--graph",
-      args[graphIdx + 1],
-      ...(wsIdx === -1 ? [] : ["--workspace", args[wsIdx + 1]]),
-    ],
-    { cwd, encoding: "utf8" },
-  );
+  const approve = spawnSync("bun", [CLI_SRC, "graph", "approve", "--graph", args[graphIdx + 1]], {
+    cwd,
+    encoding: "utf8",
+  });
   if (approve.status !== 0) return approve;
   return cli(cwd, ...args);
 }
@@ -67,101 +65,73 @@ function mkdtempScopedSpecs(cwd: string): void {
 }
 
 describe("sddx cli", () => {
-  test("task create validates spec, creates branch, writes state", () => {
-    const cwd = fixtureRepo();
-    writeFileSync(join(cwd, "spec.yaml"), SPEC);
-    const r = cli(cwd, "task", "create", "--spec", "spec.yaml", "--workspace", "branch");
-    expect(r.status).toBe(0);
-    const id = /created (\S+)/.exec(r.stdout)![1]!;
-    expect(existsSync(join(cwd, ".sddx", "tasks", `${id}.json`))).toBe(true);
-    expect(existsSync(join(cwd, ".sddx", "specs", `${id}.yaml`))).toBe(true);
-    const branch = spawnSync("git", ["rev-parse", "--abbrev-ref", "HEAD"], {
-      cwd,
-      encoding: "utf8",
-    }).stdout.trim();
-    expect(branch).toBe(`sddx/${id}`);
-  });
-
-  test("task create rejects an oracle-less spec with exit 1", () => {
-    const cwd = fixtureRepo();
-    writeFileSync(join(cwd, "bad.yaml"), "task: t\nsuccess_criteria:\n  - a\n");
-    const r = cli(cwd, "task", "create", "--spec", "bad.yaml");
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("oracle");
-  });
-
   test("phase transitions enforce evidence via flags", () => {
     const cwd = fixtureRepo();
-    writeFileSync(join(cwd, "spec.yaml"), SPEC);
-    const id = /created (\S+)/.exec(
-      cli(cwd, "task", "create", "--spec", "spec.yaml", "--no-branch").stdout,
-    )![1]!;
-    expect(cli(cwd, "task", "phase", id, "RED", "--test-exit", "0").status).toBe(1);
-    expect(cli(cwd, "task", "phase", id, "RED", "--test-exit", "1").status).toBe(0);
-    expect(cli(cwd, "task", "phase", id, "GREEN", "--test-exit", "0").status).toBe(0);
-    expect(cli(cwd, "task", "phase", id, "VERIFY").status).toBe(0);
-    expect(cli(cwd, "task", "phase", id, "DONE").status).toBe(1); // verifier only
+    const { taskIds } = createRun(cwd, cli, "phase it", [{ alias: "only", spec: SPEC }]);
+    const id = taskIds[0]!;
+    const wt = join(cwd, ".sddx-worktrees", id);
+    expect(cli(wt, "task", "phase", id, "RED", "--test-exit", "0").status).toBe(1);
+    expect(cli(wt, "task", "phase", id, "RED", "--test-exit", "1").status).toBe(0);
+    expect(cli(wt, "task", "phase", id, "GREEN", "--test-exit", "0").status).toBe(0);
+    expect(cli(wt, "task", "phase", id, "VERIFY").status).toBe(0);
+    expect(cli(wt, "task", "phase", id, "DONE").status).toBe(1); // verifier only
   });
 
   test("verify pass end-to-end and cleanup guards", () => {
     const cwd = fixtureRepo();
-    writeFileSync(join(cwd, "spec.yaml"), SPEC);
-    const id = /created (\S+)/.exec(
-      cli(cwd, "task", "create", "--spec", "spec.yaml", "--workspace", "branch").stdout,
-    )![1]!;
-    cli(cwd, "task", "phase", id, "RED", "--test-exit", "1");
-    cli(cwd, "task", "phase", id, "GREEN", "--test-exit", "0");
-    cli(cwd, "task", "phase", id, "VERIFY");
-    fakeRedCheck(cwd, id);
-    const v = cli(cwd, "verify", id);
+    const { taskIds } = createRun(cwd, cli, "verify it", [{ alias: "only", spec: SPEC }]);
+    const id = taskIds[0]!;
+    const wt = join(cwd, ".sddx-worktrees", id);
+    cli(wt, "task", "phase", id, "RED", "--test-exit", "1");
+    cli(wt, "task", "phase", id, "GREEN", "--test-exit", "0");
+    cli(wt, "task", "phase", id, "VERIFY");
+    fakeRedCheck(wt, id);
+    const v = cli(wt, "verify", id);
     expect(v.status).toBe(0);
     expect(v.stdout).toContain(".sddx/receipts/");
 
-    // cleanup refuses while on the task branch, then works after merge from main
-    expect(cli(cwd, "cleanup", id).status).toBe(1);
-    spawnSync("git", ["switch", "-q", "main"], { cwd });
+    // The guard, asserted negatively first — without this the test proves
+    // nothing: a `cleanup` that deleted an unintegrated task's branch outright
+    // would still pass on the positive case alone. `verify` merged the task
+    // into its run branch, so clear the goal's merge log to make it genuinely
+    // unintegrated, the same shape a reverted merge leaves behind.
+    mutateGoal(cwd, (g) => {
+      g.merges = [];
+    });
+    const refused = cli(cwd, "cleanup", id);
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain("not merged into HEAD");
+    // and the branch it refused to clean up still exists
+    expect(
+      spawnSync("git", ["rev-parse", "--verify", "--quiet", `refs/heads/sddx/${id}`], { cwd })
+        .status,
+    ).toBe(0);
+
+    // once the work is merged somewhere that keeps it, cleanup proceeds
     spawnSync("git", ["merge", "-q", "--no-edit", `sddx/${id}`], { cwd });
     expect(cli(cwd, "cleanup", id).status).toBe(0);
   });
 
-  test("default auto workspace creates a worktree from origin/HEAD in a clone", () => {
+  test("a run creates a worktree forked from origin/HEAD in a clone", () => {
     const { clone } = fixtureClone();
-    writeFileSync(join(clone, "spec.yaml"), SPEC);
-    const r = cli(clone, "task", "create", "--spec", "spec.yaml");
-    expect(r.status).toBe(0);
-    const id = /created (\S+)/.exec(r.stdout)![1]!;
-    expect(r.stdout).toContain(`worktree=${join(".sddx-worktrees", id)}`);
+    const { taskIds } = createRun(clone, cli, "clone it", [{ alias: "only", spec: SPEC }]);
+    const id = taskIds[0]!;
     const wt = join(clone, ".sddx-worktrees", id);
     expect(existsSync(join(wt, ".sddx", "tasks", `${id}.json`))).toBe(true);
-    // main checkout untouched: still on main, no .sddx, clean status
+    // main checkout untouched: still on main, and the task's state lives in the
+    // worktree rather than here
     const g = (...a: string[]) => spawnSync("git", a, { cwd: clone, encoding: "utf8" }).stdout;
     expect(g("rev-parse", "--abbrev-ref", "HEAD").trim()).toBe("main");
-    expect(existsSync(join(clone, ".sddx"))).toBe(false);
-    expect(g("status", "--porcelain")).not.toContain(".sddx"); // spec.yaml is test scaffolding
+    expect(existsSync(join(clone, ".sddx", "tasks", `${id}.json`))).toBe(false);
     // worktree HEAD equals origin/HEAD
     const wtHead = spawnSync("git", ["rev-parse", "HEAD"], { cwd: wt, encoding: "utf8" });
     expect(wtHead.stdout.trim()).toBe(g("rev-parse", "origin/HEAD").trim());
   });
 
-  test("auto downgrades to branch mode when submodules exist, with one notice line", () => {
-    const cwd = fixtureRepo();
-    writeFileSync(join(cwd, ".gitmodules"), '[submodule "x"]\n\tpath = x\n\turl = ./x\n');
-    spawnSync("git", ["add", "-A"], { cwd });
-    spawnSync("git", ["commit", "-qm", "gitmodules"], { cwd });
-    writeFileSync(join(cwd, "spec.yaml"), SPEC);
-    const r = cli(cwd, "task", "create", "--spec", "spec.yaml");
-    expect(r.status).toBe(0);
-    const notices = r.stdout.split("\n").filter((l) => l.includes("branch mode"));
-    expect(notices).toEqual(["submodules detected → branch mode"]);
-    expect(r.stdout).not.toContain("worktree=");
-  });
-
   test("cleanup refuses a dirty worktree, then removes worktree and merged branch", () => {
     const { clone } = fixtureClone();
-    writeFileSync(join(clone, "spec.yaml"), SPEC);
-    const id = /created (\S+)/.exec(
-      cli(clone, "task", "create", "--spec", "spec.yaml").stdout,
-    )![1]!;
+    const { taskIds } = createRun(clone, cli, "clean it", [{ alias: "only", spec: SPEC }]);
+    const id = taskIds[0]!;
     const wt = join(clone, ".sddx-worktrees", id);
 
     // complete the task inside the worktree
@@ -191,25 +161,17 @@ describe("sddx cli", () => {
       join(cwd, "graph.yaml"),
       `${GRAPH_HEADER}goal: ship it\ntasks:\n  - alias: only\n    spec: spec.yaml\n`,
     );
-    const created = approveAndCreate(
-      cwd,
-      "graph",
-      "create",
-      "--graph",
-      "graph.yaml",
-      "--workspace",
-      "branch",
-    );
+    const created = approveAndCreate(cwd, "graph", "create", "--graph", "graph.yaml");
     expect(created.status).toBe(0);
     const id = /created (\S+) phase=PLAN/.exec(created.stdout)![1]!;
+    const wt = join(cwd, ".sddx-worktrees", id);
 
-    cli(cwd, "task", "phase", id, "RED", "--test-exit", "1");
-    cli(cwd, "task", "phase", id, "GREEN", "--test-exit", "0");
-    cli(cwd, "task", "phase", id, "VERIFY");
-    fakeRedCheck(cwd, id);
+    cli(wt, "task", "phase", id, "RED", "--test-exit", "1");
+    cli(wt, "task", "phase", id, "GREEN", "--test-exit", "0");
+    cli(wt, "task", "phase", id, "VERIFY");
+    fakeRedCheck(wt, id);
     // verify merges the task's branch into the goal's run branch automatically
-    expect(cli(cwd, "verify", id).status).toBe(0);
-    spawnSync("git", ["switch", "-q", "main"], { cwd });
+    expect(cli(wt, "verify", id).status).toBe(0);
 
     const ok = cli(cwd, "cleanup", id);
     expect(ok.status).toBe(0);
@@ -222,16 +184,20 @@ describe("sddx cli", () => {
 
   test("cleanup refuses a task not merged into HEAD or any goal's run branch", () => {
     const cwd = fixtureRepo();
-    writeFileSync(join(cwd, "spec.yaml"), SPEC);
-    const id = /created (\S+)/.exec(
-      cli(cwd, "task", "create", "--spec", "spec.yaml", "--workspace", "branch").stdout,
-    )![1]!;
-    cli(cwd, "task", "phase", id, "RED", "--test-exit", "1");
-    cli(cwd, "task", "phase", id, "GREEN", "--test-exit", "0");
-    cli(cwd, "task", "phase", id, "VERIFY");
-    fakeRedCheck(cwd, id);
-    expect(cli(cwd, "verify", id).status).toBe(0);
-    spawnSync("git", ["switch", "-q", "main"], { cwd });
+    const { taskIds } = createRun(cwd, cli, "leave it unmerged", [{ alias: "only", spec: SPEC }]);
+    const id = taskIds[0]!;
+    const wt = join(cwd, ".sddx-worktrees", id);
+    cli(wt, "task", "phase", id, "RED", "--test-exit", "1");
+    cli(wt, "task", "phase", id, "GREEN", "--test-exit", "0");
+    cli(wt, "task", "phase", id, "VERIFY");
+    fakeRedCheck(wt, id);
+    expect(cli(wt, "verify", id).status).toBe(0);
+    // Clear the goal's merge log — sddx's own revert-aware bookkeeping, and the
+    // authoritative answer to "is this task's work currently on the run branch".
+    // Emptying it is what a reverted merge looks like to cleanup.
+    mutateGoal(cwd, (g) => {
+      g.merges = [];
+    });
 
     const refused = cli(cwd, "cleanup", id);
     expect(refused.status).toBe(1);
@@ -242,61 +208,19 @@ describe("sddx cli", () => {
     ).toBe(0);
   });
 
-  test("goal create + goal show round-trip via the CLI", () => {
+  test("graph create + goal show round-trip via the CLI", () => {
     const cwd = fixtureRepo();
-    writeFileSync(join(cwd, "spec.yaml"), SPEC);
-    const id = /created (\S+)/.exec(
-      cli(cwd, "task", "create", "--spec", "spec.yaml", "--no-branch").stdout,
-    )![1]!;
-    const created = cli(cwd, "goal", "create", "--goal", "Ship the greet feature", "--tasks", id);
-    expect(created.status).toBe(0);
-    const goalIdMatch = /created goal (\S+)/.exec(created.stdout)![1]!;
-    const shown = cli(cwd, "goal", "show", goalIdMatch);
+    const run = createRun(cwd, cli, "Ship the greet feature", [{ alias: "only", spec: SPEC }]);
+    const shown = cli(cwd, "goal", "show", run.goalId);
     expect(shown.status).toBe(0);
-    expect(JSON.parse(shown.stdout).task_ids).toEqual([id]);
-  });
-
-  test("task create --depends-on records a deferred workspace; unknown parent refused", () => {
-    const cwd = fixtureRepo();
-    writeFileSync(join(cwd, "spec.yaml"), SPEC);
-    const parentId = /created (\S+)/.exec(
-      cli(cwd, "task", "create", "--spec", "spec.yaml", "--no-branch").stdout,
-    )![1]!;
-
-    writeFileSync(
-      join(cwd, "child.yaml"),
-      `task: use the greet output\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/child/**\n`,
-    );
-    const child = cli(cwd, "task", "create", "--spec", "child.yaml", "--depends-on", parentId);
-    expect(child.status).toBe(0);
-    expect(child.stdout).toContain(`depends_on=${parentId}`);
-    expect(child.stdout).toContain("workspace=deferred");
-    const childId = /created (\S+)/.exec(child.stdout)![1]!;
-    const state = JSON.parse(readFileSync(join(cwd, ".sddx", "tasks", `${childId}.json`), "utf8"));
-    expect(state.depends_on).toEqual([parentId]);
-    expect(state.workspace.base_sha).toBe(`pending:${parentId}`);
-    expect(state.workspace.path).toBeUndefined();
-    expect(existsSync(join(cwd, ".sddx-worktrees", childId))).toBe(false);
-
-    // unknown parent is refused
-    const bad = cli(cwd, "task", "create", "--spec", "child.yaml", "--depends-on", "no-such-task");
-    expect(bad.status).toBe(1);
-    expect(bad.stderr).toContain("no such task");
+    expect(JSON.parse(shown.stdout).task_ids).toEqual(run.taskIds);
   });
 
   test("graph create: ordered overlap accepted, tasks + goal written with edges", () => {
     const cwd = fixtureRepo();
     mkdtempScopedSpecs(cwd);
     // branch mode: `none` is incompatible with dependent tasks (no base to fork from)
-    const r = approveAndCreate(
-      cwd,
-      "graph",
-      "create",
-      "--graph",
-      "graph.yaml",
-      "--workspace",
-      "branch",
-    );
+    const r = approveAndCreate(cwd, "graph", "create", "--graph", "graph.yaml");
     expect(r.status).toBe(0);
     const goalId = /created goal (\S+)/.exec(r.stdout)![1]!;
     const goal = readGoalAnywhere(cwd, goalId) as any;
@@ -324,15 +248,7 @@ describe("sddx cli", () => {
       join(cwd, "graph.yaml"),
       `${GRAPH_HEADER}goal: do a and b\ntasks:\n  - alias: a\n    spec: a.yaml\n  - alias: b\n    spec: b.yaml\n`,
     );
-    const r = approveAndCreate(
-      cwd,
-      "graph",
-      "create",
-      "--graph",
-      "graph.yaml",
-      "--workspace",
-      "none",
-    );
+    const r = approveAndCreate(cwd, "graph", "create", "--graph", "graph.yaml");
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("scope overlap");
     // atomic: no task files, no goal directory
@@ -348,71 +264,10 @@ describe("sddx cli", () => {
       join(cwd, "graph.yaml"),
       `${GRAPH_HEADER}goal: g\ntasks:\n  - alias: ok\n    spec: ok.yaml\n  - alias: bad\n    spec: bad.yaml\n`,
     );
-    const r = approveAndCreate(
-      cwd,
-      "graph",
-      "create",
-      "--graph",
-      "graph.yaml",
-      "--workspace",
-      "none",
-    );
+    const r = approveAndCreate(cwd, "graph", "create", "--graph", "graph.yaml");
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("oracle");
     expect(existsSync(join(cwd, ".sddx", "tasks"))).toBe(false);
-  });
-
-  test("graph create refuses --workspace none when the graph has a dependency", () => {
-    const cwd = fixtureRepo();
-    mkdtempScopedSpecs(cwd);
-    const r = approveAndCreate(
-      cwd,
-      "graph",
-      "create",
-      "--graph",
-      "graph.yaml",
-      "--workspace",
-      "none",
-    );
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("none is incompatible with dependent tasks");
-    expect(existsSync(join(cwd, ".sddx", "tasks"))).toBe(false);
-  });
-
-  test("task create with repeated --depends-on records multiple parents (fan-in)", () => {
-    const cwd = fixtureRepo();
-    writeFileSync(join(cwd, "p1.yaml"), SPEC);
-    const p1 = /created (\S+)/.exec(
-      cli(cwd, "task", "create", "--spec", "p1.yaml", "--workspace", "branch").stdout,
-    )![1]!;
-    writeFileSync(
-      join(cwd, "p2.yaml"),
-      `task: another root\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\n`,
-    );
-    const p2 = /created (\S+)/.exec(
-      cli(cwd, "task", "create", "--spec", "p2.yaml", "--workspace", "branch").stdout,
-    )![1]!;
-    writeFileSync(
-      join(cwd, "child.yaml"),
-      `task: fan-in child\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\n`,
-    );
-    const child = cli(
-      cwd,
-      "task",
-      "create",
-      "--spec",
-      "child.yaml",
-      "--depends-on",
-      p1,
-      "--depends-on",
-      p2,
-      "--workspace",
-      "branch",
-    );
-    expect(child.status).toBe(0);
-    const childId = /created (\S+)/.exec(child.stdout)![1]!;
-    const state = JSON.parse(readFileSync(join(cwd, ".sddx", "tasks", `${childId}.json`), "utf8"));
-    expect(state.depends_on).toEqual([p1, p2]);
   });
 
   test("graph create copies on_dependency_failure/retry from the spec, defaulting when absent", () => {
@@ -429,26 +284,14 @@ describe("sddx cli", () => {
       join(cwd, "graph.yaml"),
       `${GRAPH_HEADER}goal: g\ntasks:\n  - alias: policy\n    spec: root.yaml\n  - alias: plain\n    spec: plain.yaml\n`,
     );
-    const r = approveAndCreate(
-      cwd,
-      "graph",
-      "create",
-      "--graph",
-      "graph.yaml",
-      "--workspace",
-      "none",
-    );
+    const r = approveAndCreate(cwd, "graph", "create", "--graph", "graph.yaml");
     expect(r.status).toBe(0);
     const goalId = /created goal (\S+)/.exec(r.stdout)![1]!;
     const goal = readGoalAnywhere(cwd, goalId) as any;
-    const policyState = JSON.parse(
-      readFileSync(join(cwd, ".sddx", "tasks", `${goal.task_ids[0]}.json`), "utf8"),
-    );
+    const policyState = JSON.parse(readFileSync(taskStatePath(cwd, goal.task_ids[0]), "utf8"));
     expect(policyState.on_dependency_failure).toBe("block");
     expect(policyState.retry).toEqual({ max_attempts: 3, workspace: "reuse" });
-    const plainState = JSON.parse(
-      readFileSync(join(cwd, ".sddx", "tasks", `${goal.task_ids[1]}.json`), "utf8"),
-    );
+    const plainState = JSON.parse(readFileSync(taskStatePath(cwd, goal.task_ids[1]), "utf8"));
     expect(plainState.on_dependency_failure).toBeUndefined();
     expect(plainState.retry).toBeUndefined();
     expect(plainState.attempt_count).toBe(1);
@@ -464,100 +307,31 @@ describe("sddx cli", () => {
       join(cwd, "graph.yaml"),
       `${GRAPH_HEADER}goal: g\ntasks:\n  - alias: bad\n    spec: bad.yaml\n`,
     );
-    const r = approveAndCreate(
-      cwd,
-      "graph",
-      "create",
-      "--graph",
-      "graph.yaml",
-      "--workspace",
-      "none",
-    );
+    const r = approveAndCreate(cwd, "graph", "create", "--graph", "graph.yaml");
     expect(r.status).toBe(1);
     expect(r.stderr).toContain("on_dependency_failure");
     expect(existsSync(join(cwd, ".sddx", "tasks"))).toBe(false);
     expect(goalIds(cwd)).toEqual([]);
   });
 
-  test("task create --depends-on refuses none mode and overlapping siblings", () => {
+  test("removed flags are refused by name, not silently ignored", () => {
+    // `--workspace none` is a request for NO isolation. Dropping it without a
+    // word would hand the caller the opposite of what they asked for, so this
+    // has to fail loudly the way the removed commands and config keys do.
     const cwd = fixtureRepo();
-    writeFileSync(join(cwd, "p.yaml"), SPEC);
-    const parentId = /created (\S+)/.exec(
-      cli(cwd, "task", "create", "--spec", "p.yaml", "--no-branch").stdout,
-    )![1]!;
-
-    // none mode + a dependency is refused (no isolatable base to fork from)
-    writeFileSync(
-      join(cwd, "c1.yaml"),
-      `task: child one\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/shared/**\n`,
-    );
-    const none = cli(
-      cwd,
-      "task",
-      "create",
-      "--spec",
-      "c1.yaml",
-      "--depends-on",
-      parentId,
-      "--workspace",
-      "none",
-    );
-    expect(none.status).toBe(1);
-    expect(none.stderr).toContain("worktree or branch mode");
-
-    // first sibling (branch mode) is accepted
-    const c1 = cli(
-      cwd,
-      "task",
-      "create",
-      "--spec",
-      "c1.yaml",
-      "--depends-on",
-      parentId,
-      "--workspace",
-      "branch",
-    );
-    expect(c1.status).toBe(0);
-
-    // a second sibling of the same parent with overlapping scope is refused
-    writeFileSync(
-      join(cwd, "c2.yaml"),
-      `task: child two\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/shared/x.ts\n`,
-    );
-    const c2 = cli(
-      cwd,
-      "task",
-      "create",
-      "--spec",
-      "c2.yaml",
-      "--depends-on",
-      parentId,
-      "--workspace",
-      "branch",
-    );
-    expect(c2.status).toBe(1);
-    expect(c2.stderr).toContain("scope overlap");
-  });
-
-  test("goal create refuses concurrent overlapping tasks", () => {
-    const cwd = fixtureRepo();
-    writeFileSync(
-      join(cwd, "a.yaml"),
-      `task: alpha\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/db/**\n`,
-    );
-    writeFileSync(
-      join(cwd, "b.yaml"),
-      `task: bravo\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nscope:\n  - src/db/x.ts\n`,
-    );
-    const aId = /created (\S+)/.exec(
-      cli(cwd, "task", "create", "--spec", "a.yaml", "--no-branch").stdout,
-    )![1]!;
-    const bId = /created (\S+)/.exec(
-      cli(cwd, "task", "create", "--spec", "b.yaml", "--no-branch").stdout,
-    )![1]!;
-    const r = cli(cwd, "goal", "create", "--goal", "both", "--tasks", `${aId},${bId}`);
-    expect(r.status).toBe(1);
-    expect(r.stderr).toContain("scope overlap");
+    for (const [flag, value] of [
+      ["--workspace", "none"],
+      ["--no-branch", null],
+    ] as const) {
+      const args = value === null ? [flag] : [flag, value];
+      const r = cli(cwd, "graph", "create", "--graph", "graph.yaml", ...args);
+      expect(r.status).toBe(2);
+      expect(r.stderr).toContain(`\`${flag}\` was removed`);
+      expect(r.stderr).toContain("migrate-to-v4");
+      // nothing was created on the way to the refusal
+      expect(existsSync(join(cwd, ".sddx", "tasks"))).toBe(false);
+      expect(goalIds(cwd)).toEqual([]);
+    }
   });
 
   test("pr create usage error exits 2 without --goal", () => {
@@ -569,7 +343,6 @@ describe("sddx cli", () => {
     const cwd = fixtureRepo();
     expect(cli(cwd, "frobnicate").status).toBe(2);
     expect(cli(cwd, "task").status).toBe(2);
-    expect(cli(cwd, "task", "create", "--spec", "x.yaml", "--workspace", "bogus").status).toBe(2);
   });
 
   test("--version and -v print the package version outside a git repository", () => {
@@ -587,7 +360,11 @@ describe("sddx cli", () => {
       const r = cli(cwd, flag);
       expect(r.status).toBe(0);
       expect(r.stdout).toContain("usage:");
-      expect(r.stdout).toContain("sddx task create");
+      expect(r.stdout).toContain("sddx graph create");
+      // the removed creation paths are not advertised
+      expect(r.stdout).not.toContain("sddx task create");
+      expect(r.stdout).not.toContain("sddx goal create");
+      expect(r.stdout).not.toContain("--workspace");
     }
   });
 
@@ -598,15 +375,7 @@ describe("sddx cli", () => {
       join(cwd, "graph.yaml"),
       `${GRAPH_HEADER}goal: report it\ntasks:\n  - alias: only\n    spec: spec.yaml\n`,
     );
-    const created = approveAndCreate(
-      cwd,
-      "graph",
-      "create",
-      "--graph",
-      "graph.yaml",
-      "--workspace",
-      "worktree",
-    );
+    const created = approveAndCreate(cwd, "graph", "create", "--graph", "graph.yaml");
     expect(created.status).toBe(0);
     const id = /created (\S+) phase=PLAN/.exec(created.stdout)![1]!;
     const goalId = /created goal (\S+)/.exec(created.stdout)![1]!;

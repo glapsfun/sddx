@@ -1,8 +1,10 @@
 # Getting started: your first verified task
 
-This walks the same loop `/sddx:quick` (or `--solo`) drives inside Claude
-Code, by hand from the CLI, so you can see every phase transition as it
-happens. The exact commands are also a copy-paste-able scaffold at
+This walks a **one-node run** by hand from the CLI, so you can see every phase
+transition as it happens. A single task is not a special mode — it is a run
+with one node, and it gets the same goal, run branch, worktree, oracle, and
+receipt as a ten-node one. This is what `/sddx:run` drives for you inside
+Claude Code. The exact commands are also a copy-paste-able scaffold at
 [examples/01-single-task](../../examples/01-single-task/).
 
 ## The loop
@@ -16,28 +18,47 @@ model claim — see
 [design-principles.md](../explanation/design-principles.md#why-phases-are-evidence-not-claims)
 for why that's the whole point.
 
-## 1. Register a task from a spec
+## 1. Write a spec and a one-node graph
 
 A spec is one YAML file with a one-sentence goal, binary success criteria,
 and a mandatory **oracle** — the command that proves the task is done:
 
 ```yaml
+# spec.yaml
 task: health check returns ok
 success_criteria:
   - "bun test tests/health.test.ts exits 0"
+scope:
+  - "health.ts"
+  - "tests/**"
 oracle:
   type: command
   run: "bun test tests/health.test.ts"
   expect: exit 0
 ```
 
-`sddx task create --spec spec.yaml --workspace none` registers it and prints
-`created <id> phase=PLAN ...` — `--workspace none` runs in place, no branch,
-no worktree (see
-[../tutorials/02-your-first-parallel-run.md](02-your-first-parallel-run.md)
-for the worktree case). A spec without an oracle is rejected right here —
-"no oracle, no goal" — see
-[spec-reference.md](../reference/spec-reference.md#oracle).
+A graph names the **goal** that owns the run branch. Even one task needs one,
+because a task with no goal is a task no run branch describes:
+
+```yaml
+# graph.yaml
+schema_version: "1.0"
+interaction_mode: human
+goal: health endpoint reports ok
+tasks:
+  - alias: health
+    spec: spec.yaml
+```
+
+`sddx graph create --graph graph.yaml --dry-run` validates everything and
+writes nothing. Then `sddx graph approve --graph graph.yaml` followed by
+`sddx graph create --graph graph.yaml` creates the run branch, the task's
+`sddx/<id>` branch, its worktree, and the goal record — atomically, or not at
+all. A spec without an oracle is rejected right here — "no oracle, no goal" —
+see [spec-reference.md](../reference/spec-reference.md#oracle).
+
+**The rest of the loop runs inside the task's worktree**, at
+`.sddx-worktrees/<id>/`. Your own checkout stays untouched and writable.
 
 ## 2. Write the failing test first
 
@@ -76,9 +97,11 @@ checks are in
 
 ## Inside Claude Code
 
-The same loop, without the by-hand phase commands: `/sddx:quick` drives one
-task through this exact sequence, ending in the deterministic **Next
-Actions** menu instead of free-form "what's next" prose. `--solo` is the same
-thing said explicitly for a trivial task — no subagents, no worktree, same
-hook gates. Next:
-[your first parallel run](02-your-first-parallel-run.md).
+The same loop, without the by-hand phase commands: `/sddx:run` drives this
+exact sequence — for one node or many — ending in the deterministic **Next
+Actions** menu instead of free-form "what's next" prose. Next:
+[your first parallel run](02-your-first-parallel-run.md), which is the same
+lifecycle with more than one node in the graph.
+
+Coming from sddx 3.x, where this was `/sddx:quick` or `--solo`? See
+[migrate-to-v4.md](../how-to/migrate-to-v4.md).

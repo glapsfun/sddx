@@ -4,7 +4,7 @@
 import { stuckThreshold } from "./config";
 import { sha256 } from "./receipt";
 import { resolveTask } from "./resolve";
-import { type Phase, transition, writeTask } from "./task";
+import { isTerminal, legacyWorkspaceOf, type Phase, transition, writeTask } from "./task";
 
 export const TEST_RUNNER_PREFIXES: readonly string[] = [
   "bun test",
@@ -60,6 +60,17 @@ export function recordTestRun(
   const res = resolveTask(cwd);
   if (res.kind !== "task") return { matched: true, transitioned: null };
   const task = res.task;
+
+  // A legacy (3.x branch/none) task cannot be advanced by this version, and the
+  // recorder is a passive observer: going inert is the only correct response.
+  // Letting `transition` throw here instead surfaced as a generic "sddx hook
+  // error" on EVERY observed test run in an upgraded checkout, and — because the
+  // throw preceded `writeTask` — silently disabled stuck-streak accumulation for
+  // that checkout too. The migration refusal belongs on the commands the user
+  // actually invokes, not on a hook they never asked to run.
+  if (legacyWorkspaceOf(task) !== null && !isTerminal(task.phase)) {
+    return { matched: true, transitioned: null };
+  }
 
   const at = new Date().toISOString();
   if (exitCode !== 0) {

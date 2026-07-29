@@ -210,11 +210,62 @@ export function writeTask(cwd: string, t: TaskState): void {
   writeFileSync(taskPath(cwd, t.id), `${JSON.stringify(t, null, 2)}\n`);
 }
 
+/** Workspace modes no creation path can produce any more. Reading them is
+ * supported forever; advancing a task that records one is not. */
+const LEGACY_WORKSPACE_MODES: ReadonlySet<string> = new Set(["branch", "none"]);
+
+/**
+ * The legacy workspace mode this task records, or `null` if it records none.
+ *
+ * A DEFERRED task is the subtle case: its `mode` is `"deferred"`, so looking at
+ * `mode` alone sees nothing legacy — the mode it would become on materialization
+ * lives in `materialize_as`. Missing that let a 3.x dependent recorded as
+ * `materialize_as: "branch"` be silently materialized as a worktree, which is
+ * exactly the unsafe workspace branch mode existed to avoid.
+ */
+export function legacyWorkspaceOf(t: TaskState): string | null {
+  const w = t.workspace as Workspace | undefined;
+  if (!w || typeof w !== "object") return null;
+  for (const candidate of [w.mode, w.materialize_as]) {
+    if (typeof candidate === "string" && LEGACY_WORKSPACE_MODES.has(candidate)) return candidate;
+  }
+  return null;
+}
+
+/**
+ * Refuse to advance an unfinished task written by an older sddx.
+ *
+ * `branch` and `none` were real workspace strategies until 4.0. Since no
+ * creation path can produce them now, a task on disk recording one is
+ * unambiguously historical — which is exactly what makes this check possible.
+ * While `--workspace branch|none` still existed, current and legacy state were
+ * indistinguishable and refusing would have broken working repositories.
+ *
+ * Scoped to UNFINISHED tasks on purpose. A completed legacy task has a receipt
+ * and is immutable history: it must keep auditing and displaying normally, so
+ * `board`, `audit`, and `task show` never come through here.
+ *
+ * Abandoning is deliberately NOT routed through here — see `abandonOrRetry`.
+ * Refusing it too would strand a legacy task with no way to close it out, and
+ * the message below promises exactly that remedy.
+ */
+export function assertAdvanceable(t: TaskState): void {
+  const mode = legacyWorkspaceOf(t);
+  if (mode === null || isTerminal(t.phase)) return;
+  throw new Error(
+    `task ${t.id} records the "${mode}" workspace mode, which was removed in sddx 4.0, and is unfinished (phase ${t.phase}). ` +
+      "It cannot be advanced by this version. Either complete it with a compatible older sddx (3.x), " +
+      `or close it out with \`sddx task phase ${t.id} ABANDONED\` and recreate the work as a canonical run with \`sddx graph create\`. ` +
+      "Its state has not been modified.",
+  );
+}
+
 export function transition(
   t: TaskState,
   to: Phase,
   opts: { testExit?: number; internal?: boolean; source?: EvidenceSource } = {},
 ): TaskState {
+  assertAdvanceable(t);
   if (!TRANSITIONS[t.phase].includes(to)) {
     throw new Error(`illegal transition ${t.phase} → ${to}`);
   }
@@ -251,6 +302,7 @@ export function allowPath(t: TaskState, path: string): TaskState {
   if (isTerminal(t.phase)) {
     throw new Error(`task ${t.id} is ${t.phase}; allow-list is frozen on terminal tasks`);
   }
+  assertAdvanceable(t);
   const normalized = normalizeRelPath(path);
   if (normalized === "" || normalized.startsWith("/") || normalized.split("/").includes("..")) {
     throw new Error(`allow requires a repo-relative path, got: ${path}`);
@@ -336,6 +388,18 @@ export function abandonOrRetry(t: TaskState): RetryOutcome {
   const policy = retryPolicyOf(t);
   const attempts = t.attempt_count ?? 1;
   const at = new Date().toISOString();
+  // A legacy task may be CLOSED (that is the documented way out) but never
+  // RETRIED: a retry resets it to PLAN and re-runs the workspace policy, which
+  // is resumption under a mode this version cannot build. Going terminal below
+  // is safe and leaves the user an exit; retrying would erase the very evidence
+  // an older sddx would resume from, while the refusal elsewhere promises that
+  // state was not modified.
+  const legacy = legacyWorkspaceOf(t);
+  if (attempts < policy.max_attempts && legacy !== null) {
+    t.phase = "ABANDONED";
+    t.history.push({ phase: "ABANDONED", at });
+    return { retried: false, attempt_count: attempts, max_attempts: policy.max_attempts };
+  }
   if (attempts < policy.max_attempts) {
     t.attempt_count = attempts + 1;
     t.phase = "PLAN";

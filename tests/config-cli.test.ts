@@ -24,15 +24,16 @@ describe("sddx config show", () => {
     const envelope = JSON.parse(r.stdout);
     expect(envelope.schema_version).toBe("1.0");
     expect(envelope.data).toMatchObject({
-      workspace_mode: "auto",
       stuck_threshold: 3,
       oracle_runs_default: 1,
       board_enabled: true,
       pr_host: null,
       agent_model: {},
-      prefer_solo: false,
       verbose: false,
     });
+    // removed in 4.0 — absent from the resolved shape entirely
+    expect(envelope.data.workspace_mode).toBeUndefined();
+    expect(envelope.data.prefer_solo).toBeUndefined();
   });
 
   test("env var overrides config.json", () => {
@@ -58,7 +59,7 @@ describe("sddx config show", () => {
     expect(r.stderr).toBe("");
     const envelope = JSON.parse(r.stdout);
     expect(envelope.schema_version).toBe("1.0");
-    expect(envelope.data.workspace_mode).toBe("auto");
+    expect(envelope.data.stuck_threshold).toBe(3);
   });
 
   test("agent_model parsed for human-readable output", () => {
@@ -113,15 +114,43 @@ describe("sddx config validate", () => {
     expect(r.stdout).toContain('"oracle_runs_default" must be a positive integer');
   });
 
-  test("structurally-valid but out-of-range/typo'd values are flagged, not silently defaulted", () => {
+  test("structurally-valid but out-of-range values are flagged, not silently defaulted", () => {
     const cwd = fixtureRepo();
-    withConfig(cwd, { stuck_threshold: -2, workspace_mode: "worktrees" });
+    withConfig(cwd, { stuck_threshold: -2 });
     const r = cli(cwd, process.env, "config", "validate");
     expect(r.status).toBe(0);
     expect(r.stdout).toContain('"stuck_threshold" must be a positive integer — got -2');
-    expect(r.stdout).toContain(
-      '"workspace_mode" must be one of auto|worktree|branch|none — got "worktrees"',
-    );
+  });
+
+  test("a removed key is named as removed, not as an unrecognized typo", () => {
+    // The two mean different things to whoever reads the warning: unrecognized
+    // suggests a misspelling, removed means a setting that used to work and
+    // silently stopped. A user who set workspace_mode needs the latter.
+    const cwd = fixtureRepo();
+    withConfig(cwd, { workspace_mode: "branch", prefer_solo: true });
+    const r = cli(cwd, process.env, "config", "validate");
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('"workspace_mode" removed in sddx 4.0');
+    expect(r.stdout).toContain("worktree is the only workspace strategy");
+    expect(r.stdout).toContain('"prefer_solo" removed in sddx 4.0');
+    expect(r.stdout).toContain("one-node");
+    // named as removed, NOT as a typo
+    expect(r.stdout).not.toContain('unrecognized key "workspace_mode"');
+    expect(r.stdout).not.toContain('unrecognized key "prefer_solo"');
+  });
+
+  test("a removed key does not change execution behavior", () => {
+    // It is a notice, never a failure, and nothing downstream reads it.
+    const cwd = fixtureRepo();
+    withConfig(cwd, { workspace_mode: "none", prefer_solo: true, stuck_threshold: 7 });
+    const shown = cli(cwd, process.env, "config", "show", "--output", "json");
+    expect(shown.status).toBe(0);
+    const data = JSON.parse(shown.stdout).data;
+    // the surviving key still resolves normally alongside the dead ones
+    expect(data.stuck_threshold).toBe(7);
+    expect(data.workspace_mode).toBeUndefined();
+    expect(data.prefer_solo).toBeUndefined();
+    expect(cli(cwd, process.env, "config", "validate").status).toBe(0);
   });
 
   test("malformed JSON: fails loudly", () => {

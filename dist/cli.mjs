@@ -8087,12 +8087,14 @@ function namesSensitiveArea(scope) {
   for (const glob of scope) {
     const segments2 = glob.replace(/\\/g, "/").split("/");
     for (const seg of segments2) {
-      const s = seg.toLowerCase();
-      if (SENSITIVE_SEGMENTS.includes(s))
-        return s;
+      for (const word of seg.toLowerCase().split(/[^a-z0-9]+/)) {
+        if (word && SENSITIVE_SEGMENTS.includes(word))
+          return word;
+      }
     }
     const last = segments2[segments2.length - 1] ?? "";
-    if (!/^[*?]+$/.test(last) && SENSITIVE_FILENAMES.some((re) => re.test(last)))
+    const literal = last.replace(/[*?]/g, "");
+    if (literal && SENSITIVE_FILENAMES.some((re) => re.test(literal)))
       return last;
   }
   return;

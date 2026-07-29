@@ -96,6 +96,54 @@ describe("protected-path bound", () => {
     }
   });
 
+  test("naming the area as a file or a suffixed directory still refuses", () => {
+    // Whole-segment equality caught `src/auth/**` but let `src/auth.ts` and
+    // `src/auth-service/**` through — scopes that name the protected area MORE
+    // precisely than the directory form that was refused. Word-wise comparison
+    // closes that, and the suffix form (`user-auth.ts`) with it.
+    const cwd = fixtureRepo();
+    const g = join(cwd, planRepo(cwd, ["x"]));
+    for (const scope of [
+      "src/auth.ts",
+      "lib/billing.ts",
+      "db/migrations.sql",
+      "src/auth-service/**",
+      "lib/user-auth.ts",
+    ]) {
+      const d = decideGate(cwd, g, nodesFor([[scope]]), "auto", 99, scopesOverlap);
+      expect(d.refusal, `${scope} should refuse`).toBeDefined();
+    }
+  });
+
+  test("a wildcard prefix does not defeat a protected filename", () => {
+    // SENSITIVE_FILENAMES are anchored with `^`, so testing them against the
+    // raw segment made the refusal depend on how the planner spelled the glob:
+    // `ops/.env*` refused, `ops/*.env` did not. Wildcards are stripped first.
+    const cwd = fixtureRepo();
+    const g = join(cwd, planRepo(cwd, ["x"]));
+    for (const scope of [
+      "ops/*.env",
+      "deploy/*Dockerfile",
+      "deploy/Docker*file",
+      "x/*docker-compose*",
+    ]) {
+      const d = decideGate(cwd, g, nodesFor([[scope]]), "auto", 99, scopesOverlap);
+      expect(d.refusal, `${scope} should refuse`).toBeDefined();
+    }
+  });
+
+  test("the word boundary keeps the bound from overreaching", () => {
+    // The cost of word-wise matching would be refusing every scope that merely
+    // starts with a protected name. It does not: these share a prefix, not a
+    // word, and auto mode must still be usable.
+    const cwd = fixtureRepo();
+    const g = join(cwd, planRepo(cwd, ["x"]));
+    for (const scope of ["authors/**", "authority/**", "src/authorship.ts"]) {
+      const d = decideGate(cwd, g, nodesFor([[scope]]), "auto", 99, scopesOverlap);
+      expect(d.refusal, `${scope} should pass`).toBeUndefined();
+    }
+  });
+
   test("every protected segment is matched", () => {
     const cwd = fixtureRepo();
     const g = join(cwd, planRepo(cwd, ["x"]));

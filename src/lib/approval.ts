@@ -8,7 +8,8 @@
 // runs is the plan that was approved. It does NOT prove a human approved it —
 // any caller can write a token. The hook-side permission dialog is what a model
 // cannot self-grant, and an SSH signature over a touch-required key is the only
-// configuration that binds approval to a person. See docs/execution-modes.md.
+// configuration that binds approval to a person. See
+// docs/explanation/interaction-modes.md.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { InteractionMode } from "./config";
@@ -303,18 +304,37 @@ export const SENSITIVE_FILENAMES = [/^Dockerfile/i, /^\.env/i, /^docker-compose/
 
 /** Does this scope glob name a protected area at any depth? Compares literal
  * segments only — a wildcard segment names nothing, which is what keeps
- * `src/**` out of this and `src/auth/**` in it. */
+ * `src/**` out of this and `src/auth/**` in it.
+ *
+ * A segment is compared WORD-WISE, not by whole-segment equality: it is split
+ * on non-alphanumerics and each word checked against the list. Equality alone
+ * read `src/auth/**` as protected but let `src/auth.ts`, `src/auth-service/**`,
+ * and `db/migrations.sql` through — scopes that name the protected area more
+ * precisely than the directory form that was caught. Word-wise matching also
+ * catches the suffix form (`lib/user-auth.ts`).
+ *
+ * The word boundary is what keeps this from overreaching: `authors/**` and
+ * `authority/**` tokenize to one word that is not `auth`, so they still pass.
+ * The cost is the reverse — `authentication/**` is one word too and is NOT
+ * caught. That is the conservative direction for a *bound* (a missed refusal in
+ * auto mode is recoverable; refusing every plan turns auto mode off), and human
+ * mode reviews it regardless. */
 export function namesSensitiveArea(scope: string[]): string | undefined {
   for (const glob of scope) {
     const segments = glob.replace(/\\/g, "/").split("/");
     for (const seg of segments) {
-      const s = seg.toLowerCase();
-      if ((SENSITIVE_SEGMENTS as readonly string[]).includes(s)) return s;
+      for (const word of seg.toLowerCase().split(/[^a-z0-9]+/)) {
+        if (word && (SENSITIVE_SEGMENTS as readonly string[]).includes(word)) return word;
+      }
     }
     // The last segment names a file. Wildcard-only segments (`**`, `*`) name
-    // nothing, which is what keeps `src/**` out of this.
+    // nothing, which is what keeps `src/**` out of this. Wildcards are stripped
+    // before the patterns are applied, because they are anchored with `^`: a
+    // planner spelling the same scope `ops/*.env` rather than `ops/.env*` used
+    // to decide whether the bound fired at all.
     const last = segments[segments.length - 1] ?? "";
-    if (!/^[*?]+$/.test(last) && SENSITIVE_FILENAMES.some((re) => re.test(last))) return last;
+    const literal = last.replace(/[*?]/g, "");
+    if (literal && SENSITIVE_FILENAMES.some((re) => re.test(literal))) return last;
   }
   return undefined;
 }

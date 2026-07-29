@@ -142,7 +142,7 @@ which is the point.
    Every autonomy bound is a **hard refusal**, not a degradation to a prompt:
    there is no "approve your way past it". `auto` refuses when the plan exceeds
    `auto_max_tasks`; when any node's `scope` reaches sddx's own enforcement
-   paths (`hooks/**`, `.claude-plugin/**`, `dist/**`, `bin/**`, `.claude/**`,
+   paths (`hooks/**`, `templates/**`, `dist/**`, `bin/**`, `.claude/**`,
    CI workflows) or a protected area (auth, migrations, secrets, credentials,
    billing, `infra/**`, `terraform/**`, `k8s/**`, Dockerfiles, `.env*`); when a
    node declares no `scope` at all (unconfined); when the header carries a

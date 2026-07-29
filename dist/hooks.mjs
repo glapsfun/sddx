@@ -9307,7 +9307,7 @@ function mergeAssumptions(goalLevel, nodeLevel) {
 var renderBlocker = (b) => `${b.node ? `node "${b.node}": ` : ""}${b.decision} — ${b.impact} ${b.next_step}`;
 var SELF_MODIFYING_GLOBS = [
   "hooks/**",
-  ".claude-plugin/**",
+  "templates/**",
   ".github/workflows/**",
   "dist/**",
   "bin/**",

@@ -30,7 +30,7 @@
     "dist/cli.mjs",
     "bin/sddx",
     "bin/sddx-run",
-    ".claude-plugin/plugin.json",
+    "templates/",
     "README.md",
     "LICENSE"
   ],

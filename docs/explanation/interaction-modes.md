@@ -192,7 +192,7 @@ tripped an autonomy bound would produce exactly that hybrid.
 | a `manual` oracle | it means a human observes the result; an unattended run has nobody. Incoherence, not risk appetite. (`browser` is fine — headless browser oracles genuinely execute) |
 | granting a `task allow` TDD-gate exemption | the allow-list is the only escape hatch from the TDD gate; a run that could widen its own gate has no gate. Needs a human in **both** modes |
 | a node with no `scope` at all | unconfined: it may write anything, including every path below. Treating "no scope" as "no reach" would make omitting `scope` the cheapest bypass |
-| any `scope` reaching `hooks/**`, `.claude-plugin/**`, `dist/**`, `bin/**`, `.claude/**`, or CI workflows | a plan that edits the machinery enforcing the plan — including the *compiled* gates, which are what actually run |
+| any `scope` reaching `hooks/**`, `templates/**`, `dist/**`, `bin/**`, `.claude/**`, or CI workflows | a plan that edits the machinery enforcing the plan — including the *compiled* gates, which are what actually run |
 | any `scope` naming a protected area — `auth`, `migrations`, `secrets`, `credentials`, `billing` — or reaching `infra/**`, `terraform/**`, `k8s/**`, a `Dockerfile*`, a `docker-compose*`, or a `.env*` | a security, data, billing, or deployment decision is not one an unattended run may take |
 | a non-empty `unresolved` list in the Goal Brief header | intake reported a decision it could not safely take, so the plan rests on a choice nobody has made |
 | node count > `auto_max_tasks` (default 6) | blast radius ≈ worktrees forked |

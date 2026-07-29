@@ -257,8 +257,38 @@ function checkAdapters(
     checks.push(
       pass(`adapter:${name}`, `up to date (${Object.keys(manifest?.files ?? {}).length} files)`),
     );
+    checks.push(...checkGeneratedTracked(root, adapter, ctx));
   }
   return checks;
+}
+
+/**
+ * Are the adapter's generated files actually going to reach teammates?
+ *
+ * The gate is a team contract — that is the entire reason hooks go into the
+ * committed settings file rather than the personal one. A repository that
+ * gitignores the harness directory gets a working gate for whoever ran `init`
+ * and no gate at all for everyone else, which is the failure mode sddx exists
+ * to remove. Worth naming loudly; not worth failing over, since a solo
+ * repository is a legitimate reason to keep it ignored.
+ */
+function checkGeneratedTracked(root: string, adapter: Adapter, ctx: AdapterContext): Check[] {
+  const paths = [
+    ...adapter.generate(ctx).map((f) => f.path),
+    ...adapter.mergeTargets(ctx).map((t) => t.path),
+  ];
+  const ignored = paths.filter((p) => {
+    const r = spawnSync("git", ["check-ignore", "-q", p], { cwd: root });
+    return r.status === 0;
+  });
+  if (ignored.length === 0) return [];
+  return [
+    warn(
+      `adapter:${adapter.name}:tracked`,
+      `${ignored.length} generated file(s) are gitignored (${ignored.slice(0, 3).join(", ")}${ignored.length > 3 ? ", …" : ""}) — teammates will not get the TDD gate`,
+      `git check-ignore -v ${ignored[0]}   # then un-ignore the sddx-owned paths, or accept a local-only setup`,
+    ),
+  ];
 }
 
 /**

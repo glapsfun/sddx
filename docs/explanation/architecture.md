@@ -11,22 +11,25 @@ design choice is in [design-principles.md](design-principles.md) and
 
 ```
 sddx/
-├── .claude-plugin/plugin.json   # ONLY the manifest lives here (name, version, userConfig)
-├── skills/                      # /sddx:run, plan, verify, board, audit, pr
-├── agents/                      # intake, orchestrator, planner, tdd-executor, verifier
-├── hooks/hooks.json             # the five hook registrations
+├── templates/claude/            # adapter templates, shipped in the npm package
+│   ├── skills/                  # /sddx:run, plan, verify, board, audit, pr
+│   ├── agents/                  # intake, orchestrator, planner, tdd-executor, verifier
+│   └── hooks/hooks.json         # the hook registrations
 ├── bin/sddx-run                 # POSIX launcher: Bun required, no fallback
 ├── src/                         # TypeScript sources (Bun toolchain)
-│   └── lib/                     # spec, task, classify, receipt, verify, worktree, git…
+│   ├── lib/                     # spec, task, classify, receipt, verify, worktree, git…
+│   └── lib/adapters/            # one module per harness; claude is the only one
 ├── dist/                        # committed dependency-free bundles: cli.mjs, hooks.mjs, bootstrap.mjs
 ├── scripts/                     # build.ts, token-budget.ts
 └── tests/                       # bun test: unit + hook integration + e2e milestones
 ```
 
-Claude Code plugin rules honored throughout: only the manifest inside
-`.claude-plugin/`; skills (not legacy `commands/`); every script referenced as
-`${CLAUDE_PLUGIN_ROOT}/dist/….mjs`; `claude plugin validate --strict` runs in
-CI.
+The templates carry a single `{{SDDX}}` placeholder wherever they invoke the
+CLI. `sddx init --adapter claude` substitutes the invocation implied by the
+repository's committed `runtime_scope` and writes the result into the project's
+own `.claude/` — `sddx-` prefixed, so nothing can collide with assets the user
+wrote. Because the substitution depends only on committed policy, two
+developers generate byte-identical files.
 
 Role separation is enforced with tool restrictions, not prompting: the
 `intake`, `orchestrator` and `planner` agents have no source-edit tools

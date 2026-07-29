@@ -56,11 +56,36 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun test
 
-  plugin-validate:
+  package-smoke:
+    # Proves the artifact users actually get: pack it, install it somewhere
+    # else entirely, and initialize a throwaway repository with it. A green
+    # unit suite says nothing about whether the tarball is complete.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/validate-plugin
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - name: pack and install into a clean prefix
+        run: |
+          set -euo pipefail
+          tarball="$(npm pack --silent)"
+          mkdir -p "$RUNNER_TEMP/global"
+          npm install --prefix "$RUNNER_TEMP/global" --global "$PWD/$tarball"
+          echo "$RUNNER_TEMP/global/bin" >> "$GITHUB_PATH"
+      - name: initialize a throwaway repository
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/probe"
+          cd "$RUNNER_TEMP/probe"
+          git init -q -b main .
+          git config user.email ci@example.invalid
+          git config user.name ci
+          sddx --version
+          sddx init --yes --runtime global --adapter claude
+          sddx doctor
 
   links:
     runs-on: ubuntu-latest

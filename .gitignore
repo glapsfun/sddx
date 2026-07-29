@@ -13,3 +13,10 @@ node_modules/
 
 # sddx examples (local runs only — CI uses its own scratch dir)
 examples/*/.sandbox/
+
+# sddx (generated) — do not edit between markers
+.sddx/local/
+.sddx/cache/
+.sddx/sessions/
+.sddx-worktrees/
+# end sddx

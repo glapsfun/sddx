@@ -302,3 +302,19 @@ describe("output", () => {
     expect(combined).toContain("fix: sddx init");
   });
 });
+
+describe("generated files must reach teammates", () => {
+  test("gitignored adapter output warns — a gate only one person has is not a gate", () => {
+    const root = initialized();
+    write(root, ".gitignore", ".claude\n");
+
+    const tracked = byId(checks(root).checks, "adapter:claude:tracked")!;
+    expect(tracked.status).toBe("warn");
+    expect(tracked.detail).toContain("teammates");
+    expect(tracked.fix).toContain("git check-ignore");
+  });
+
+  test("normally tracked adapter output produces no such warning", () => {
+    expect(byId(checks(initialized()).checks, "adapter:claude:tracked")).toBeUndefined();
+  });
+});

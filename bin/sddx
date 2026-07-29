@@ -1,6 +1,6 @@
 #!/bin/sh
 # npm/bun `bin` entry point: delegate to the generic sddx-run runtime shim
-# (bun, else node >= 18) with the bundled CLI resolved relative to this
+# (Bun only — see that script) with the bundled CLI resolved relative to this
 # file's real location. npm/bun install this as a symlink in a global bin
 # dir, so $0 must be resolved through the symlink chain first — `dirname
 # "$0"` alone would point at the bin dir, not this package.

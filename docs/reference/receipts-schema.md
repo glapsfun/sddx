@@ -13,7 +13,7 @@ writes nothing; there are no failure receipts, so `verdict` is always
 | `prev`           | string            | sha256 of the parent receipt *file*, or `"genesis"` for the first        |
 | `harness`        | string            | Harness that ran the loop (e.g. `claude-code`)                           |
 | `model`          | string \| null    | Model provenance, when known                                             |
-| `plugin_version` | string            | sddx version that wrote the receipt                                      |
+| `plugin_version` | string            | sddx version that wrote the receipt, read from `package.json` (see note) |
 | `oracle`         | `{run, expect}`   | The exact command executed and the expectation                           |
 | `exit_code`      | number            | Observed oracle exit code                                                |
 | `duration_ms`    | number            | Oracle wall-clock duration                                               |
@@ -28,6 +28,22 @@ writes nothing; there are no failure receipts, so `verdict` is always
 The `allow` field closes the loop on the gate's only escape hatch
 ([hooks.md](hooks.md)): every exemption a task used is part of its permanent
 record.
+
+### Note on `plugin_version`
+
+The field is named for the plugin distribution sddx used to ship as. That
+distribution is retired and the value is now read from `package.json`, the
+single version source — but **the key keeps its name on purpose.** Receipts are
+immutable and hash-chained: renaming a field would change the bytes every
+historical receipt is hashed over, breaking `sddx audit` at the version
+boundary and invalidating chains that are otherwise perfectly sound. Treat it
+as a wire-format name, not a statement about where the number comes from.
+
+The `env.runtime` field is subject to the same rule. It records `bun` for
+anything sddx writes today, and `unknown` in the unreachable case where Bun is
+somehow absent; `node` is still *accepted* by the validator so that receipts
+written before Bun became the only supported runtime keep validating, but
+nothing writes it any more.
 
 ## Receipt v3 (sddx ≥ 0.2)
 

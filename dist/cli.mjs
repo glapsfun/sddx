@@ -7867,7 +7867,7 @@ function validateReceipt(raw) {
     const runs = r.runs;
     need("runs", Array.isArray(runs) && runs.length >= 1 && runs.every((run) => typeof run === "object" && run !== null && typeof run.exit_code === "number" && typeof run.duration_ms === "number" && run.duration_ms >= 0 && HEX64.test(String(run.stdout_sha256)) && HEX64.test(String(run.stderr_sha256))));
     const env = r.env;
-    need("env", !!env && typeof env === "object" && typeof env.os === "string" && env.os !== "" && typeof env.arch === "string" && env.arch !== "" && (env.runtime === "bun" || env.runtime === "node") && typeof env.runtime_version === "string" && env.runtime_version !== "" && typeof env.dirty_tree === "boolean");
+    need("env", !!env && typeof env === "object" && typeof env.os === "string" && env.os !== "" && typeof env.arch === "string" && env.arch !== "" && (env.runtime === "bun" || env.runtime === "unknown" || env.runtime === "node") && typeof env.runtime_version === "string" && env.runtime_version !== "" && typeof env.dirty_tree === "boolean");
     need("signature", r.signature === undefined && r.signer === undefined || typeof r.signature === "string" && r.signature !== "" && typeof r.signer === "string" && r.signer !== "");
   }
   need("task_id", typeof r.task_id === "string" && r.task_id !== "");
@@ -10275,8 +10275,8 @@ function captureEnv(cwd) {
   return {
     os: platform(),
     arch: arch(),
-    runtime: bun ? "bun" : "node",
-    runtime_version: bun ? bun.version : process.versions.node,
+    runtime: bun ? "bun" : "unknown",
+    runtime_version: bun ? bun.version : "unknown",
     dirty_tree: status.status === 0 && (status.stdout ?? "").trim() !== ""
   };
 }
@@ -10431,7 +10431,7 @@ function makeReporter(command, format, noColor) {
   currentCommand = command;
   return new Reporter(command, format, {
     noColor,
-    pluginVersion: pluginVersion(),
+    pluginVersion: sddxVersion(),
     harness: "claude-code"
   });
 }
@@ -10461,19 +10461,13 @@ function rejectRemovedFlags(args) {
     }
   }
 }
-function readVersionField(relativePath) {
+function sddxVersion() {
   try {
-    const manifest = new URL(relativePath, import.meta.url);
+    const manifest = new URL("../package.json", import.meta.url);
     return JSON.parse(readFileSync9(manifest, "utf8")).version;
   } catch {
     return "unknown";
   }
-}
-function pluginVersion() {
-  return readVersionField("../.claude-plugin/plugin.json");
-}
-function packageVersion() {
-  return readVersionField("../package.json");
 }
 
 class Rollback {
@@ -11049,7 +11043,7 @@ function cmdVerify(cwd, args, format, noColor) {
   const res = verifyTask(cwd, id, {
     model: flag(args, "--model") ?? null,
     harness: flag(args, "--harness"),
-    pluginVersion: pluginVersion()
+    pluginVersion: sddxVersion()
   });
   if (res.verdict === "pass") {
     const integration = res.integration ?? { result: "none" };
@@ -11366,7 +11360,7 @@ function main(argv) {
   currentNoColor = noColor;
   const [cmd, ...rest] = cleaned;
   if (cmd === "--version" || cmd === "-v") {
-    printLine(packageVersion());
+    printLine(sddxVersion());
     return;
   }
   if (cmd === "--help" || cmd === "-h") {

@@ -141,7 +141,7 @@ function makeReporter(command: string, format: OutputFormat, noColor: boolean): 
   currentCommand = command;
   return new Reporter(command, format, {
     noColor,
-    pluginVersion: pluginVersion(),
+    pluginVersion: sddxVersion(),
     harness: "claude-code",
   });
 }
@@ -182,21 +182,27 @@ function rejectRemovedFlags(args: string[]): void {
   }
 }
 
-function readVersionField(relativePath: string): string {
+/**
+ * The product version, and the only version source there is.
+ *
+ * Resolved relative to this module's own URL so it works identically from a
+ * cloned checkout (`src/cli.ts` → `../package.json`) and from an installed
+ * package (`dist/cli.mjs` → `../package.json`), including when a global install
+ * reached the bundle through a symlinked `bin` entry.
+ *
+ * This value is what gets stamped into a receipt's `plugin_version` field. The
+ * FIELD keeps its name — receipts are immutable and hash-chained, so renaming
+ * it would invalidate every historical receipt at the version boundary and
+ * break `sddx audit` across it. It is a wire-format name, not a claim about
+ * where the number is read from. See docs/reference/receipts.md.
+ */
+function sddxVersion(): string {
   try {
-    const manifest = new URL(relativePath, import.meta.url);
+    const manifest = new URL("../package.json", import.meta.url);
     return (JSON.parse(readFileSync(manifest, "utf8")) as { version: string }).version;
   } catch {
     return "unknown";
   }
-}
-
-function pluginVersion(): string {
-  return readVersionField("../.claude-plugin/plugin.json");
-}
-
-function packageVersion(): string {
-  return readVersionField("../package.json");
 }
 
 /**
@@ -1056,7 +1062,7 @@ function cmdVerify(cwd: string, args: string[], format: OutputFormat, noColor: b
   const res = verifyTask(cwd, id, {
     model: flag(args, "--model") ?? null,
     harness: flag(args, "--harness"),
-    pluginVersion: pluginVersion(),
+    pluginVersion: sddxVersion(),
   });
   if (res.verdict === "pass") {
     const integration = res.integration ?? { result: "none" };
@@ -1301,6 +1307,10 @@ function cmdConfigShow(cwd: string, args: string[], format: OutputFormat, noColo
     `verbose: ${cfg.verbose}`,
     `interaction_mode: ${cfg.interaction_mode}`,
     `auto_max_tasks: ${cfg.auto_max_tasks}`,
+    `runtime_scope: ${cfg.runtime_scope}`,
+    `package_manager: ${cfg.package_manager}`,
+    `adapters: ${cfg.adapters.length > 0 ? cfg.adapters.join(",") : "(none)"}`,
+    `schema_version: ${cfg.schema_version ?? "(unset — predates sddx init)"}`,
   ];
   reporter.success(lines.join("\n"));
 
@@ -1499,7 +1509,7 @@ function main(argv: string[]): void {
   currentNoColor = noColor;
   const [cmd, ...rest] = cleaned;
   if (cmd === "--version" || cmd === "-v") {
-    printLine(packageVersion());
+    printLine(sddxVersion());
     return;
   }
   if (cmd === "--help" || cmd === "-h") {

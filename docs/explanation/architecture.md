@@ -15,7 +15,7 @@ sddx/
 ├── skills/                      # /sddx:run, plan, verify, board, audit, pr
 ├── agents/                      # intake, orchestrator, planner, tdd-executor, verifier
 ├── hooks/hooks.json             # the five hook registrations
-├── bin/sddx-run                 # POSIX launcher: prefer bun, fall back to node ≥18
+├── bin/sddx-run                 # POSIX launcher: Bun required, no fallback
 ├── src/                         # TypeScript sources (Bun toolchain)
 │   └── lib/                     # spec, task, classify, receipt, verify, worktree, git…
 ├── dist/                        # committed dependency-free bundles: cli.mjs, hooks.mjs, bootstrap.mjs

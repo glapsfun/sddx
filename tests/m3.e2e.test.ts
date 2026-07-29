@@ -17,8 +17,8 @@ interface HookResult {
   raw: string;
 }
 
-function runHook(sub: string, event: unknown, runtime: "bun" | "node" = "bun"): HookResult {
-  const r = spawnSync(runtime, [HOOKS, sub], {
+function runHook(sub: string, event: unknown): HookResult {
+  const r = spawnSync("bun", [HOOKS, sub], {
     input: typeof event === "string" ? event : JSON.stringify(event),
     encoding: "utf8",
   });
@@ -97,14 +97,6 @@ describe("hook I/O contract (5.1)", () => {
     const res = runHook("frobnicate", {});
     expect(res.exitCode).toBe(0);
     expect(String(res.output.systemMessage)).toContain("unknown subcommand");
-  });
-
-  test("gate decisions are identical under plain node (launcher fallback)", () => {
-    const { wt: repo } = repoWithTask();
-    const bunRes = runHook("tdd-gate", editEvent(repo, join(repo, "src", "api.ts")), "bun");
-    const nodeRes = runHook("tdd-gate", editEvent(repo, join(repo, "src", "api.ts")), "node");
-    expect(nodeRes.exitCode).toBe(0);
-    expect(denyReason(nodeRes)).toBe(denyReason(bunRes));
   });
 });
 

@@ -1,7 +1,7 @@
 # CLI reference
 
-`sddx` is `bin/sddx-run dist/cli.mjs`, run from the plugin root: a bun-or-node
-launcher executing a dependency-free bundle. Run it from the root of the
+`sddx` is `bin/sddx-run dist/cli.mjs`: a Bun-required launcher executing a
+dependency-free bundle. Run it from the root of the
 repository you're working in — all paths (`.sddx/`, worktrees) resolve against
 the current directory.
 

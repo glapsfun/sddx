@@ -21,7 +21,7 @@
     "oracle"
   ],
   "engines": {
-    "node": ">=18"
+    "bun": ">=1.0.0"
   },
   "bin": {
     "sddx": "bin/sddx"

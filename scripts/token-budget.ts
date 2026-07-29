@@ -33,17 +33,17 @@ function alwaysOnText(markdown: string): string {
 
 function alwaysOnFiles(root: string): string[] {
   const files: string[] = [];
-  const skillsDir = join(root, "skills");
+  const skillsDir = join(root, "templates", "claude", "skills");
   if (existsSync(skillsDir)) {
     for (const name of readdirSync(skillsDir).sort()) {
-      const skill = join("skills", name, "SKILL.md");
+      const skill = join("templates", "claude", "skills", name, "SKILL.md");
       if (existsSync(join(root, skill))) files.push(skill);
     }
   }
-  const agentsDir = join(root, "agents");
+  const agentsDir = join(root, "templates", "claude", "agents");
   if (existsSync(agentsDir)) {
     for (const name of readdirSync(agentsDir).sort()) {
-      if (name.endsWith(".md")) files.push(join("agents", name));
+      if (name.endsWith(".md")) files.push(join("templates", "claude", "agents", name));
     }
   }
   return files;

@@ -118,6 +118,7 @@ export function verifyTask(
       ? {
           approval: {
             mode: goalApproval.mode,
+            ...(goalApproval.authorization ? { authorization: goalApproval.authorization } : {}),
             ...(goalApproval.requested_mode ? { requested_mode: goalApproval.requested_mode } : {}),
             ...(goalApproval.degraded_reason
               ? { degraded_reason: goalApproval.degraded_reason }

@@ -17,6 +17,8 @@ usage:
   sddx goal show <id>
   sddx graph create --graph <path> [--workspace auto|worktree|branch|none] [--dry-run]
   sddx graph approve --graph <path> [--workspace auto|worktree|branch|none]
+  sddx graph regenerate --graph <path>
+  sddx graph cancel --graph <path>
   sddx pr create --goal <goal-id> [--title <title>]
   sddx run report --goal <goal-id>
   sddx board
@@ -133,7 +135,7 @@ verification. Prints the full list: `<id> allow=[…]`.
 **Refused in `auto` mode.** The allow list is the only escape hatch from the TDD
 gate, so an unattended run that could widen it would have no gate. This is an
 absolute invariant, not a threshold: granting an exemption requires a human in
-both modes. Set `execution_mode: "human"` in `.sddx/config.json` to grant it
+both modes. Set `interaction_mode: "human"` in `.sddx/config.json` to grant it
 (there is no `--mode` flag, and no environment override — see
 [config.md](config.md#the-two-gate-keys-are-config-only-on-purpose)).
 
@@ -246,7 +248,9 @@ topological execution order, the **effective workspace mode** (downgrades
 applied), the **resolved base SHA**, and the validation verdict. This is the
 approval screen: those last three are decided inside `graph create` and are
 absent from the drafts. A second `--dry-run` of a revised plan prints only what
-changed.
+changed — over every node's spec **and** over the Goal Brief header, so an
+edited constraint, acceptance criterion, or unresolved item is never reported as
+"none".
 
 In `human` mode (the default), creation requires a matching approval token and
 exits **3** without one, having written nothing. Validation runs first, so an
@@ -277,15 +281,76 @@ checkout instead of an isolated worktree; `graph create` exits 3 on the mismatch
 rather than silently dropping the isolation you approved.
 
 A token always records `mode: human` — approving *is* the deliberate act, so a
-receipt reading `mode: auto` always means no human saw that plan. When
-`execution_mode` is `auto` and a blast-radius bound armed the gate anyway, the
-token additionally records `requested_mode: auto` and the bound that tripped, so
-the degradation is visible without weakening what `mode` means.
+receipt reading `mode: auto` always means no human saw that plan. An autonomy
+bound never produces a token: exceeding one is a **hard refusal**, not a
+degradation to an interactive prompt, precisely so a run recorded `auto` can
+never have a human approval hiding underneath it. Tokens written by older
+versions may carry `requested_mode` and `degraded_reason`; both still parse
+during an audit, and neither is written any more.
 
 Signed best-effort under the `sddx-approval` SSH namespace when git signing is
 configured; an unsigned token is normal, never an error. A signature only binds
 approval to a person when the key is touch-required — see
 [what sddx can and cannot prove](../explanation/execution-modes.md#what-sddx-can-and-cannot-prove).
+
+## sddx graph regenerate
+
+```sh
+sddx graph regenerate --graph <path>
+```
+
+The **Regenerate** plan action. Truncates the draft back to its Goal Brief
+header — dropping `tasks:` — and removes the node spec drafts it referenced, so
+the orchestrator can produce a new decomposition from the same brief.
+
+The header is truncated **textually**, so every recorded answer and assumption
+survives byte for byte: a re-plan is not a reason to re-ask questions the user
+already answered, and re-serializing the YAML would move the graph bytes and
+invalidate an approval over a brief nobody edited.
+
+Exits 3 once a goal has been created from the plan — regenerate applies while
+the plan is still a draft, and is not a way to unwind a materialized run. A
+goal record that exists but cannot be parsed counts as created: an unreadable
+record is still a materialized run.
+
+Both the `--graph` path and every node `spec:` path it names must resolve inside
+`.sddx/drafts/`; anything else exits 2 without writing. This command deletes,
+and neither the command line nor a draft's `spec:` strings are a trusted path
+source — the Bash gate lets the sddx CLI run in every phase.
+
+## sddx graph cancel
+
+```sh
+sddx graph cancel --graph <path>
+```
+
+The **Cancel** plan action. Removes the graph draft and its node spec drafts,
+and nothing else — before materialization there is no branch, worktree, task,
+goal record, or approval token to undo. That is the reason the approval gate
+sits before creation rather than after it.
+
+Exits 3 once a goal has been created from the plan, and refuses any path outside
+`.sddx/drafts/`, for the same reasons as `graph regenerate`. It also discards the
+cached render, so re-planning the same goal sentence renders in full rather than
+diffing against the plan that was cancelled.
+
+## sddx intake check
+
+```sh
+sddx intake check --batch <path>
+```
+
+Validates an intake question batch before it is rendered to the user: at most
+three questions per dispatch, each with an `id`, the `question`, and a `why`
+(an optional `default` may be given). Over the cap it exits nonzero **naming
+the cap** rather than truncating — silently dropping the fourth question would
+discard whichever one intake judged most important.
+
+An unreadable or malformed batch fails rather than passing as "no questions",
+so a broken batch cannot send an unreviewed plan past the question round. So
+does a readable file that is not a batch at all — a mapping with no `questions`
+key (the graph header is the one written here by mistake). Only an empty file,
+`{}`, or an explicitly empty `questions:` list is a valid batch of none.
 
 ## sddx run report
 

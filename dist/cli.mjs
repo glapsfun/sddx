@@ -6953,7 +6953,7 @@ import {
   rmSync as rmSync3,
   writeFileSync as writeFileSync9
 } from "node:fs";
-import { dirname as dirname3, join as join12, relative as relative2, resolve as resolve2 } from "node:path";
+import { dirname as dirname3, isAbsolute as isAbsolute4, join as join12, relative as relative2, resolve as resolve2 } from "node:path";
 
 // src/audit.ts
 import { spawnSync as spawnSync5 } from "node:child_process";
@@ -7082,6 +7082,77 @@ function scopesOverlap(a, b) {
 
 // src/lib/graph.ts
 var ALIAS_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+var INTERACTION_MODES = ["human", "auto"];
+function stringList(key, value, errors2) {
+  if (value === undefined)
+    return [];
+  if (!Array.isArray(value) || value.length === 0 || !value.every((s) => typeof s === "string" && s.trim() !== "")) {
+    errors2.push(`${key}: when present, must be a non-empty list of non-empty strings`);
+    return [];
+  }
+  return value.map((s) => s.trim());
+}
+function entryField(key, i, entry, field, errors2) {
+  const v = entry[field];
+  if (typeof v !== "string" || v.trim() === "") {
+    errors2.push(`${key}[${i}]: missing "${field}"`);
+    return "";
+  }
+  return v.trim();
+}
+function parseAnswers(value, errors2) {
+  if (value === undefined)
+    return [];
+  if (!Array.isArray(value) || value.length === 0) {
+    errors2.push("answers: when present, must be a non-empty list of {id, question, answer}");
+    return [];
+  }
+  const out = [];
+  for (let i = 0;i < value.length; i++) {
+    const e = value[i];
+    if (typeof e !== "object" || e === null || Array.isArray(e)) {
+      errors2.push(`answers[${i}]: must be a mapping with id, question and answer`);
+      continue;
+    }
+    const r = e;
+    out.push({
+      id: entryField("answers", i, r, "id", errors2),
+      question: entryField("answers", i, r, "question", errors2),
+      answer: entryField("answers", i, r, "answer", errors2)
+    });
+  }
+  return out;
+}
+function parseAssumptions(value, errors2) {
+  if (value === undefined)
+    return [];
+  if (!Array.isArray(value) || value.length === 0) {
+    errors2.push("assumptions: when present, must be a non-empty list of non-empty values");
+    return [];
+  }
+  const out = [];
+  for (let i = 0;i < value.length; i++) {
+    const e = value[i];
+    if (typeof e === "string") {
+      if (e.trim() === "")
+        errors2.push(`assumptions[${i}]: must not be empty`);
+      else
+        out.push(e.trim());
+      continue;
+    }
+    if (typeof e !== "object" || e === null || Array.isArray(e)) {
+      errors2.push(`assumptions[${i}]: must be a string or a mapping with id, value and rationale`);
+      continue;
+    }
+    const r = e;
+    entryField("assumptions", i, r, "id", errors2);
+    const v = entryField("assumptions", i, r, "value", errors2);
+    const rationale = entryField("assumptions", i, r, "rationale", errors2);
+    if (v !== "" && rationale !== "")
+      out.push(`${v} — ${rationale}`);
+  }
+  return out;
+}
 function parseGraph(yamlText) {
   let raw;
   try {
@@ -7101,11 +7172,20 @@ function parseGraph(yamlText) {
     errors2.push("tasks: non-empty list of task nodes required");
     return { errors: errors2 };
   }
-  if (r.assumptions !== undefined) {
-    if (!Array.isArray(r.assumptions) || r.assumptions.length === 0 || !r.assumptions.every((s) => typeof s === "string" && s.trim() !== "")) {
-      errors2.push("assumptions: when present, must be a non-empty list of non-empty strings");
-    }
+  const schemaVersion = typeof r.schema_version === "string" || typeof r.schema_version === "number" ? String(r.schema_version).trim() : "";
+  if (schemaVersion === "") {
+    errors2.push("schema_version: required in the Goal Brief header of a planned graph");
   }
+  const mode = typeof r.interaction_mode === "string" ? r.interaction_mode.trim() : "";
+  if (!INTERACTION_MODES.includes(mode)) {
+    errors2.push(`interaction_mode: required in the Goal Brief header, one of ${INTERACTION_MODES.join("|")}`);
+  }
+  const answers = parseAnswers(r.answers, errors2);
+  const assumptions = parseAssumptions(r.assumptions, errors2);
+  const constraints = stringList("constraints", r.constraints, errors2);
+  const acceptanceCriteria = stringList("acceptance_criteria", r.acceptance_criteria, errors2);
+  const outOfScope = stringList("out_of_scope", r.out_of_scope, errors2);
+  const unresolved = stringList("unresolved", r.unresolved, errors2);
   const nodes = [];
   const seen = new Set;
   for (let i = 0;i < r.tasks.length; i++) {
@@ -7151,9 +7231,48 @@ function parseGraph(yamlText) {
     graph: {
       goal: r.goal.trim(),
       tasks: nodes,
-      assumptions: Array.isArray(r.assumptions) ? r.assumptions.map((s) => s.trim()) : []
+      assumptions,
+      schema_version: schemaVersion,
+      interaction_mode: mode,
+      answers,
+      constraints,
+      acceptance_criteria: acceptanceCriteria,
+      unresolved,
+      out_of_scope: outOfScope
     }
   };
+}
+var TOP_LEVEL_KEY = /^[^\s#-][^:]*:/;
+function truncateToHeader(yamlText) {
+  const lines = yamlText.split(`
+`);
+  const out = [];
+  let dropping = false;
+  for (const line of lines) {
+    if (dropping) {
+      if (TOP_LEVEL_KEY.test(line))
+        dropping = false;
+      else
+        continue;
+    }
+    if (/^tasks:/.test(line)) {
+      dropping = true;
+      continue;
+    }
+    out.push(line);
+  }
+  const text = out.join(`
+`);
+  return yamlText.endsWith(`
+`) && text !== "" && !text.endsWith(`
+`) ? `${text}
+` : text;
+}
+function briefAssumptions(graph) {
+  return [
+    ...graph.assumptions,
+    ...graph.answers.map((a) => `answered: ${a.question} → ${a.answer}`)
+  ];
 }
 function ancestors(id, parents, guard = new Set([id])) {
   const out = new Set;
@@ -7598,6 +7717,10 @@ function readGoal(cwd, id) {
   }
   return g;
 }
+function goalExists(cwd, id) {
+  const root = mainRoot(cwd);
+  return goalBlobSha(root, id) !== null || existsSync2(goalPath(root, id));
+}
 function writeGoal(cwd, g) {
   const root = mainRoot(cwd);
   g.updated_at = new Date().toISOString();
@@ -7706,7 +7829,7 @@ function validateReceipt(raw) {
   if (version >= 4) {
     if (r.approval !== undefined) {
       const a = r.approval;
-      need("approval", typeof a === "object" && a !== null && (a.mode === "human" || a.mode === "auto") && typeof a.plan_sha256 === "string" && HEX64.test(a.plan_sha256) && (a.requested_mode === undefined || a.requested_mode === "human" || a.requested_mode === "auto") && Array.isArray(a.assumptions) && a.assumptions.every((x) => typeof x === "string") && Array.isArray(a.amendments) && a.amendments.length === 0);
+      need("approval", typeof a === "object" && a !== null && (a.mode === "human" || a.mode === "auto") && typeof a.plan_sha256 === "string" && HEX64.test(a.plan_sha256) && (a.requested_mode === undefined || a.requested_mode === "human" || a.requested_mode === "auto") && (a.authorization === undefined || a.authorization === "human-approval" || a.authorization === "auto") && Array.isArray(a.assumptions) && a.assumptions.every((x) => typeof x === "string") && Array.isArray(a.amendments) && a.amendments.length === 0);
     }
   } else {
     need("approval", r.approval === undefined);
@@ -7942,6 +8065,7 @@ function mergeAssumptions(goalLevel, nodeLevel) {
       out.push(a);
   return out;
 }
+var renderBlocker = (b) => `${b.node ? `node "${b.node}": ` : ""}${b.decision} — ${b.impact} ${b.next_step}`;
 var SELF_MODIFYING_GLOBS = [
   "hooks/**",
   ".claude-plugin/**",
@@ -7973,7 +8097,7 @@ function namesSensitiveArea(scope) {
   }
   return;
 }
-var REMEDY = 'To review and run this plan yourself, set "execution_mode": "human" in .sddx/config.json.';
+var REMEDY = 'To review and run this plan yourself, set "interaction_mode": "human" in .sddx/config.json.';
 function decideGate(cwd, graphPath, nodes, requestedMode, ceiling, overlaps2, workspaceMode) {
   const { hash, errors: errors2 } = planHash(graphPath);
   const base = { hash, requestedMode, nodeCount: nodes.length };
@@ -7981,9 +8105,10 @@ function decideGate(cwd, graphPath, nodes, requestedMode, ceiling, overlaps2, wo
     return { ...base, ok: false, mode: "human", reason: errors2.join("; ") || "plan unreadable" };
   }
   if (requestedMode === "auto") {
-    const refusal = autoRefusal(nodes, ceiling, overlaps2, workspaceMode);
-    if (refusal)
-      return { ...base, ok: false, mode: "auto", refusal };
+    const blocker = autoRefusal(nodes, ceiling, overlaps2, workspaceMode, unresolvedOf(graphPath));
+    if (blocker) {
+      return { ...base, ok: false, mode: "auto", refusal: renderBlocker(blocker), blocker };
+    }
   }
   const approval = readApproval(cwd, hash);
   if (approval) {
@@ -8007,36 +8132,93 @@ function decideGate(cwd, graphPath, nodes, requestedMode, ceiling, overlaps2, wo
   }
   return { ...base, ok: true, mode: "auto" };
 }
-function autoRefusal(nodes, ceiling, overlaps2, workspaceMode) {
+function autoRefusal(nodes, ceiling, overlaps2, workspaceMode, unresolved = []) {
   const manual = nodes.find((n) => n.oracleType === "manual");
   if (manual) {
-    return `node "${manual.alias}" declares oracle.type: manual — an unattended run has nobody to observe it. Use an executable oracle, or run in human mode. ${REMEDY}`;
+    return {
+      bound: "manual-oracle",
+      node: manual.alias,
+      decision: "declares oracle.type: manual",
+      impact: "an unattended run has nobody present to observe it, so completion could never be proven",
+      next_step: `Give it an executable oracle, or run it with a human watching. ${REMEDY}`
+    };
+  }
+  if (unresolved.length > 0) {
+    const list = unresolved.map((u) => `"${u}"`).join(", ");
+    return {
+      bound: "unresolved",
+      decision: `${unresolved.length} decision${unresolved.length === 1 ? "" : "s"} intake could not safely take: ${list}`,
+      impact: "the plan rests on a choice nobody has made, and an unattended run would make it by accident",
+      next_step: `Decide them and record them as answers in the Goal Brief header, or run in human mode. ${REMEDY}`
+    };
   }
   if (workspaceMode === "none") {
-    return `workspace "none" runs every task directly in the working checkout instead of an isolated worktree, which an unattended run must not do. ${REMEDY}`;
+    return {
+      bound: "workspace",
+      decision: 'workspace "none" was requested',
+      impact: "every task would run directly in the working checkout instead of an isolated worktree, mutating the branch you are sitting on",
+      next_step: `Use the default worktree isolation, or run in human mode. ${REMEDY}`
+    };
   }
   const unconfined = nodes.find((n) => n.scope.length === 0);
   if (unconfined) {
-    return `node "${unconfined.alias}" declares no scope, so it is unconfined and may write sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")}) or protected paths (${SENSITIVE_SEGMENTS.join(", ")}, ${SENSITIVE_GLOBS.join(", ")}). ${REMEDY}`;
+    return {
+      bound: "unconfined-scope",
+      node: unconfined.alias,
+      decision: "declares no scope, so it is unconfined",
+      impact: `it may write sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")}) or protected paths (${SENSITIVE_SEGMENTS.join(", ")}, ${SENSITIVE_GLOBS.join(", ")})`,
+      next_step: `Declare the smallest scope that covers the work, or run in human mode. ${REMEDY}`
+    };
   }
   const selfModifying = nodes.find((n) => overlaps2(n.scope, [...SELF_MODIFYING_GLOBS]));
   if (selfModifying) {
-    return `node "${selfModifying.alias}" declares a scope reaching sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")}). ${REMEDY}`;
+    return {
+      bound: "self-modifying",
+      node: selfModifying.alias,
+      decision: `declares a scope reaching sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")})`,
+      impact: "a plan that edits the machinery enforcing the plan cannot be bounded by it",
+      next_step: `Narrow the scope, or run it with a human reviewing. ${REMEDY}`
+    };
   }
+  const PROTECTED_IMPACT = "a security, data, billing, or deployment decision is not one an unattended run may take";
   for (const n of nodes) {
     const named = namesSensitiveArea(n.scope);
     if (named) {
-      return `node "${n.alias}" declares a scope naming the protected area "${named}" — a security, data, billing, or deployment decision is not one an unattended run may take. ${REMEDY}`;
+      return {
+        bound: "protected-path",
+        node: n.alias,
+        decision: `declares a scope naming the protected area "${named}"`,
+        impact: PROTECTED_IMPACT,
+        next_step: `Move that work into its own task and run it with a human reviewing. ${REMEDY}`
+      };
     }
   }
   const sensitive = nodes.find((n) => overlaps2(n.scope, [...SENSITIVE_GLOBS]));
   if (sensitive) {
-    return `node "${sensitive.alias}" declares a scope reaching protected paths (${SENSITIVE_GLOBS.join(", ")}) — a security, data, billing, or deployment decision is not one an unattended run may take. ${REMEDY}`;
+    return {
+      bound: "protected-path",
+      node: sensitive.alias,
+      decision: `declares a scope reaching protected paths (${SENSITIVE_GLOBS.join(", ")})`,
+      impact: PROTECTED_IMPACT,
+      next_step: `Move that work into its own task and run it with a human reviewing. ${REMEDY}`
+    };
   }
   if (nodes.length > ceiling) {
-    return `plan has ${nodes.length} nodes, over the auto_max_tasks ceiling of ${ceiling}. ${REMEDY}`;
+    return {
+      bound: "task-ceiling",
+      decision: `plan has ${nodes.length} nodes, over the auto_max_tasks ceiling of ${ceiling}`,
+      impact: "the blast radius of one unattended run is capped deliberately, and this plan exceeds it",
+      next_step: `Split the goal into smaller runs, raise auto_max_tasks in reviewed configuration, or run in human mode. ${REMEDY}`
+    };
   }
   return;
+}
+function unresolvedOf(graphPath) {
+  try {
+    return parseGraph(readFileSync4(graphPath, "utf8")).graph?.unresolved ?? [];
+  } catch {
+    return [];
+  }
 }
 
 // src/audit.ts
@@ -8193,7 +8375,7 @@ import { join as join9 } from "node:path";
 // src/lib/config.ts
 import { existsSync as existsSync6, readFileSync as readFileSync6 } from "node:fs";
 import { join as join7 } from "node:path";
-var EXECUTION_MODES = ["human", "auto"];
+var INTERACTION_MODES2 = ["human", "auto"];
 var DEFAULT_AUTO_MAX_TASKS = 6;
 function readConfig(root) {
   const path = join7(root, ".sddx", "config.json");
@@ -8254,15 +8436,18 @@ function boardEnabled(root, env = process.env) {
     fallback: true
   });
 }
-var asMode = (v) => typeof v === "string" && EXECUTION_MODES.includes(v) ? v : null;
-function executionMode(root) {
-  return asMode(readConfig(root).execution_mode) ?? "human";
+var asMode = (v) => typeof v === "string" && INTERACTION_MODES2.includes(v) ? v : null;
+function interactionMode(root) {
+  const cfg = readConfig(root);
+  if (cfg.interaction_mode !== undefined)
+    return asMode(cfg.interaction_mode) ?? "human";
+  return asMode(cfg.execution_mode) ?? "human";
 }
-var gateExecutionMode = executionMode;
+var gateInteractionMode = interactionMode;
 function autoMaxTasks(root) {
   return positiveInt(readConfig(root).auto_max_tasks) ?? DEFAULT_AUTO_MAX_TASKS;
 }
-var KNOWN_AGENT_ROLES = ["orchestrator", "planner", "tddExecutor", "verifier"];
+var KNOWN_AGENT_ROLES = ["intake", "orchestrator", "planner", "tddExecutor", "verifier"];
 function parseAgentModel(raw) {
   const models = {};
   const warnings = [];
@@ -8337,7 +8522,7 @@ function resolveConfig(root, env = process.env) {
     agent_model: parseAgentModel(cfg.agent_model).models,
     prefer_solo: resolveValue({ configValue: cfg.prefer_solo, configParse: bool, fallback: false }),
     verbose: resolveValue({ configValue: cfg.verbose, configParse: bool, fallback: false }),
-    execution_mode: executionMode(root),
+    interaction_mode: interactionMode(root),
     auto_max_tasks: autoMaxTasks(root)
   };
 }
@@ -8358,7 +8543,8 @@ var CONFIG_SCHEMA = [
   ["agent_model", isString, "a string"],
   ["prefer_solo", isBoolean, "a boolean"],
   ["verbose", isBoolean, "a boolean"],
-  ["execution_mode", isOneOf(EXECUTION_MODES), `one of ${EXECUTION_MODES.join("|")}`],
+  ["interaction_mode", isOneOf(INTERACTION_MODES2), `one of ${INTERACTION_MODES2.join("|")}`],
+  ["execution_mode", isOneOf(INTERACTION_MODES2), `one of ${INTERACTION_MODES2.join("|")}`],
   ["auto_max_tasks", isPositiveInt, "a positive integer"]
 ];
 var KNOWN_CONFIG_KEYS = new Set(CONFIG_SCHEMA.map(([key]) => key));
@@ -8375,6 +8561,9 @@ function validateConfigObject(obj) {
   }
   if (typeof obj.agent_model === "string") {
     warnings.push(...parseAgentModel(obj.agent_model).warnings);
+  }
+  if ("execution_mode" in obj) {
+    warnings.push(obj.interaction_mode === undefined ? '"execution_mode" has been renamed to "interaction_mode" — the old name is still read, rename it to silence this' : '"execution_mode" is ignored because "interaction_mode" is also set — remove the old key');
   }
   return warnings;
 }
@@ -9054,6 +9243,74 @@ function computeBoard(cwd) {
     changed = true;
   }
   return { path, changed, data: boardDataFromRows(cwd, rows, flags) };
+}
+
+// src/lib/intake.ts
+var QUESTION_CAP = 3;
+function parseQuestionBatch(yamlText) {
+  let raw;
+  try {
+    raw = $parse(yamlText);
+  } catch (e) {
+    return { errors: [`invalid YAML: ${e.message}`] };
+  }
+  if (raw === null || raw === undefined)
+    return { questions: [], errors: [] };
+  if (typeof raw !== "object" || Array.isArray(raw)) {
+    return { errors: ["question batch must be a YAML mapping with a `questions` list"] };
+  }
+  const r = raw;
+  if (!("questions" in r)) {
+    if (Object.keys(r).length > 0) {
+      return { errors: ["question batch must be a YAML mapping with a `questions` list"] };
+    }
+    return { questions: [], errors: [] };
+  }
+  if (r.questions === undefined || r.questions === null)
+    return { questions: [], errors: [] };
+  if (!Array.isArray(r.questions)) {
+    return { errors: ["questions: must be a list"] };
+  }
+  if (r.questions.length > QUESTION_CAP) {
+    return {
+      errors: [
+        `questions: ${r.questions.length} returned, over the cap of ${QUESTION_CAP} per dispatch — ask the ${QUESTION_CAP} that can change scope, behavior, safety, an oracle, or the plan, and resolve the rest as assumptions`
+      ]
+    };
+  }
+  const errors2 = [];
+  const out = [];
+  const seen = new Set;
+  for (let i = 0;i < r.questions.length; i++) {
+    const e = r.questions[i];
+    if (typeof e !== "object" || e === null || Array.isArray(e)) {
+      errors2.push(`questions[${i}]: must be a mapping with id, question and why`);
+      continue;
+    }
+    const q = e;
+    const field = (name) => {
+      const v = q[name];
+      if (typeof v !== "string" || v.trim() === "") {
+        errors2.push(`questions[${i}]: missing "${name}"`);
+        return "";
+      }
+      return v.trim();
+    };
+    const id = field("id");
+    const question = field("question");
+    const why = field("why");
+    if (id !== "") {
+      if (seen.has(id))
+        errors2.push(`questions[${i}]: duplicate question id "${id}"`);
+      else
+        seen.add(id);
+    }
+    const dflt = typeof q.default === "string" ? q.default.trim() : undefined;
+    out.push({ id, question, why, ...dflt ? { default: dflt } : {} });
+  }
+  if (errors2.length > 0)
+    return { errors: errors2 };
+  return { questions: out, errors: [] };
 }
 
 // src/lib/prhost.ts
@@ -9853,6 +10110,8 @@ function generateRunReport(cwd, goalId2, targetBranch) {
     tasks,
     oracles,
     assumptions,
+    interactionMode: goal.approval?.mode ?? null,
+    authorization: goal.approval?.authorization ?? null,
     ...goal.approval ? { approval: goal.approval } : {},
     reviewCommands: [
       `git switch ${goal.run_branch}`,
@@ -9862,7 +10121,12 @@ function generateRunReport(cwd, goalId2, targetBranch) {
   };
 }
 function approvalLines(a) {
-  const lines = ["Approval", `- mode: ${a.mode}`, `- plan: ${a.plan_sha256.slice(0, 12)}`];
+  const lines = [
+    "Approval",
+    `- interaction mode: ${a.mode}`,
+    ...a.authorization ? [`- authorization: ${a.authorization}`] : [],
+    `- plan: ${a.plan_sha256.slice(0, 12)}`
+  ];
   if (a.requested_mode && a.requested_mode !== a.mode) {
     lines.push(`- requested ${a.requested_mode}, ran as ${a.mode}`);
     if (a.degraded_reason)
@@ -10101,6 +10365,7 @@ function verifyTask(cwd, id, opts) {
     ...goalApproval ? {
       approval: {
         mode: goalApproval.mode,
+        ...goalApproval.authorization ? { authorization: goalApproval.authorization } : {},
         ...goalApproval.requested_mode ? { requested_mode: goalApproval.requested_mode } : {},
         ...goalApproval.degraded_reason ? { degraded_reason: goalApproval.degraded_reason } : {},
         plan_sha256: goalApproval.plan_sha256,
@@ -10134,8 +10399,11 @@ var USAGE = `usage:
   sddx verify <id> [--model <m>] [--harness <h>]
   sddx goal create --goal <sentence> --tasks <id1,id2,...>
   sddx goal show <id>
+  sddx intake check --batch <path>
   sddx graph create --graph <path> [--workspace auto|worktree|branch|none] [--dry-run]
   sddx graph approve --graph <path> [--workspace auto|worktree|branch|none]
+  sddx graph regenerate --graph <path>
+  sddx graph cancel --graph <path>
   sddx pr create --goal <goal-id> [--title <title>]
   sddx run report --goal <goal-id>
   sddx board
@@ -10152,7 +10420,7 @@ global flags (any command):
 var currentFormat = "terminal";
 var currentNoColor = false;
 var currentCommand = "sddx";
-function failWith(messages, code = 1) {
+function failWith(messages, code = 1, data = null) {
   if (currentFormat === "terminal") {
     for (const m of messages)
       printError(m);
@@ -10160,7 +10428,7 @@ function failWith(messages, code = 1) {
     const reporter = makeReporter(currentCommand, currentFormat, currentNoColor);
     for (const m of messages)
       reporter.error(m);
-    reporter.finish(null, { status: "error" });
+    reporter.finish(data, { status: "error" });
   }
   process.exit(code);
 }
@@ -10452,7 +10720,7 @@ function resolvePlan(cwd, graphArg, requested) {
     }
     idByAlias.set(node.alias, id);
     loaded.set(node.alias, {
-      spec: { ...spec, assumptions: mergeAssumptions(graph.assumptions, spec.assumptions) },
+      spec: { ...spec, assumptions: mergeAssumptions(briefAssumptions(graph), spec.assumptions) },
       src
     });
   }
@@ -10518,6 +10786,18 @@ function planNodeSummary(plan, alias) {
     })).slice(0, 12) : "-"
   };
 }
+function planBriefSummary(graph) {
+  const list = (xs) => xs.join(" | ") || "(none)";
+  return {
+    goal: graph.goal,
+    answers: list(graph.answers.map((a) => `${a.question} → ${a.answer}`)),
+    assumptions: list(graph.assumptions),
+    constraints: list(graph.constraints),
+    acceptance_criteria: list(graph.acceptance_criteria),
+    out_of_scope: list(graph.out_of_scope),
+    unresolved: list(graph.unresolved)
+  };
+}
 function forkPointLines(cwd, plan) {
   const runBranchBase = `run branch base: ${plan.base.sha} (${plan.base.source})`;
   if (plan.mode === "worktree") {
@@ -10531,24 +10811,88 @@ function forkPointLines(cwd, plan) {
     `task base: ${taskBase} (local HEAD — ${plan.mode} mode branches from your checkout)`
   ];
 }
-var renderCachePath = (cwd, gid) => join12(sddxDir(cwd), "drafts", `.render-${gid}.json`);
+var PLAN_ACTIONS = ["Approve", "Edit", "Regenerate", "Cancel"];
+var draftsDir = (cwd) => join12(sddxDir(cwd), "drafts");
+function within(dir, path) {
+  const rel = relative2(dir, path);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute4(rel);
+}
+var renderCachePath = (cwd, gid) => join12(draftsDir(cwd), `.render-${gid}.json`);
+function dropRenderCache(cwd, gid) {
+  if (gid !== null)
+    rmSync3(renderCachePath(cwd, gid), { force: true });
+}
 function renderPlan(cwd, graphArg, plan, reporter) {
+  const mode = gateInteractionMode(cwd);
   const order = topoOrder(plan.graph.tasks).map((n) => n.alias);
   const current = {};
   for (const alias of order)
     current[alias] = planNodeSummary(plan, alias);
+  const currentBrief = planBriefSummary(plan.graph);
   const { hash } = planHash(join12(cwd, graphArg));
+  const targetBranch = defaultBranch(cwd);
+  const runBranch = runBranchName(plan.goalId);
+  const rootCount = plan.graph.tasks.filter((n) => n.depends_on.length === 0).length;
+  const worktreeCount = plan.mode === "worktree" ? rootCount : 0;
   const lines = [
     `goal: ${plan.graph.goal}`,
     `plan: ${hash.slice(0, 12)} (${order.length} node${order.length === 1 ? "" : "s"})`,
     `workspace: ${plan.mode}`,
+    `target branch: ${targetBranch}`,
+    `run branch: ${runBranch} (not created yet)`,
+    plan.mode === "worktree" ? `worktrees: ${worktreeCount} at creation, ${order.length} once every dependent materializes` : `worktrees: none (${plan.mode} mode)`,
     ...forkPointLines(cwd, plan),
     "validation: passed",
     ""
   ];
+  const brief = plan.graph;
+  const modeDiverges = brief.interaction_mode !== mode;
+  if (modeDiverges) {
+    lines.push(`planned under interaction_mode: ${brief.interaction_mode}, configured mode is ${mode} — the configured mode governs this run`, "");
+  }
+  if (brief.answers.length > 0) {
+    lines.push("answered:");
+    for (const a of brief.answers)
+      lines.push(`  ${a.question} → ${a.answer}`);
+    lines.push("");
+  }
+  if (brief.assumptions.length > 0) {
+    lines.push("assumptions:");
+    for (const a of brief.assumptions)
+      lines.push(`  ${a}`);
+    lines.push("");
+  }
+  if (brief.constraints.length > 0) {
+    lines.push("constraints:");
+    for (const c of brief.constraints)
+      lines.push(`  ${c}`);
+    lines.push("");
+  }
+  if (brief.acceptance_criteria.length > 0) {
+    lines.push("acceptance criteria:");
+    for (const a of brief.acceptance_criteria)
+      lines.push(`  ${a}`);
+    lines.push("");
+  }
+  if (brief.out_of_scope.length > 0) {
+    lines.push("out of scope:");
+    for (const o of brief.out_of_scope)
+      lines.push(`  ${o}`);
+    lines.push("");
+  }
+  if (brief.unresolved.length > 0) {
+    lines.push("unresolved:");
+    for (const u of brief.unresolved)
+      lines.push(`  ${u}`);
+    lines.push("");
+  }
   let previous = null;
+  let previousBrief = null;
   try {
-    previous = JSON.parse(readFileSync9(renderCachePath(cwd, plan.goalId), "utf8"));
+    const parsed = JSON.parse(readFileSync9(renderCachePath(cwd, plan.goalId), "utf8"));
+    const versioned = "nodes" in parsed && "brief" in parsed;
+    previous = versioned ? parsed.nodes : parsed;
+    previousBrief = versioned ? parsed.brief : null;
   } catch {
     previous = null;
   }
@@ -10563,6 +10907,15 @@ function renderPlan(cwd, graphArg, plan, reporter) {
   }
   if (previous) {
     const changed = [];
+    const beforeBrief = previousBrief;
+    if (beforeBrief) {
+      const fields = Object.keys(currentBrief).filter((f) => beforeBrief[f] !== currentBrief[f]);
+      if (fields.length > 0) {
+        changed.push("  ~ goal brief");
+        for (const f of fields)
+          changed.push(`      ${f}: ${beforeBrief[f]} → ${currentBrief[f]}`);
+      }
+    }
     for (const alias of order) {
       const before = previous[alias];
       const after = current[alias];
@@ -10583,12 +10936,20 @@ function renderPlan(cwd, graphArg, plan, reporter) {
     }
     lines.push("", changed.length > 0 ? "changes since last render:" : "changes since last render: none", ...changed);
   }
+  const actions = mode === "human" ? PLAN_ACTIONS : [];
+  if (actions.length > 0) {
+    lines.push("", "actions:");
+    lines.push(`  Approve    — ... graph approve --graph ${graphArg}`);
+    lines.push("  Edit       — revise the drafts, then re-render (any edit re-arms the gate)");
+    lines.push(`  Regenerate — ... graph regenerate --graph ${graphArg} (keeps the Goal Brief)`);
+    lines.push(`  Cancel     — ... graph cancel --graph ${graphArg}`);
+  }
   lines.push("", "nothing written — this is a dry run");
   reporter.success(lines.join(`
 `));
   try {
     mkdirSync8(dirname3(renderCachePath(cwd, plan.goalId)), { recursive: true });
-    writeFileSync9(renderCachePath(cwd, plan.goalId), JSON.stringify(current));
+    writeFileSync9(renderCachePath(cwd, plan.goalId), JSON.stringify({ nodes: current, brief: currentBrief }));
   } catch {}
   reporter.finish({
     dryRun: true,
@@ -10597,11 +10958,26 @@ function renderPlan(cwd, graphArg, plan, reporter) {
     planSha256: hash,
     workspaceMode: plan.mode,
     baseSha: plan.base.sha,
-    runBranch: runBranchName(plan.goalId),
+    runBranch,
     aliasToId: Object.fromEntries(plan.idByAlias),
     taskIds: [...plan.idByAlias.values()],
     executionOrder: order,
-    nodes: current
+    nodes: current,
+    targetBranch,
+    worktreeCount,
+    taskCount: order.length,
+    interactionMode: mode,
+    actions,
+    interactionModeDiverges: modeDiverges,
+    brief: {
+      interactionMode: brief.interaction_mode,
+      answers: brief.answers,
+      assumptions: brief.assumptions,
+      constraints: brief.constraints,
+      acceptanceCriteria: brief.acceptance_criteria,
+      outOfScope: brief.out_of_scope,
+      unresolved: brief.unresolved
+    }
   });
 }
 function gateNodes(plan) {
@@ -10612,7 +10988,7 @@ function gateNodes(plan) {
   }));
 }
 function resolveApproval(cwd, graphArg, plan) {
-  return decideGate(cwd, join12(cwd, graphArg), gateNodes(plan), gateExecutionMode(cwd), autoMaxTasks(cwd), scopesOverlap, plan.mode);
+  return decideGate(cwd, join12(cwd, graphArg), gateNodes(plan), gateInteractionMode(cwd), autoMaxTasks(cwd), scopesOverlap, plan.mode);
 }
 function cmdGraphApprove(cwd, args, format, noColor) {
   const reporter = makeReporter("graph approve", format, noColor);
@@ -10629,9 +11005,10 @@ function cmdGraphApprove(cwd, args, format, noColor) {
   const { hash, errors: errors2 } = planHash(join12(cwd, graphArg));
   if (hash === "")
     failWith(errors2.map((e) => `graph approve: ${e}`));
-  const refusal = decideGate(cwd, join12(cwd, graphArg), gateNodes(plan), gateExecutionMode(cwd), autoMaxTasks(cwd), scopesOverlap, plan.mode).refusal;
-  if (refusal)
-    failWith([`graph approve: ${refusal}`]);
+  const decision = decideGate(cwd, join12(cwd, graphArg), gateNodes(plan), gateInteractionMode(cwd), autoMaxTasks(cwd), scopesOverlap, plan.mode);
+  if (decision.refusal) {
+    failWith([`graph approve: ${decision.refusal}`], 1, { blocker: decision.blocker });
+  }
   const approval = writeApproval(cwd, {
     plan_sha256: hash,
     mode: "human",
@@ -10673,7 +11050,7 @@ function cmdGraphCreate(cwd, args, format, noColor) {
   }
   const gate = resolveApproval(cwd, graphArg, plan);
   if (gate.refusal)
-    failWith([`graph create: ${gate.refusal}`]);
+    failWith([`graph create: ${gate.refusal}`], 1, { blocker: gate.blocker });
   if (!gate.ok) {
     failWith([`graph create: ${gate.reason}`], 3);
   }
@@ -10718,6 +11095,7 @@ function cmdGraphCreate(cwd, args, format, noColor) {
       baseSha: base.sha,
       approval: {
         mode: gate.mode,
+        authorization: gate.mode === "human" ? "human-approval" : "auto",
         plan_sha256: gate.hash,
         at: new Date().toISOString()
       }
@@ -11013,7 +11391,7 @@ function cmdConfigShow(cwd, args, format, noColor) {
     `agent_model: ${agentModel}`,
     `prefer_solo: ${cfg.prefer_solo}`,
     `verbose: ${cfg.verbose}`,
-    `execution_mode: ${cfg.execution_mode}`,
+    `interaction_mode: ${cfg.interaction_mode}`,
     `auto_max_tasks: ${cfg.auto_max_tasks}`
   ];
   reporter.success(lines.join(`
@@ -11056,6 +11434,88 @@ function cmdConfigValidate(cwd, format, noColor) {
   }
   reporter.finish({ hasConfig: true, warnings });
 }
+function cmdIntakeCheck(cwd, args, format, noColor) {
+  const reporter = makeReporter("intake check", format, noColor);
+  const path = flag(args, "--batch");
+  if (!path)
+    fail("intake check: --batch <path> is required");
+  const abs = resolve2(cwd, path);
+  let text;
+  try {
+    text = readFileSync9(abs, "utf8");
+  } catch (e) {
+    fail(`intake check: cannot read ${path}: ${e.message}`);
+  }
+  const { questions, errors: errors2 } = parseQuestionBatch(text);
+  if (!questions)
+    failWith(errors2.map((e) => `intake check: ${e}`), 2);
+  reporter.success(`intake check: ${questions.length} question${questions.length === 1 ? "" : "s"} (cap ${QUESTION_CAP})`);
+  reporter.finish({ count: questions.length, cap: QUESTION_CAP, questions });
+}
+function draftPlan(cwd, args, action) {
+  const graphArg = flag(args, "--graph");
+  if (!graphArg)
+    fail(`graph ${action}: --graph <path> is required`);
+  const abs = resolve2(cwd, graphArg);
+  const drafts = draftsDir(cwd);
+  if (!within(drafts, abs)) {
+    fail(`graph ${action}: ${graphArg} is not under ${relative2(cwd, drafts)}/ — ${action} only ever removes plan drafts, and refuses any path outside the drafts directory`, 2);
+  }
+  let text;
+  try {
+    text = readFileSync9(abs, "utf8");
+  } catch (e) {
+    fail(`graph ${action}: cannot read ${graphArg}: ${e.message}`);
+  }
+  const { graph, errors: errors2 } = parseGraph(text);
+  const goal = graph ? graph.goal : (/^goal:\s*(.+)$/m.exec(text)?.[1] ?? "").trim();
+  const gid = goal === "" ? null : goalId(goal);
+  if (gid !== null && goalExists(cwd, gid)) {
+    fail(`graph ${action}: goal ${gid} has already been created from this plan — ${action} only applies while it is still a draft. Use cleanup/next-actions to unwind a materialized run.`, 3);
+  }
+  const specs = (graph?.tasks ?? []).map((n) => resolve2(dirname3(abs), n.spec));
+  for (const spec of specs) {
+    if (!within(drafts, spec)) {
+      fail(`graph ${action}: ${relative2(cwd, spec)} is outside ${relative2(cwd, drafts)}/ — a node's spec path may not escape the drafts directory`, 2);
+    }
+  }
+  return { graphArg, abs, text, graph, errors: errors2, specs, goalId: gid };
+}
+function cmdGraphRegenerate(cwd, args, format, noColor) {
+  const reporter = makeReporter("graph regenerate", format, noColor);
+  const { graphArg, abs, text, specs, goalId: gid } = draftPlan(cwd, args, "regenerate");
+  const header = truncateToHeader(text);
+  writeFileSync9(abs, header);
+  const removed = [];
+  for (const spec of specs) {
+    if (!existsSync11(spec))
+      continue;
+    rmSync3(spec, { force: true });
+    removed.push(relative2(cwd, spec));
+  }
+  dropRenderCache(cwd, gid);
+  reporter.success([
+    `graph regenerate: ${graphArg} truncated to its Goal Brief header — every recorded answer kept`,
+    `removed ${removed.length} node spec draft${removed.length === 1 ? "" : "s"}`,
+    "re-run the orchestrator over this header to produce a new decomposition"
+  ].join(`
+`));
+  reporter.finish({ graph: graphArg, removedSpecs: removed, headerBytes: header.length });
+}
+function cmdGraphCancel(cwd, args, format, noColor) {
+  const reporter = makeReporter("graph cancel", format, noColor);
+  const { graphArg, abs, specs, goalId: gid } = draftPlan(cwd, args, "cancel");
+  const removed = [];
+  for (const path of [...specs, abs]) {
+    if (!existsSync11(path))
+      continue;
+    rmSync3(path, { force: true });
+    removed.push(relative2(cwd, path));
+  }
+  dropRenderCache(cwd, gid);
+  reporter.success(`graph cancel: removed ${removed.length} draft${removed.length === 1 ? "" : "s"} for ${graphArg} — no branch, worktree, task, goal, or approval token existed to undo`);
+  reporter.finish({ removed });
+}
 function main(argv) {
   const cwd = process.cwd();
   const { format, noColor, rest: cleaned } = parseOutputFlag(argv);
@@ -11084,8 +11544,8 @@ function main(argv) {
       const [id, path] = rest.slice(1);
       if (!id || !path)
         fail(USAGE, 2);
-      if (gateExecutionMode(resolveMainRepoRoot(cwd)) === "auto") {
-        fail(`task allow: refused in auto mode — a TDD-gate exemption always requires a human. Mode is read from reviewed configuration only: set "execution_mode": "human" in .sddx/config.json to grant "${path}" on ${id}.`);
+      if (gateInteractionMode(resolveMainRepoRoot(cwd)) === "auto") {
+        fail(`task allow: refused in auto mode — a TDD-gate exemption always requires a human. Mode is read from reviewed configuration only: set "interaction_mode": "human" in .sddx/config.json to grant "${path}" on ${id}.`);
       }
       const task = readTask(cwd, id);
       allowPath(task, path);
@@ -11174,12 +11634,24 @@ function main(argv) {
       reporter.finish(goal);
       return;
     }
+    if (cmd === "intake" && rest[0] === "check") {
+      cmdIntakeCheck(cwd, rest.slice(1), format, noColor);
+      return;
+    }
     if (cmd === "graph" && rest[0] === "approve") {
       cmdGraphApprove(cwd, rest.slice(1), format, noColor);
       return;
     }
     if (cmd === "graph" && rest[0] === "create") {
       cmdGraphCreate(cwd, rest.slice(1), format, noColor);
+      return;
+    }
+    if (cmd === "graph" && rest[0] === "regenerate") {
+      cmdGraphRegenerate(cwd, rest.slice(1), format, noColor);
+      return;
+    }
+    if (cmd === "graph" && rest[0] === "cancel") {
+      cmdGraphCancel(cwd, rest.slice(1), format, noColor);
       return;
     }
     if (cmd === "pr" && rest[0] === "create") {

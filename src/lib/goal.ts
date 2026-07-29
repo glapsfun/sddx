@@ -18,8 +18,16 @@ export interface MergeEntry {
 
 /** Approval provenance for the whole goal, written once by `graph create` and
  * denormalized onto every receipt the goal produces. */
+/** How a plan came to be authorized. `human-approval` means a token matched —
+ * a person read the plan and approved it; `auto` means the configured mode
+ * authorized it and no human saw it. Recorded explicitly rather than inferred
+ * from `mode`, so an audit reads the claim instead of reconstructing it. */
+export type AuthorizationType = "human-approval" | "auto";
+
 export interface GoalApproval {
   mode: "human" | "auto";
+  /** Absent on goals written before authorization type was recorded. */
+  authorization?: AuthorizationType;
   requested_mode?: "human" | "auto";
   degraded_reason?: string;
   plan_sha256: string;
@@ -260,6 +268,19 @@ export function readGoal(cwd: string, id: string): Goal {
     );
   }
   return g;
+}
+
+/**
+ * Whether a goal record exists at all — its ref, or a legacy loose file.
+ *
+ * Deliberately does NOT parse or validate it. A caller asking "has this plan
+ * been materialized?" must read an unreadable or version-stale record as YES:
+ * treating a `readGoal` throw as "still a draft" is how Cancel came to delete
+ * the plan artifacts of a live run.
+ */
+export function goalExists(cwd: string, id: string): boolean {
+  const root = mainRoot(cwd);
+  return goalBlobSha(root, id) !== null || existsSync(goalPath(root, id));
 }
 
 export function writeGoal(cwd: string, g: Goal): void {

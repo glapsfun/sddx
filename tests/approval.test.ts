@@ -13,6 +13,7 @@ import {
 } from "../src/lib/approval";
 import { signPayload, verifySignature } from "../src/lib/sign";
 import { fixtureRepo } from "./fixtures";
+import { GRAPH_HEADER } from "./helpers";
 
 const SPEC = (task: string) => `task: ${task}
 success_criteria:
@@ -32,7 +33,7 @@ function planRepo(): { cwd: string; graph: string } {
   const graph = join(drafts, "graph.yaml");
   writeFileSync(
     graph,
-    `goal: do the thing
+    `${GRAPH_HEADER}goal: do the thing
 tasks:
   - alias: alpha
     spec: a.yaml
@@ -79,7 +80,7 @@ describe("planHash", () => {
     const first = planHash(graph).hash;
     writeFileSync(
       graph,
-      `goal: do the thing
+      `${GRAPH_HEADER}goal: do the thing
 tasks:
   - alias: beta
     spec: b.yaml
@@ -121,6 +122,88 @@ tasks:
     const before = planHash(graph).hash;
     writeFileSync(graph, readFileSync(graph, "utf8").replace("    depends_on: alpha\n", ""));
     expect(planHash(graph).hash).not.toBe(before);
+  });
+
+  // The Goal Brief is the graph file's header, so it rides the byte hash that
+  // already covers the graph. These assert that guarantee holds rather than
+  // introducing a second digest — a brief-specific digest would need its own
+  // canonicalization, and every canonicalization layer is a surface on which
+  // two different briefs can collide to one value.
+  describe("covers the Goal Brief header", () => {
+    const withHeader = (header: string) => {
+      const cwd = fixtureRepo();
+      const drafts = join(cwd, ".sddx", "drafts");
+      mkdirSync(drafts, { recursive: true });
+      writeFileSync(join(drafts, "a.yaml"), SPEC("first thing"));
+      const graph = join(drafts, "graph.yaml");
+      writeFileSync(graph, `${header}tasks:\n  - alias: alpha\n    spec: a.yaml\n`);
+      return graph;
+    };
+    const BRIEF = `${GRAPH_HEADER}goal: do the thing
+answers:
+  - id: q1
+    question: which store?
+    answer: postgres
+assumptions:
+  - id: a1
+    value: sessions are server-side
+    rationale: no client storage in scope
+`;
+
+    test("an unchanged draft re-digests byte-identically on a later read", () => {
+      const graph = withHeader(BRIEF);
+      const first = planHash(graph).hash;
+      // re-read from disk, as a separate process would
+      writeFileSync(graph, readFileSync(graph, "utf8"));
+      expect(planHash(graph).hash).toBe(first);
+    });
+
+    test("editing a recorded answer invalidates the hash", () => {
+      const graph = withHeader(BRIEF);
+      const before = planHash(graph).hash;
+      writeFileSync(graph, readFileSync(graph, "utf8").replace("postgres", "sqlite"));
+      expect(planHash(graph).hash).not.toBe(before);
+    });
+
+    test("editing a recorded assumption invalidates the hash", () => {
+      const graph = withHeader(BRIEF);
+      const before = planHash(graph).hash;
+      writeFileSync(
+        graph,
+        readFileSync(graph, "utf8").replace("no client storage in scope", "the client stores it"),
+      );
+      expect(planHash(graph).hash).not.toBe(before);
+    });
+
+    test("switching interaction_mode invalidates the hash", () => {
+      const graph = withHeader(BRIEF);
+      const before = planHash(graph).hash;
+      writeFileSync(
+        graph,
+        readFileSync(graph, "utf8").replace("interaction_mode: human", "interaction_mode: auto"),
+      );
+      expect(planHash(graph).hash).not.toBe(before);
+    });
+
+    test("a cosmetic header reorder also invalidates — the accepted cost of no canonicalization", () => {
+      const graph = withHeader(BRIEF);
+      const before = planHash(graph).hash;
+      writeFileSync(
+        graph,
+        readFileSync(graph, "utf8").replace(
+          'schema_version: "1.0"\ninteraction_mode: human\n',
+          'interaction_mode: human\nschema_version: "1.0"\n',
+        ),
+      );
+      expect(planHash(graph).hash).not.toBe(before);
+    });
+
+    test("an invalid header yields no digest at all, never a default one", () => {
+      const graph = withHeader('schema_version: "1.0"\ngoal: do the thing\n');
+      const r = planHash(graph);
+      expect(r.hash).toBe("");
+      expect(r.errors.join(" ")).toContain("interaction_mode");
+    });
   });
 
   test("reports errors instead of hashing an unreadable plan", () => {
@@ -265,7 +348,7 @@ describe("token signing is best-effort", () => {
     mkdirSync(drafts, { recursive: true });
     writeFileSync(join(drafts, "a.yaml"), SPEC("only thing"));
     const graph = join(drafts, "graph.yaml");
-    writeFileSync(graph, "goal: g\ntasks:\n  - alias: alpha\n    spec: a.yaml\n");
+    writeFileSync(graph, `${GRAPH_HEADER}goal: g\ntasks:\n  - alias: alpha\n    spec: a.yaml\n`);
 
     const { hash } = planHash(graph);
     const token = writeApproval(cwd, { plan_sha256: hash, mode: "human" });

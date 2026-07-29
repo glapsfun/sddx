@@ -76,7 +76,7 @@ Three things make that airtight, and each closes a way the gate was defeatable:
   expansion — `.sddx/approv?ls/` or `${d}dx/approvals/` never spell the path out.
   It raises the bar behind the `Edit`/`Write` block; it is not a second proof.
 - **Mode is read from `.sddx/config.json` only.** A `--mode` flag or an inline
-  `SDDX_EXECUTION_MODE=auto` is part of the command line the agent composes, so
+  `SDDX_INTERACTION_MODE=auto` is part of the command line the agent composes, so
   honoring either would let the constrained thing switch off the constraint.
   There is no `--mode` flag. The file itself is not tool-writable either, for
   the same reason: leaving it open would hand back the same choice one
@@ -181,33 +181,66 @@ lands.
 
 ## Auto mode's bounds
 
-Two are **hard refusals** — not thresholds, not configurable. They fail rather
-than prompting, because asking a human to approve an incoherent plan is worse
-than refusing it:
-
-1. **A `manual` oracle.** It means a human observes the result; an unattended
-   run has nobody. That is incoherence, not risk appetite. (`browser` is fine —
-   headless browser oracles genuinely execute.)
-2. **Granting a `task allow` TDD-gate exemption.** The allow-list is the only
-   escape hatch from the TDD gate. An unattended run that could widen its own
-   gate would have no gate. Exemptions need a human in **both** modes.
-
-Three more **arm the gate** rather than failing — nothing is lost, the drafts
-are already written:
+Every bound is a **hard refusal**. None of them prompts, degrades, or arms an
+approval gate you could satisfy — because a run recorded `auto` must never have
+a human approval hiding underneath it. Asking a human to approve a plan that
+tripped an autonomy bound would produce exactly that hybrid.
 
 | Bound | Why it's the right proxy |
 |---|---|
-| node count > `auto_max_tasks` (default 6) | blast radius ≈ worktrees forked |
+| a `manual` oracle | it means a human observes the result; an unattended run has nobody. Incoherence, not risk appetite. (`browser` is fine — headless browser oracles genuinely execute) |
+| granting a `task allow` TDD-gate exemption | the allow-list is the only escape hatch from the TDD gate; a run that could widen its own gate has no gate. Needs a human in **both** modes |
+| a node with no `scope` at all | unconfined: it may write anything, including every path below. Treating "no scope" as "no reach" would make omitting `scope` the cheapest bypass |
 | any `scope` reaching `hooks/**`, `.claude-plugin/**`, `dist/**`, `bin/**`, `.claude/**`, or CI workflows | a plan that edits the machinery enforcing the plan — including the *compiled* gates, which are what actually run |
+| any `scope` naming a protected area — `auth`, `migrations`, `secrets`, `credentials`, `billing` — or reaching `infra/**`, `terraform/**`, `k8s/**`, a `Dockerfile*`, a `docker-compose*`, or a `.env*` | a security, data, billing, or deployment decision is not one an unattended run may take |
+| a non-empty `unresolved` list in the Goal Brief header | intake reported a decision it could not safely take, so the plan rests on a choice nobody has made |
+| node count > `auto_max_tasks` (default 6) | blast radius ≈ worktrees forked |
 | `--workspace none` | every task runs in your live checkout instead of an isolated worktree |
 
-That second check is unconditional — it ignores the node count entirely. It
-reuses the same glob-overlap primitive the `overlap ⟹ ordered` rule uses, asked
-a different question.
+The path bounds use **two matchers**, because one does not work. Plain glob
+overlap asks "could any path match both", which against a pattern like
+`**/auth/**` is true of *every* scope ending in a doubled star — `src/widget/**`
+overlaps, since `src/widget/auth/x` matches both. Measured against a naive list,
+`src/**`, `docs/**`, and `tests/unit/**` all refused: auto mode would have been
+off, not bounded. So a scope is protected when a **literal segment** of its
+pattern names a protected area at any depth (catching `services/api/auth/**`
+without the wildcard blowup, since a wildcard segment names nothing), or when it
+overlaps a root-anchored location like `infra/**`.
 
-Degradation is recorded, never silent: the goal and every receipt carry
-`requested_mode: auto` alongside the effective `mode: human` and the bound that
-tripped.
+A gap is accepted deliberately: a broad scope naming nothing protected
+(`src/**`) passes, even though it could write `src/auth/session.ts`. Closing it
+means refusing every broad scope, which is the failure mode above. The
+unconfined bound catches the extreme case, and human mode reviews the rest.
+
+**The deterministic bounds do not consult the intake role's self-report.** The
+`unresolved` list is an *additional* trigger layered on top, never a substitute:
+a model that assumes its way past an auth decision and reports nothing unresolved
+still cannot run unattended, because the path bound is a code constant with unit
+tests rather than a judgment. Not every critical decision is path-shaped
+("should signup collect date of birth?"), so `unresolved` catches the residue —
+but it is the residue, not the mechanism.
+
+### A human blocker and an auto blocker are different events
+
+Both stop the run before anything is created. They differ in what they are
+asking of you.
+
+| | **human mode** | **auto mode** |
+|---|---|---|
+| what stopped it | the plan is ready and awaiting your decision | an autonomy bound was exceeded |
+| what you are shown | the plan summary and four actions — Approve, Edit, Regenerate, Cancel | a structured blocker: the missing decision, its impact, and the recommended next step |
+| exit code | `3` — approval required | `1` — refused |
+| how to continue | Approve, or edit the drafts and re-render | **not** by approving. Narrow the scope, resolve the decision, split the goal, or set `"interaction_mode": "human"` in `.sddx/config.json` and review it yourself |
+| is it an error? | no — it is the gate doing its job | yes: the plan asked for more autonomy than the configuration grants |
+
+A human blocker is a **pause**; an auto blocker is a **refusal**. That is why
+the refusal message names a reviewed-configuration edit rather than a command:
+mode is config-only precisely so the thing being constrained cannot lift the
+constraint. And it never names `--mode` or an environment variable, because
+neither exists.
+
+In both cases the drafts survive for inspection, and no goal record, run branch,
+task branch, worktree, task state, receipt, or approval token was created.
 
 ## Clarification questions are oracle-blockers
 
@@ -227,9 +260,16 @@ subagent — is the pre-planning gate.
 | "Who's the target audience?" | no | assumed, recorded |
 | "Preferred brand colors?" | no | assumed, recorded |
 
-This also defines the one condition that halts an unattended run: **an oracle
-that cannot be named even after conservative assumption.** Not a vibe — a
-testable state.
+This is now the intake role's job, and it runs before the orchestrator in both
+modes. Under `human` it returns **one** batch of at most three questions — a cap
+enforced by `sddx intake check`, not by instruction — which the session renders,
+since a subagent has no channel to the user. Under `auto` it asks nothing:
+open decisions are resolved conservatively and recorded as `assumptions` with
+their rationale, and anything that genuinely cannot be decided safely goes in
+`unresolved`, which refuses the run.
+
+An oracle that cannot be named even after conservative assumption still halts an
+unattended run. Not a vibe — a testable state.
 
 ## Resume never re-asks
 
@@ -264,7 +304,7 @@ confidence.
 ```jsonc
 // .sddx/config.json — materialized from the plugin manifest's userConfig
 {
-  "execution_mode": "human",  // human | auto        (default: human)
+  "interaction_mode": "human",  // human | auto        (default: human)
   "auto_max_tasks": 6         // positive integer    (default: 6)
 }
 ```
@@ -272,7 +312,7 @@ confidence.
 These two keys are **config-only** — no CLI flag, no environment variable, unlike
 every other key. That is the point: both would otherwise be command-line surface
 the agent composes, and therefore a way to switch off its own constraint. For
-unattended CI, commit `execution_mode: "auto"`.
+unattended CI, commit `interaction_mode: "auto"`.
 
 An unreadable config, a typo, or an out-of-domain value all resolve to `human` —
 nothing can accidentally yield unattended execution.

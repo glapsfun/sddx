@@ -121,6 +121,8 @@ oracle:
 on_dependency_failure: block
 EOF
 cat > graph2.yaml <<'EOF'
+schema_version: "1.0"
+interaction_mode: human
 goal: skip vs block demonstration
 tasks:
   - alias: parent

@@ -46,6 +46,8 @@ scope:
   - "src/shared/**"
 EOF
 cat > bad-graph.yaml <<'EOF'
+schema_version: "1.0"
+interaction_mode: human
 goal: illegal concurrent overlap
 tasks:
   - alias: x
@@ -112,6 +114,8 @@ scope:
   - "src/d/**"
 EOF
 cat > graph.yaml <<'EOF'
+schema_version: "1.0"
+interaction_mode: human
 goal: ship the dashboard
 tasks:
   - alias: a

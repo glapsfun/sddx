@@ -76,7 +76,7 @@ export function scopeBlockMessage(
  *
  * - `approvals/**` holds tokens that record that a human approved a plan; a
  *   direct write forges that approval.
- * - `config.json` is the ONLY source of `execution_mode` — read from neither
+ * - `config.json` is the ONLY source of `interaction_mode` — read from neither
  *   flag nor environment precisely so the agent cannot choose it. Leaving the
  *   file writable would hand back the same choice one indirection later: flip
  *   `human` to `auto` and the plan self-approves with no dialog.
@@ -98,7 +98,7 @@ function approvalWriteBlock(relOrAbs: string): string | null {
   if (CONFIG_PATH.test(path)) {
     return [
       `sddx approval gate: blocked write to ${relOrAbs} — sddx configuration is not tool-editable.`,
-      "It carries execution_mode, which decides whether a plan needs your approval at all,",
+      "It carries interaction_mode, which decides whether a plan needs your approval at all,",
       "so a tool that could rewrite it could switch off the gate that constrains it.",
       "Edit it yourself, or inspect the effective values with: sddx config show",
     ].join("\n");

@@ -37,7 +37,7 @@ execution, each carrying those same four fields; a pass requires every entry
 to exit 0. It adds `env` (`os`, `arch`, `runtime`, `runtime_version`,
 `dirty_tree` — whether the oracle ran against uncommitted changes) and
 optional `signature`/`signer` (see
-[verify-and-audit-receipts.md](../how-to/verify-and-audit-receipts.md#receipt-signing)).
+[verify-and-audit-receipts.md](../how-to/verify-and-audit-receipts.md#enable-receipt-signing)).
 `sddx audit` accepts v1–v3; existing chains stay valid.
 
 ## The hash chain
@@ -95,8 +95,9 @@ a goal and absent for a standalone task:
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `mode` | `human \| auto` | The mode that actually applied |
-| `requested_mode` | `human \| auto` | Set only when `auto` degraded to `human` |
-| `degraded_reason` | string | The blast-radius bound that forced the degradation |
+| `authorization` | `human-approval \| auto` | Whether a person approved this plan or the configured mode authorized it. Absent on receipts written before it was recorded |
+| `requested_mode` | `human \| auto` | **Legacy, read-only.** Written when `auto` degraded to `human`; bounds are hard refusals now, so nothing writes it |
+| `degraded_reason` | string | **Legacy, read-only** — see `requested_mode` |
 | `plan_sha256` | hex64 | The approved plan this work descends from |
 | `at` | ISO-8601 | When the plan was approved |
 | `assumptions` | string[] | Decisions resolved without asking, from the spec |

@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { planHash } from "../src/lib/approval";
 import { approvalGate } from "../src/lib/approvalgate";
 import { fixtureClone } from "./fixtures";
-import { goalIds, readGoalAnywhere, repoRoot } from "./helpers";
+import { GRAPH_HEADER_LINES, goalIds, readGoalAnywhere, repoRoot } from "./helpers";
 
 const CLI = join(repoRoot, "src/cli.ts");
 const cli = (cwd: string, env: NodeJS.ProcessEnv, ...args: string[]) =>
@@ -13,7 +13,7 @@ const cli = (cwd: string, env: NodeJS.ProcessEnv, ...args: string[]) =>
 const g = (cwd: string, ...args: string[]) =>
   spawnSync("git", args, { cwd, encoding: "utf8" }).stdout.trim();
 
-// Mode is config-only by design (config.ts executionMode): the environment is
+// Mode is config-only by design (config.ts interactionMode): the environment is
 // part of the command line the agent composes, so it must not switch the gate.
 const human = process.env;
 const auto = process.env;
@@ -22,7 +22,7 @@ function withMode(cwd: string, mode: "human" | "auto", autoMaxTasks?: number): v
   writeFileSync(
     join(cwd, ".sddx", "config.json"),
     JSON.stringify({
-      execution_mode: mode,
+      interaction_mode: mode,
       ...(autoMaxTasks ? { auto_max_tasks: autoMaxTasks } : {}),
     }),
   );
@@ -35,7 +35,17 @@ function withMode(cwd: string, mode: "human" | "auto", autoMaxTasks?: number): v
 function planRepo(cwd: string, nodes = 2): string {
   const drafts = join(cwd, ".sddx", "drafts");
   mkdirSync(drafts, { recursive: true });
-  const lines = ["goal: ship the widget", "assumptions:", '  - "the project uses Vite"', "tasks:"];
+  const lines = [
+    ...GRAPH_HEADER_LINES,
+    "goal: ship the widget",
+    "assumptions:",
+    '  - "the project uses Vite"',
+    "answers:",
+    "  - id: q1",
+    "    question: which bundler?",
+    "    answer: Vite 5",
+    "tasks:",
+  ];
   for (let i = 0; i < nodes; i++) {
     writeFileSync(
       join(drafts, `n${i}.yaml`),
@@ -123,8 +133,11 @@ describe("human mode end-to-end", () => {
       expect(r.version).toBe(4);
       expect(r.approval.mode).toBe("human");
       expect(r.approval.plan_sha256).toBe(goal.approval.plan_sha256);
-      // the graph-level assumption reached every receipt
+      // the graph-level assumption reached every receipt, and so did what the
+      // user actually decided — a receipt that needs the graph draft to be
+      // interpreted stops being a receipt, and drafts are swept
       expect(r.approval.assumptions).toContain("the project uses Vite");
+      expect(r.approval.assumptions).toContain("answered: which bundler? → Vite 5");
     }
 
     // 6. the summary reports it, and the audit is clean

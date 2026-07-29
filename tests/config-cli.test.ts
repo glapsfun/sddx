@@ -140,22 +140,22 @@ describe("execution mode surfaced through the config CLI", () => {
     const json = cli(cwd, process.env, "config", "show", "--output", "json");
     expect(json.status).toBe(0);
     expect(JSON.parse(json.stdout).data).toMatchObject({
-      execution_mode: "human",
+      interaction_mode: "human",
       auto_max_tasks: 6,
     });
 
-    withConfig(cwd, { execution_mode: "auto", auto_max_tasks: 2 });
+    withConfig(cwd, { interaction_mode: "auto", auto_max_tasks: 2 });
     const term = cli(cwd, process.env, "config", "show");
     expect(term.status).toBe(0);
-    expect(term.stdout).toContain("execution_mode: auto");
+    expect(term.stdout).toContain("interaction_mode: auto");
     expect(term.stdout).toContain("auto_max_tasks: 2");
   });
 
   test("config validate reports an out-of-domain mode and ceiling", () => {
     const cwd = fixtureRepo();
-    withConfig(cwd, { execution_mode: "yolo", auto_max_tasks: 0 });
+    withConfig(cwd, { interaction_mode: "yolo", auto_max_tasks: 0 });
     const r = cli(cwd, process.env, "config", "validate");
-    expect(r.stdout + r.stderr).toContain("execution_mode");
+    expect(r.stdout + r.stderr).toContain("interaction_mode");
     expect(r.stdout + r.stderr).toContain("auto_max_tasks");
   });
 
@@ -164,6 +164,6 @@ describe("execution mode surfaced through the config CLI", () => {
     mkdirSync(join(cwd, ".sddx"), { recursive: true });
     writeFileSync(join(cwd, ".sddx", "config.json"), "{not json");
     const r = cli(cwd, process.env, "config", "show", "--output", "json");
-    expect(JSON.parse(r.stdout).data.execution_mode).toBe("human");
+    expect(JSON.parse(r.stdout).data.interaction_mode).toBe("human");
   });
 });

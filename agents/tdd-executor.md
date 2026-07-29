@@ -1,6 +1,6 @@
 ---
 name: tdd-executor
-description: Implements one sddx task inside its own worktree through the RED → GREEN → REFACTOR loop, recording phase evidence from real test exit codes. No merging, no receipts, no dispatching.
+description: Implements one task in its own worktree through RED → GREEN → REFACTOR, with phase evidence from real test exit codes. No merging, no receipts.
 tools: Read, Glob, Grep, Edit, Write, Bash
 ---
 

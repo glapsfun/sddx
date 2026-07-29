@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { planHash, writeApproval } from "../src/lib/approval";
 import { approvalGate } from "../src/lib/approvalgate";
 import { fixtureRepo } from "./fixtures";
-import { repoRoot } from "./helpers";
+import { GRAPH_HEADER_LINES, repoRoot } from "./helpers";
 
 const HOOKS_SRC = join(repoRoot, "src/hooks.ts");
 
@@ -36,7 +36,7 @@ oracle:
 function planRepo(cwd: string, nodes = 2): string {
   const drafts = join(cwd, ".sddx", "drafts");
   mkdirSync(drafts, { recursive: true });
-  const lines = ["goal: ship the widget", "tasks:"];
+  const lines = [...GRAPH_HEADER_LINES, "goal: ship the widget", "tasks:"];
   for (let i = 0; i < nodes; i++) {
     writeFileSync(join(drafts, `n${i}.yaml`), SPEC(`build part ${i}`, `src/n${i}/**`));
     lines.push(`  - alias: n${i}`, `    spec: n${i}.yaml`);
@@ -57,7 +57,7 @@ describe("approval gate decisions", () => {
   test("human mode with no token asks, naming the plan digest and node count", () => {
     const cwd = fixtureRepo();
     const rel = planRepo(cwd, 2);
-    withConfig(cwd, { execution_mode: "human" });
+    withConfig(cwd, { interaction_mode: "human" });
 
     const d = approvalGate({ command: createCmd(rel), cwd });
     expect(d.decision).toBe("ask");
@@ -68,7 +68,7 @@ describe("approval gate decisions", () => {
   test("a valid token passes through", () => {
     const cwd = fixtureRepo();
     const rel = planRepo(cwd);
-    withConfig(cwd, { execution_mode: "human" });
+    withConfig(cwd, { interaction_mode: "human" });
     writeApproval(cwd, { plan_sha256: planHash(join(cwd, rel)).hash, mode: "human" });
 
     expect(approvalGate({ command: createCmd(rel), cwd }).decision).toBe("pass");
@@ -77,7 +77,7 @@ describe("approval gate decisions", () => {
   test("auto mode within bounds passes through", () => {
     const cwd = fixtureRepo();
     const rel = planRepo(cwd, 2);
-    withConfig(cwd, { execution_mode: "auto", auto_max_tasks: 6 });
+    withConfig(cwd, { interaction_mode: "auto", auto_max_tasks: 6 });
     expect(approvalGate({ command: createCmd(rel), cwd }).decision).toBe("pass");
   });
 
@@ -87,7 +87,7 @@ describe("approval gate decisions", () => {
     // silent and lets the command exit non-zero with the reason.
     const cwd = fixtureRepo();
     const rel = planRepo(cwd, 4);
-    withConfig(cwd, { execution_mode: "auto", auto_max_tasks: 2 });
+    withConfig(cwd, { interaction_mode: "auto", auto_max_tasks: 2 });
     const d = approvalGate({ command: createCmd(rel), cwd });
     expect(d.decision).toBe("pass");
   });
@@ -95,7 +95,7 @@ describe("approval gate decisions", () => {
   test("commands other than plan creation are not the gate's business", () => {
     const cwd = fixtureRepo();
     planRepo(cwd);
-    withConfig(cwd, { execution_mode: "human" });
+    withConfig(cwd, { interaction_mode: "human" });
     expect(approvalGate({ command: "bun test", cwd }).decision).toBe("pass");
     expect(approvalGate({ command: "sddx board", cwd }).decision).toBe("pass");
     // a dry run creates nothing, so it never needs approval
@@ -111,7 +111,7 @@ describe("approval gate decisions", () => {
     const cwd = fixtureRepo();
     const rel = planRepo(cwd);
     for (const mode of ["human", "auto"] as const) {
-      withConfig(cwd, { execution_mode: mode });
+      withConfig(cwd, { interaction_mode: mode });
       const d = approvalGate({ command: `sddx graph approve --graph ${rel}`, cwd });
       expect(d.decision).toBe("ask");
       expect(d.reason).toContain("YOUR approval");
@@ -126,19 +126,19 @@ describe("approval gate decisions", () => {
   test("SECURITY: the environment cannot switch the gate's mode", () => {
     const cwd = fixtureRepo();
     const rel = planRepo(cwd, 2);
-    withConfig(cwd, { execution_mode: "human" });
-    process.env.SDDX_EXECUTION_MODE = "auto";
+    withConfig(cwd, { interaction_mode: "human" });
+    process.env.SDDX_INTERACTION_MODE = "auto";
     try {
       expect(approvalGate({ command: createCmd(rel), cwd }).decision).toBe("ask");
     } finally {
-      delete process.env.SDDX_EXECUTION_MODE;
+      delete process.env.SDDX_INTERACTION_MODE;
     }
   });
 
   test("SECURITY: --dry-run is matched as an exact token in the right segment", () => {
     const cwd = fixtureRepo();
     const rel = planRepo(cwd, 2);
-    withConfig(cwd, { execution_mode: "human" });
+    withConfig(cwd, { interaction_mode: "human" });
     // `--dry-run=false` is not `--dry-run`; the CLI's args.includes agrees, so
     // this command performs a REAL create and must be gated
     expect(approvalGate({ command: `${createCmd(rel)} --dry-run=false`, cwd }).decision).toBe(
@@ -167,7 +167,7 @@ describe("the approval gate fails closed", () => {
 
   test("an unreadable plan asks rather than passing through", () => {
     const cwd = fixtureRepo();
-    withConfig(cwd, { execution_mode: "auto" });
+    withConfig(cwd, { interaction_mode: "auto" });
     const d = approvalGate({ command: "sddx graph create --graph .sddx/drafts/missing.yaml", cwd });
     expect(d.decision).toBe("ask");
   });
@@ -175,7 +175,7 @@ describe("the approval gate fails closed", () => {
   test("an unreadable approval token is treated as absent, never as approval", () => {
     const cwd = fixtureRepo();
     const rel = planRepo(cwd);
-    withConfig(cwd, { execution_mode: "human" });
+    withConfig(cwd, { interaction_mode: "human" });
     const { hash } = planHash(join(cwd, rel));
     mkdirSync(join(cwd, ".sddx", "approvals"), { recursive: true });
     writeFileSync(join(cwd, ".sddx", "approvals", `${hash}.json`), "{not json");
@@ -185,7 +185,7 @@ describe("the approval gate fails closed", () => {
   test("an internal throw asks rather than passing through", () => {
     const cwd = fixtureRepo();
     const rel = planRepo(cwd);
-    withConfig(cwd, { execution_mode: "human" });
+    withConfig(cwd, { interaction_mode: "human" });
     // make the approvals dir unreadable so the lookup throws rather than returns
     const dir = join(cwd, ".sddx", "approvals");
     mkdirSync(dir, { recursive: true });
@@ -209,7 +209,7 @@ describe("dispatcher wiring", () => {
   test("emits an ask permission decision and exits 0", () => {
     const cwd = fixtureRepo();
     const rel = planRepo(cwd);
-    withConfig(cwd, { execution_mode: "human" });
+    withConfig(cwd, { interaction_mode: "human" });
 
     const r = dispatch(cwd, "approval-gate", {
       cwd,
@@ -232,7 +232,7 @@ describe("dispatcher wiring", () => {
     // no-op and this test is what says so.
     const cwd = fixtureRepo();
     const rel = planRepo(cwd);
-    withConfig(cwd, { execution_mode: "human" });
+    withConfig(cwd, { interaction_mode: "human" });
 
     const r = dispatch(cwd, "approval-gate", {
       cwd,
@@ -248,7 +248,7 @@ describe("dispatcher wiring", () => {
   test("passes through silently when approval is not required", () => {
     const cwd = fixtureRepo();
     const rel = planRepo(cwd);
-    withConfig(cwd, { execution_mode: "auto", auto_max_tasks: 6 });
+    withConfig(cwd, { interaction_mode: "auto", auto_max_tasks: 6 });
     const r = dispatch(cwd, "approval-gate", {
       cwd,
       tool_name: "Bash",
@@ -296,7 +296,7 @@ describe("hook registration", () => {
   test("SessionStart does no approval work and stays fast", () => {
     const cwd = fixtureRepo();
     planRepo(cwd);
-    withConfig(cwd, { execution_mode: "human" });
+    withConfig(cwd, { interaction_mode: "human" });
     const started = performance.now();
     const r = dispatch(cwd, "session-start", { cwd });
     const elapsed = performance.now() - started;

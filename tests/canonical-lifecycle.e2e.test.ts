@@ -13,7 +13,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { readGoal } from "../src/lib/goal";
 import { fixtureClone } from "./fixtures";
-import { fakeRedCheck, goalIds, repoRoot } from "./helpers";
+import { fakeRedCheck, GRAPH_HEADER_LINES, goalIds, repoRoot } from "./helpers";
 
 const CLI = join(repoRoot, "src/cli.ts");
 const cli = (cwd: string, ...args: string[]) =>
@@ -26,7 +26,7 @@ const spec = (task: string, part: string) =>
 /** Writes a graph from `[alias, part, dependsOn?]` triples. */
 function plan(cwd: string, nodes: Array<[string, string, string?]>): string {
   mkdirSync(join(cwd, "specs"), { recursive: true });
-  const lines = ["goal: ship the widget", "tasks:"];
+  const lines = [...GRAPH_HEADER_LINES, "goal: ship the widget", "tasks:"];
   for (const [alias, part, dep] of nodes) {
     writeFileSync(join(cwd, "specs", `${alias}.yaml`), spec(`build ${alias}`, part));
     lines.push(`  - alias: ${alias}`, `    spec: specs/${alias}.yaml`);
@@ -151,6 +151,7 @@ describe("dependent and fan-in tasks", () => {
     writeFileSync(
       join(cwd, "graph.yaml"),
       [
+        ...GRAPH_HEADER_LINES,
         "goal: ship the widget",
         "tasks:",
         "  - alias: a",
@@ -293,7 +294,7 @@ describe("worktree preflight refusal", () => {
 describe("human and auto produce identical topology", () => {
   function withMode(cwd: string, mode: "human" | "auto"): void {
     mkdirSync(join(cwd, ".sddx"), { recursive: true });
-    writeFileSync(join(cwd, ".sddx", "config.json"), JSON.stringify({ execution_mode: mode }));
+    writeFileSync(join(cwd, ".sddx", "config.json"), JSON.stringify({ interaction_mode: mode }));
   }
 
   test("the only difference is how the plan was authorized", () => {

@@ -11,7 +11,7 @@ put an override, what wins when several sources disagree, and what
 Inside Claude Code, enabling the plugin prompts for these settings and
 materializes them into `.sddx/config.json` — there's nothing to hand-edit.
 Outside Claude Code, write `.sddx/config.json` yourself — and it should be *you*:
-the file carries `execution_mode`, so an agent's `Edit`/`Write` to it is blocked
+the file carries `interaction_mode`, so an agent's `Edit`/`Write` to it is blocked
 outright, and a Bash command naming it is refused unless it is a plain read.
 That Bash check is textual, so it is a deterrent rather than a proof — an
 expansion that never spells the path out is not caught. Reading the file back is
@@ -39,6 +39,22 @@ it also prints, per key, which source actually won (`env`, `config`, or
 `default`) — the one place `verbose` changes `terminal` output; `--output
 json`/`--output markdown` already carry the fully-resolved values regardless
 of `verbose`.
+
+## Renaming `execution_mode`
+
+The key that decides whether a human is consulted is now `interaction_mode`.
+The old name is still read, so nothing breaks — but `sddx config validate`
+reports it, naming the replacement:
+
+```diff
+ {
+-  "execution_mode": "auto"
++  "interaction_mode": "auto"
+ }
+```
+
+Set both and `interaction_mode` wins, with a warning saying so. See
+[config.md](../reference/config.md#migrating-execution_mode--interaction_mode).
 
 ## Validating without guessing
 

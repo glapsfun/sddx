@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { blockedOn, resolveTaskState } from "../src/lib/task";
 import { rematerializeStaleDependents } from "../src/lib/worktree";
 import { fixtureClone, fixtureRepo } from "./fixtures";
-import { fakeRedCheck, repoRoot } from "./helpers";
+import { fakeRedCheck, GRAPH_HEADER, repoRoot } from "./helpers";
 
 const CLI = join(repoRoot, "src/cli.ts");
 const cli = (cwd: string, ...args: string[]) =>
@@ -50,7 +50,7 @@ function scopedGraph(cwd: string): void {
   );
   writeFileSync(
     join(cwd, "graph.yaml"),
-    "goal: ship the chain\ntasks:\n  - alias: a\n    spec: specs/a.yaml\n  - alias: b\n    spec: specs/b.yaml\n    depends_on: a\n",
+    `${GRAPH_HEADER}goal: ship the chain\ntasks:\n  - alias: a\n    spec: specs/a.yaml\n  - alias: b\n    spec: specs/b.yaml\n    depends_on: a\n`,
   );
 }
 
@@ -174,7 +174,7 @@ describe("fan-in dependency end-to-end", () => {
     );
     writeFileSync(
       join(cwd, "graph.yaml"),
-      "goal: ship the fan-in\ntasks:\n  - alias: a\n    spec: specs/a.yaml\n  - alias: b\n    spec: specs/b.yaml\n  - alias: d\n    spec: specs/d.yaml\n    depends_on: [a, b]\n",
+      `${GRAPH_HEADER}goal: ship the fan-in\ntasks:\n  - alias: a\n    spec: specs/a.yaml\n  - alias: b\n    spec: specs/b.yaml\n  - alias: d\n    spec: specs/d.yaml\n    depends_on: [a, b]\n`,
     );
   }
 
@@ -271,7 +271,7 @@ describe("retry end-to-end", () => {
     );
     writeFileSync(
       join(clone, "graph.yaml"),
-      "goal: ship the chain\ntasks:\n  - alias: a\n    spec: specs/a.yaml\n  - alias: b\n    spec: specs/b.yaml\n    depends_on: a\n",
+      `${GRAPH_HEADER}goal: ship the chain\ntasks:\n  - alias: a\n    spec: specs/a.yaml\n  - alias: b\n    spec: specs/b.yaml\n    depends_on: a\n`,
     );
     const created = approveAndCreate(clone, "graph", "create", "--graph", "graph.yaml");
     const goalId = /created goal (\S+)/.exec(created.stdout)![1]!;

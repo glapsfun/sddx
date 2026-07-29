@@ -5,13 +5,13 @@ import { join } from "node:path";
 import { decideGate, SELF_MODIFYING_GLOBS } from "../src/lib/approval";
 import { scopesOverlap } from "../src/lib/glob-overlap";
 import { fixtureClone, fixtureRepo } from "./fixtures";
-import { goalIds, repoRoot } from "./helpers";
+import { GRAPH_HEADER_LINES, goalIds, repoRoot } from "./helpers";
 
 const CLI_SRC = join(repoRoot, "src/cli.ts");
 function cli(cwd: string, env: NodeJS.ProcessEnv, ...args: string[]) {
   return spawnSync("bun", [CLI_SRC, ...args], { cwd, encoding: "utf8", env });
 }
-// Execution mode is config-only by design (see config.ts executionMode): the
+// Execution mode is config-only by design (see config.ts interactionMode): the
 // environment is part of the command line the agent composes, so it must not be
 // able to switch the gate. Tests therefore write config, exactly as a user does.
 const auto = process.env;
@@ -21,7 +21,7 @@ function withMode(cwd: string, mode: "human" | "auto", autoMaxTasks?: number): v
   writeFileSync(
     join(cwd, ".sddx", "config.json"),
     JSON.stringify({
-      execution_mode: mode,
+      interaction_mode: mode,
       ...(autoMaxTasks ? { auto_max_tasks: autoMaxTasks } : {}),
     }),
   );
@@ -44,7 +44,7 @@ function planRepo(
 ): string {
   const drafts = join(cwd, ".sddx", "drafts");
   mkdirSync(drafts, { recursive: true });
-  const lines = ["goal: ship the widget", "tasks:"];
+  const lines = [...GRAPH_HEADER_LINES, "goal: ship the widget", "tasks:"];
   for (let i = 0; i < nodes; i++) {
     const alias = `n${i}`;
     writeFileSync(join(drafts, `${alias}.yaml`), SPEC(`build part ${i}`, perNode(i)));
@@ -239,6 +239,51 @@ describe("decideGate refuses rather than degrading", () => {
     expect(d.mode).toBe("auto");
     expect(d.refusal).toContain("auto_max_tasks");
     expect(d.nodeCount).toBe(4);
+  });
+
+  /** Adds an `unresolved:` list to an already-written graph draft. */
+  function withUnresolved(graphPath: string, ...items: string[]): string {
+    const text = readFileSync(graphPath, "utf8");
+    const block = ["unresolved:", ...items.map((i) => `  - "${i}"`), ""].join("\n");
+    writeFileSync(graphPath, text.replace("tasks:", `${block}tasks:`));
+    return graphPath;
+  }
+
+  test("a non-empty unresolved list refuses an auto plan that clears every path bound", () => {
+    // The additive half of the blocker rule: intake reporting a decision it
+    // could not safely take. It is layered ON TOP of the deterministic bounds,
+    // never instead of them — see the next test.
+    const cwd = fixtureRepo();
+    const g = withUnresolved(graphOn(cwd, 2), "should signup collect date of birth?");
+    const d = decideGate(cwd, g, nodes(2), "auto", 99, scopesOverlap);
+    expect(d.ok).toBe(false);
+    expect(d.refusal).toContain("should signup collect date of birth?");
+  });
+
+  test("the same unresolved plan is untouched in human mode, where a human already reviews it", () => {
+    const cwd = fixtureRepo();
+    const g = withUnresolved(graphOn(cwd, 2), "should signup collect date of birth?");
+    const d = decideGate(cwd, g, nodes(2), "human", 99, scopesOverlap);
+    expect(d.refusal).toBeUndefined();
+  });
+
+  test("a protected-path plan refuses even when intake reports nothing unresolved", () => {
+    // The point of the deterministic bounds: they do not consult the
+    // self-report, so a model that assumes its way past an auth decision and
+    // writes an empty `unresolved` still cannot run unattended.
+    const cwd = fixtureRepo();
+    const g = graphOn(cwd, 2);
+    expect(readFileSync(g, "utf8")).not.toContain("unresolved");
+    const d = decideGate(
+      cwd,
+      g,
+      nodes(2, (i) => (i === 1 ? ["src/auth/**"] : ["src/n0/**"])),
+      "auto",
+      99,
+      scopesOverlap,
+    );
+    expect(d.ok).toBe(false);
+    expect(d.refusal).toContain("auth");
   });
 
   test("self-modification is reported with the offending node and paths", () => {

@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fixtureClone, fixtureRepo } from "./fixtures";
-import { fakeRedCheck, goalIds, readGoalAnywhere, repoRoot } from "./helpers";
+import { fakeRedCheck, GRAPH_HEADER, goalIds, readGoalAnywhere, repoRoot } from "./helpers";
 
 const PACKAGE_VERSION = (
   JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as { version: string }
@@ -62,7 +62,7 @@ function mkdtempScopedSpecs(cwd: string): void {
   );
   writeFileSync(
     join(cwd, "graph.yaml"),
-    "goal: ship the feature\ntasks:\n  - alias: schema\n    spec: specs/schema.yaml\n  - alias: api\n    spec: specs/api.yaml\n    depends_on: schema\n",
+    `${GRAPH_HEADER}goal: ship the feature\ntasks:\n  - alias: schema\n    spec: specs/schema.yaml\n  - alias: api\n    spec: specs/api.yaml\n    depends_on: schema\n`,
   );
 }
 
@@ -189,7 +189,7 @@ describe("sddx cli", () => {
     writeFileSync(join(cwd, "spec.yaml"), SPEC);
     writeFileSync(
       join(cwd, "graph.yaml"),
-      "goal: ship it\ntasks:\n  - alias: only\n    spec: spec.yaml\n",
+      `${GRAPH_HEADER}goal: ship it\ntasks:\n  - alias: only\n    spec: spec.yaml\n`,
     );
     const created = approveAndCreate(
       cwd,
@@ -322,7 +322,7 @@ describe("sddx cli", () => {
     // a and b are both roots (no depends_on) with overlapping scope → illegal
     writeFileSync(
       join(cwd, "graph.yaml"),
-      "goal: do a and b\ntasks:\n  - alias: a\n    spec: a.yaml\n  - alias: b\n    spec: b.yaml\n",
+      `${GRAPH_HEADER}goal: do a and b\ntasks:\n  - alias: a\n    spec: a.yaml\n  - alias: b\n    spec: b.yaml\n`,
     );
     const r = approveAndCreate(
       cwd,
@@ -346,7 +346,7 @@ describe("sddx cli", () => {
     writeFileSync(join(cwd, "bad.yaml"), "task: t\nsuccess_criteria:\n  - a\n");
     writeFileSync(
       join(cwd, "graph.yaml"),
-      "goal: g\ntasks:\n  - alias: ok\n    spec: ok.yaml\n  - alias: bad\n    spec: bad.yaml\n",
+      `${GRAPH_HEADER}goal: g\ntasks:\n  - alias: ok\n    spec: ok.yaml\n  - alias: bad\n    spec: bad.yaml\n`,
     );
     const r = approveAndCreate(
       cwd,
@@ -427,7 +427,7 @@ describe("sddx cli", () => {
     );
     writeFileSync(
       join(cwd, "graph.yaml"),
-      "goal: g\ntasks:\n  - alias: policy\n    spec: root.yaml\n  - alias: plain\n    spec: plain.yaml\n",
+      `${GRAPH_HEADER}goal: g\ntasks:\n  - alias: policy\n    spec: root.yaml\n  - alias: plain\n    spec: plain.yaml\n`,
     );
     const r = approveAndCreate(
       cwd,
@@ -460,7 +460,10 @@ describe("sddx cli", () => {
       join(cwd, "bad.yaml"),
       `task: bad policy\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\non_dependency_failure: retry\n`,
     );
-    writeFileSync(join(cwd, "graph.yaml"), "goal: g\ntasks:\n  - alias: bad\n    spec: bad.yaml\n");
+    writeFileSync(
+      join(cwd, "graph.yaml"),
+      `${GRAPH_HEADER}goal: g\ntasks:\n  - alias: bad\n    spec: bad.yaml\n`,
+    );
     const r = approveAndCreate(
       cwd,
       "graph",
@@ -593,7 +596,7 @@ describe("sddx cli", () => {
     writeFileSync(join(cwd, "spec.yaml"), SPEC);
     writeFileSync(
       join(cwd, "graph.yaml"),
-      "goal: report it\ntasks:\n  - alias: only\n    spec: spec.yaml\n",
+      `${GRAPH_HEADER}goal: report it\ntasks:\n  - alias: only\n    spec: spec.yaml\n`,
     );
     const created = approveAndCreate(
       cwd,

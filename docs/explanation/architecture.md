@@ -13,7 +13,7 @@ design choice is in [design-principles.md](design-principles.md) and
 sddx/
 ├── .claude-plugin/plugin.json   # ONLY the manifest lives here (name, version, userConfig)
 ├── skills/                      # /sddx:run, quick, plan, verify, board, audit
-├── agents/                      # orchestrator, planner, tdd-executor, verifier
+├── agents/                      # intake, orchestrator, planner, tdd-executor, verifier
 ├── hooks/hooks.json             # the five hook registrations
 ├── bin/sddx-run                 # POSIX launcher: prefer bun, fall back to node ≥18
 ├── src/                         # TypeScript sources (Bun toolchain)
@@ -29,9 +29,10 @@ Claude Code plugin rules honored throughout: only the manifest inside
 CI.
 
 Role separation is enforced with tool restrictions, not prompting: the
-`orchestrator` and `planner` agents have no source-edit tools, the
-`tdd-executor` cannot merge or write receipts, and the `verifier` can run the
-oracle and write the receipt but never edit sources.
+`intake`, `orchestrator` and `planner` agents have no source-edit tools
+(`intake` writes exactly one thing, the Goal Brief header of a graph draft, and
+has no Bash at all), the `tdd-executor` cannot merge or write receipts, and the
+`verifier` can run the oracle and write the receipt but never edit sources.
 
 ## Runtime and build
 

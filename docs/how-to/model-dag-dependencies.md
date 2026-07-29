@@ -23,6 +23,8 @@ scoped `src/a/**` is fine, because the edge already orders them.
 ## Fan-out and fan-in in `graph.yaml`
 
 ```yaml
+schema_version: "1.0"
+interaction_mode: human
 goal: ship the dashboard
 tasks:
   - alias: a

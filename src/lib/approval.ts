@@ -11,7 +11,7 @@
 // configuration that binds approval to a person. See docs/execution-modes.md.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import type { ExecutionMode } from "./config";
+import type { InteractionMode } from "./config";
 import { parseGraph } from "./graph";
 import { sha256 } from "./receipt";
 import { signPayload } from "./sign";
@@ -20,12 +20,12 @@ import { sddxDir } from "./task";
 export interface Approval {
   plan_sha256: string;
   /** The mode the plan was approved to run under. */
-  mode: ExecutionMode;
+  mode: InteractionMode;
   /** READ-ONLY COMPATIBILITY. Written by versions in which an `auto` plan over a
    * blast-radius bound degraded into `human` and was approved anyway. Bounds are
    * hard refusals now, so no such hybrid exists and nothing writes these — but
    * tokens on disk still carry them and must keep parsing for audit. */
-  requested_mode?: ExecutionMode;
+  requested_mode?: InteractionMode;
   /** READ-ONLY COMPATIBILITY — see `requested_mode`. */
   degraded_reason?: string;
   at: string;
@@ -106,7 +106,7 @@ export function writeApproval(
   cwd: string,
   input: {
     plan_sha256: string;
-    mode: ExecutionMode;
+    mode: InteractionMode;
     workspace_mode?: string;
   },
 ): Approval {
@@ -192,14 +192,50 @@ export interface GateDecision {
   /** The mode that applies. Exceeding an autonomy bound no longer turns `auto`
    * into `human` — it refuses — so this never reports a mode the caller did not
    * configure. */
-  mode: ExecutionMode;
-  requestedMode: ExecutionMode;
+  mode: InteractionMode;
+  requestedMode: InteractionMode;
   /** Why approval is still required, when `ok` is false. */
   reason?: string;
   /** A hard refusal — not a gate arming. Creation must fail, not ask. */
   refusal?: string;
+  /** The same refusal as structured data, for a caller that has to act on the
+   * bound rather than print it. Always present when `refusal` is. */
+  blocker?: Blocker;
   nodeCount: number;
 }
+
+/** Which bound fired. A closed set, because every one of them is a code
+ * constant rather than a judgment — that is the whole point of the design. */
+export type BlockerBound =
+  | "manual-oracle"
+  | "unresolved"
+  | "workspace"
+  | "unconfined-scope"
+  | "self-modifying"
+  | "protected-path"
+  | "task-ceiling";
+
+/**
+ * An autonomous blocker, structured. The three fields are what a person (or the
+ * session relaying to one) needs to act: what decision is missing or what policy
+ * was exceeded, what it means for the run, and what to do next. Rendering them
+ * into one line is `renderBlocker`'s job, so the terminal string and the JSON
+ * payload can never describe different bounds.
+ */
+export interface Blocker {
+  bound: BlockerBound;
+  /** The missing decision, or the policy that was exceeded. */
+  decision: string;
+  /** What it means for this run. */
+  impact: string;
+  /** The single next step that unblocks it. */
+  next_step: string;
+  /** The offending node, when the bound is node-scoped. */
+  node?: string;
+}
+
+export const renderBlocker = (b: Blocker): string =>
+  `${b.node ? `node "${b.node}": ` : ""}${b.decision} — ${b.impact} ${b.next_step}`;
 
 /** Scope globs that reach the machinery enforcing sddx's own gates. A plan that
  * edits the thing enforcing the plan always meets a human, in either mode. */
@@ -284,10 +320,10 @@ export function namesSensitiveArea(scope: string[]): string | undefined {
 }
 
 /** How a refused auto plan is made actionable. Mode is config-only by design
- * (see `executionMode`), so the remedy is an edit to a reviewed file — never a
+ * (see `interactionMode`), so the remedy is an edit to a reviewed file — never a
  * flag or an environment variable, both of which the agent composes itself. */
 const REMEDY =
-  'To review and run this plan yourself, set "execution_mode": "human" in .sddx/config.json.';
+  'To review and run this plan yourself, set "interaction_mode": "human" in .sddx/config.json.';
 
 /**
  * The single approval decision, shared by the CLI predicate and the PreToolUse
@@ -301,7 +337,7 @@ export function decideGate(
   cwd: string,
   graphPath: string,
   nodes: GateNode[],
-  requestedMode: ExecutionMode,
+  requestedMode: InteractionMode,
   ceiling: number,
   overlaps: (a: string[], b: string[]) => boolean,
   /** The RESOLVED effective workspace strategy (downgrades applied), not the raw
@@ -324,8 +360,12 @@ export function decideGate(
   // arming the gate instead of refusing — meant `graph approve` in auto mode
   // produced a run recorded `auto` that a human had in fact approved.
   if (requestedMode === "auto") {
-    const refusal = autoRefusal(nodes, ceiling, overlaps, workspaceMode);
-    if (refusal) return { ...base, ok: false, mode: "auto", refusal };
+    // The header is read here rather than passed in, so the CLI predicate and
+    // the PreToolUse hook cannot disagree about what the plan declared.
+    const blocker = autoRefusal(nodes, ceiling, overlaps, workspaceMode, unresolvedOf(graphPath));
+    if (blocker) {
+      return { ...base, ok: false, mode: "auto", refusal: renderBlocker(blocker), blocker };
+    }
   }
 
   const approval = readApproval(cwd, hash);
@@ -375,18 +415,49 @@ function autoRefusal(
   ceiling: number,
   overlaps: (a: string[], b: string[]) => boolean,
   workspaceMode?: string,
-): string | undefined {
+  unresolved: string[] = [],
+): Blocker | undefined {
   // Nobody is present to observe a manual oracle. Incoherence, not risk appetite.
   const manual = nodes.find((n) => n.oracleType === "manual");
   if (manual) {
-    return `node "${manual.alias}" declares oracle.type: manual — an unattended run has nobody to observe it. Use an executable oracle, or run in human mode. ${REMEDY}`;
+    return {
+      bound: "manual-oracle",
+      node: manual.alias,
+      decision: "declares oracle.type: manual",
+      impact:
+        "an unattended run has nobody present to observe it, so completion could never be proven",
+      next_step: `Give it an executable oracle, or run it with a human watching. ${REMEDY}`,
+    };
+  }
+
+  // The ADDITIVE half of the blocker rule. Not every critical decision is
+  // path-shaped ("should signup collect date of birth?"), so intake reporting
+  // what it could not settle catches the residue the constants below cannot
+  // express. It is layered on top of them, never in place of them: the bounds
+  // fire whether or not this list is empty, which is what keeps the rule out of
+  // the reach of a model that simply reports nothing.
+  if (unresolved.length > 0) {
+    const list = unresolved.map((u) => `"${u}"`).join(", ");
+    return {
+      bound: "unresolved",
+      decision: `${unresolved.length} decision${unresolved.length === 1 ? "" : "s"} intake could not safely take: ${list}`,
+      impact:
+        "the plan rests on a choice nobody has made, and an unattended run would make it by accident",
+      next_step: `Decide them and record them as answers in the Goal Brief header, or run in human mode. ${REMEDY}`,
+    };
   }
 
   // Isolation is a bound, not a preference. `--workspace none` runs every task
   // in the user's live checkout, mutating the branch they are sitting on —
   // unattended — and the strategy comes from the command line the agent composes.
   if (workspaceMode === "none") {
-    return `workspace "none" runs every task directly in the working checkout instead of an isolated worktree, which an unattended run must not do. ${REMEDY}`;
+    return {
+      bound: "workspace",
+      decision: 'workspace "none" was requested',
+      impact:
+        "every task would run directly in the working checkout instead of an isolated worktree, mutating the branch you are sitting on",
+      next_step: `Use the default worktree isolation, or run in human mode. ${REMEDY}`,
+    };
   }
 
   // An EMPTY scope is unconfined — the task may write anywhere, which includes
@@ -395,31 +466,74 @@ function autoRefusal(
   // omitting `scope` the cheapest bypass of both bounds.
   const unconfined = nodes.find((n) => n.scope.length === 0);
   if (unconfined) {
-    return `node "${unconfined.alias}" declares no scope, so it is unconfined and may write sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")}) or protected paths (${SENSITIVE_SEGMENTS.join(", ")}, ${SENSITIVE_GLOBS.join(", ")}). ${REMEDY}`;
+    return {
+      bound: "unconfined-scope",
+      node: unconfined.alias,
+      decision: "declares no scope, so it is unconfined",
+      impact: `it may write sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")}) or protected paths (${SENSITIVE_SEGMENTS.join(", ")}, ${SENSITIVE_GLOBS.join(", ")})`,
+      next_step: `Declare the smallest scope that covers the work, or run in human mode. ${REMEDY}`,
+    };
   }
 
   const selfModifying = nodes.find((n) => overlaps(n.scope, [...SELF_MODIFYING_GLOBS]));
   if (selfModifying) {
-    return `node "${selfModifying.alias}" declares a scope reaching sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")}). ${REMEDY}`;
+    return {
+      bound: "self-modifying",
+      node: selfModifying.alias,
+      decision: `declares a scope reaching sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")})`,
+      impact: "a plan that edits the machinery enforcing the plan cannot be bounded by it",
+      next_step: `Narrow the scope, or run it with a human reviewing. ${REMEDY}`,
+    };
   }
 
   // Security, data, billing, and deployment decisions. Deterministic by design,
   // and matched two ways — see the SENSITIVE_SEGMENTS note for why one is not enough.
+  const PROTECTED_IMPACT =
+    "a security, data, billing, or deployment decision is not one an unattended run may take";
   for (const n of nodes) {
     const named = namesSensitiveArea(n.scope);
     if (named) {
-      return `node "${n.alias}" declares a scope naming the protected area "${named}" — a security, data, billing, or deployment decision is not one an unattended run may take. ${REMEDY}`;
+      return {
+        bound: "protected-path",
+        node: n.alias,
+        decision: `declares a scope naming the protected area "${named}"`,
+        impact: PROTECTED_IMPACT,
+        next_step: `Move that work into its own task and run it with a human reviewing. ${REMEDY}`,
+      };
     }
   }
   const sensitive = nodes.find((n) => overlaps(n.scope, [...SENSITIVE_GLOBS]));
   if (sensitive) {
-    return `node "${sensitive.alias}" declares a scope reaching protected paths (${SENSITIVE_GLOBS.join(", ")}) — a security, data, billing, or deployment decision is not one an unattended run may take. ${REMEDY}`;
+    return {
+      bound: "protected-path",
+      node: sensitive.alias,
+      decision: `declares a scope reaching protected paths (${SENSITIVE_GLOBS.join(", ")})`,
+      impact: PROTECTED_IMPACT,
+      next_step: `Move that work into its own task and run it with a human reviewing. ${REMEDY}`,
+    };
   }
 
   if (nodes.length > ceiling) {
-    return `plan has ${nodes.length} nodes, over the auto_max_tasks ceiling of ${ceiling}. ${REMEDY}`;
+    return {
+      bound: "task-ceiling",
+      decision: `plan has ${nodes.length} nodes, over the auto_max_tasks ceiling of ${ceiling}`,
+      impact:
+        "the blast radius of one unattended run is capped deliberately, and this plan exceeds it",
+      next_step: `Split the goal into smaller runs, raise auto_max_tasks in reviewed configuration, or run in human mode. ${REMEDY}`,
+    };
   }
   return undefined;
+}
+
+/** The plan's `unresolved` header list, or empty when the draft is missing or
+ * unparseable — an unhashable plan is already refused by the hash check above,
+ * so this never has to invent a reason of its own. */
+function unresolvedOf(graphPath: string): string[] {
+  try {
+    return parseGraph(readFileSync(graphPath, "utf8")).graph?.unresolved ?? [];
+  } catch {
+    return [];
+  }
 }
 
 /** Every approval token on disk, newest first. Used by the audit to check

@@ -16,7 +16,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { findGoalForTask, readGoal, writeGoal } from "../src/lib/goal";
 import { fixtureClone } from "./fixtures";
-import { fakeRedCheck, repoRoot } from "./helpers";
+import { fakeRedCheck, GRAPH_HEADER_LINES, repoRoot } from "./helpers";
 
 const CLI = join(repoRoot, "src/cli.ts");
 const cli = (cwd: string, ...args: string[]) =>
@@ -29,7 +29,7 @@ const spec = (task: string, part: string) =>
 /** `n` independent root tasks, each satisfied by writing its own file. */
 function plan(cwd: string, n: number): string {
   mkdirSync(join(cwd, "specs"), { recursive: true });
-  const lines = ["goal: ship the widget", "tasks:"];
+  const lines = [...GRAPH_HEADER_LINES, "goal: ship the widget", "tasks:"];
   for (let i = 0; i < n; i++) {
     writeFileSync(join(cwd, "specs", `n${i}.yaml`), spec(`build part ${i}`, `part${i}`));
     lines.push(`  - alias: n${i}`, `    spec: specs/n${i}.yaml`);

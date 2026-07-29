@@ -21,7 +21,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { computeBoard } from "../src/board";
 import { fixtureClone, fixtureRepo } from "./fixtures";
-import { fakeRedCheck, repoRoot } from "./helpers";
+import { fakeRedCheck, GRAPH_HEADER, repoRoot } from "./helpers";
 
 const CLI = join(repoRoot, "src/cli.ts");
 const cli = (cwd: string, ...args: string[]) =>
@@ -135,7 +135,7 @@ describe("legacy receipts still audit", () => {
     );
     writeFileSync(
       join(cwd, "graph.yaml"),
-      "goal: ship the widget\ntasks:\n  - alias: a\n    spec: specs/a.yaml\n",
+      `${GRAPH_HEADER}goal: ship the widget\ntasks:\n  - alias: a\n    spec: specs/a.yaml\n`,
     );
     expect(cli(cwd, "graph", "approve", "--graph", "graph.yaml").status).toBe(0);
     const created = cli(cwd, "graph", "create", "--graph", "graph.yaml", "--output", "json");

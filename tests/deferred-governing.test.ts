@@ -25,7 +25,7 @@ import { join } from "node:path";
 import { resolveTask } from "../src/lib/resolve";
 import { tddGate } from "../src/tdd-gate";
 import { fixtureClone } from "./fixtures";
-import { fakeRedCheck, repoRoot } from "./helpers";
+import { fakeRedCheck, GRAPH_HEADER_LINES, repoRoot } from "./helpers";
 
 const CLI = join(repoRoot, "src/cli.ts");
 const cli = (cwd: string, ...args: string[]) =>
@@ -45,7 +45,13 @@ const spec = (task: string, scope: string) =>
 function chainGraph(cwd: string, dependents: number): void {
   mkdirSync(join(cwd, "specs"), { recursive: true });
   writeFileSync(join(cwd, "specs", "a.yaml"), spec("parent task alpha", "src/db/**"));
-  const lines = ["goal: ship the chain", "tasks:", "  - alias: a", "    spec: specs/a.yaml"];
+  const lines = [
+    ...GRAPH_HEADER_LINES,
+    "goal: ship the chain",
+    "tasks:",
+    "  - alias: a",
+    "    spec: specs/a.yaml",
+  ];
   for (let i = 0; i < dependents; i++) {
     // each child's scope sits under the parent's, legal only because it is ordered after it
     writeFileSync(join(cwd, "specs", `c${i}.yaml`), spec(`child task ${i}`, `src/db/c${i}.ts`));

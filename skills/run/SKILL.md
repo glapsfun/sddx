@@ -29,15 +29,17 @@ branch is always the user's call in both modes (see Rules). Auto mode buys an
 unattended run ending in a reviewable branch with a receipt chain — not an
 unattended merge.
 
-Read the effective mode from `.data.execution_mode` in step 0. There is **no
+Read the effective mode from `.data.interaction_mode` in step 0. There is **no
 `--mode` flag and no environment override** — mode lives in `.sddx/config.json`
 alone, precisely so a command line you compose cannot switch off the gate you are
 subject to. Do not try to pass one. Under `human`,
-your responsibilities are: discover requirements, ask only questions that block
-an oracle (step 0.5), present the rendered plan, and **never invoke
-`graph create` before approval**. Under `auto`: resolve open questions
-conservatively, record each resolution as a spec `assumptions` entry, continue
-without interruption, and produce the summary.
+your responsibilities are: run the one intake question round and render its
+batch (step 0.5), present the rendered plan, and **never invoke
+`graph create` before approval**. Under `auto`: ask nothing, expect open
+questions resolved conservatively and recorded as `assumptions` with rationale,
+continue without interruption, and produce the summary. A decision `auto` cannot
+safely take lands in the header's `unresolved` list, which **refuses** the run
+rather than degrading it to a prompt.
 
 These are behavioral instructions layered on top of a deterministic gate, and
 they are **not** the mechanism enforcing approval. A PreToolUse hook raises the
@@ -51,21 +53,49 @@ which is the point.
    `.data.agent_model` (a `role=model` map, e.g. `{"tddExecutor": "opus"}`) for
    step 1 onward: when dispatching a subagent for a role present in that map,
    pass its model as the dispatch's model override; roles absent from the map
-   use the harness default. Also keep `.data.execution_mode` (`human`|`auto`)
+   use the harness default. Also keep `.data.interaction_mode` (`human`|`auto`)
    and `.data.auto_max_tasks`. (`--json` still works as a deprecated alias for
    `--output json`, but reads the same `.data.*` shape — not the bare fields
    an older sddx once printed at the top level.)
-0.5 **Ask only what blocks an oracle.** Before planning, surface to the user
-   only those open questions whose answers make an oracle unwritable or a
-   success criterion non-binary — "which test runner?", "is auth in scope?".
-   Anything else (audience, styling preference, naming taste) you resolve
-   conservatively and record as an `assumptions` entry on the affected spec, or
-   at graph level when it is cross-cutting. The test is mechanical: **if you can
-   write the oracle, you do not get to ask.** Under `auto`, a question that
-   conservative assumption cannot resolve is the one condition that halts the
-   run — stop and escalate rather than guessing.
-1. **Decompose into a graph** — dispatch the `orchestrator` agent with the goal.
-   It authors `.sddx/drafts/<date>-<goal-slug>-graph.yaml`: one node per task
+0.5 **Intake — interpret the goal before decomposing it.** Dispatch the
+   `intake` agent with the raw goal and the effective mode. It researches the
+   repo and writes the **Goal Brief header** of
+   `.sddx/drafts/<date>-<goal-slug>-graph.yaml` — `schema_version`,
+   `interaction_mode`, `goal`, and whichever of `answers`, `assumptions`,
+   `constraints`, `acceptance_criteria`, `out_of_scope`, `unresolved` apply —
+   and **no `tasks:` key**. A draft without `tasks:` fails parsing by design, so
+   an intake-only header cannot be fingerprinted, approved, or materialized.
+
+   **A subagent has no channel to the user, so intake cannot ask anything.** It
+   *returns* its question batch to you; you render it. Write what it returned to
+   `.sddx/drafts/<date>-<goal-slug>-questions.yaml` and run
+   `... intake check --batch <path>` **before showing anything**. That command
+   enforces the three-question cap and the shape of each entry; over the cap it
+   exits nonzero naming the cap rather than truncating. Do not render an
+   unchecked batch.
+
+   Then, under `human`: ask the user the (at most three) questions in **one**
+   round, each with why it matters and its recommended default. Fold every
+   answer — and every default the user explicitly accepted — into the header's
+   `answers` list, keyed by the question's id. Under `auto`: ask nothing, and
+   expect intake to have recorded conservative defaults as `assumptions` with
+   rationale instead.
+
+   **One batch, one dispatch.** Do not re-dispatch intake to look for more
+   questions once the user has answered — a second cold subagent re-reads the
+   repository to ask what the first round should have asked, which is the token
+   cost this flow exists to avoid. A question that was missed surfaces at the
+   plan summary in step 2.5, where **Edit** and **Regenerate** already exist.
+   The one reason to re-dispatch is the user **changing the goal itself**; in
+   that case hand the existing `answers` back to intake, which retains those
+   still valid and re-asks only the genuinely affected ones.
+
+   A well-specified goal returns a complete header and **zero** questions. Go
+   straight to step 1 — that is a success, not a shortfall.
+1. **Decompose into a graph** — dispatch the `orchestrator` agent with the goal
+   and the header intake wrote. It **appends `tasks:`** to that same draft
+   (`.sddx/drafts/<date>-<goal-slug>-graph.yaml`), never rewriting the header
+   and never restarting requirements discovery: one node per task
    with an `alias`, a `spec` path (a bare filename alongside the graph file —
    `graph create` resolves it relative to `graph.yaml`'s own directory), and
    `depends_on` naming **zero or more** sibling aliases (a scalar for one
@@ -90,24 +120,42 @@ which is the point.
    Relay it. A re-render after a revision prints only what changed, so a second
    read is cheap.
 
-   Offer four actions and take none of them unasked:
+   Offer **exactly these four** actions and take none of them unasked. There is
+   no fifth: everything else belongs to the goal-scoped Next Actions menu after
+   the run summary, and the two menus are never combined.
    - **Approve** → `... graph approve --graph <path>` (pass the same
      `--workspace` you will create with — the token records it), then step 3.
    - **Edit** → revise the draft YAML (the drafts *are* the plan), re-render.
-     Any edit changes the plan hash, so the gate arms again — expected, not a bug.
-   - **Regenerate** → delete this goal's drafts, return to step 1.
-   - **Cancel** → delete the drafts. **Nothing else needs undoing** — no branch,
-     worktree, or state file exists yet. This is why the gate sits here.
+     Any edit changes the plan hash, so the gate arms again — expected, not a
+     bug. An edit to an **answer or the goal** goes back to the header and needs
+     a fresh decomposition before the summary is shown again; an edit to only
+     the decomposition re-renders from step 2.5.
+   - **Regenerate** → `... graph regenerate --graph <path>`, then return to
+     step 1 for a fresh decomposition. It truncates the draft back to its
+     header keys and removes the node spec drafts. Every recorded answer
+     survives untouched, because the answers *are* the part of the file that is
+     kept — no question is re-asked and intake is not re-dispatched.
+   - **Cancel** → `... graph cancel --graph <path>`. **Nothing else needs
+     undoing** — no branch, worktree, or state file exists yet. This is why the
+     gate sits here.
 
-   Under `auto` within bounds, render for the record and continue without
-   prompting. `auto` still arms the gate — reported as a degradation, not a
-   failure — when the plan exceeds `auto_max_tasks` or any node's `scope`
-   reaches sddx's own enforcement paths (`hooks/**`, `.claude-plugin/**`,
-   `dist/**`, `bin/**`, `.claude/**`, CI workflows), or when `--workspace none`
-   would run tasks in the live checkout. Two things `auto` refuses outright rather than asking about: a
-   node whose `oracle.type` is `manual` (nobody is present to observe it), and
-   granting a `task allow` TDD-gate exemption (an agent that can widen its own
-   gate has no gate) — both need `human`.
+   Under `auto` **no menu is rendered and no selection is waited for** — render
+   the summary for the record and continue. A plan passing every autonomy bound
+   is authorized by the mode itself, recorded as `auto`, never as a human
+   approval.
+
+   Every autonomy bound is a **hard refusal**, not a degradation to a prompt:
+   there is no "approve your way past it". `auto` refuses when the plan exceeds
+   `auto_max_tasks`; when any node's `scope` reaches sddx's own enforcement
+   paths (`hooks/**`, `.claude-plugin/**`, `dist/**`, `bin/**`, `.claude/**`,
+   CI workflows) or a protected area (auth, migrations, secrets, credentials,
+   billing, `infra/**`, `terraform/**`, `k8s/**`, Dockerfiles, `.env*`); when a
+   node declares no `scope` at all (unconfined); when the header carries a
+   non-empty `unresolved` list; when `--workspace none` would run tasks in the
+   live checkout; when a node's `oracle.type` is `manual` (nobody is present to
+   observe it); or on a `task allow` TDD-gate exemption (an agent that can
+   widen its own gate has no gate). Each refusal names the reviewed-configuration
+   edit that would let a human run it instead.
 3. **Create atomically** — from the repo root:
    `... graph create --graph .sddx/drafts/<date>-<goal-slug>-graph.yaml`
    This is the gate: it validates every oracle, the DAG (cycle-free, and
@@ -159,8 +207,8 @@ which is the point.
    branch already reflects whatever verified so far. The report is **identical
    in both modes** — same sections, same order — and also carries the goal
    sentence, per-task oracle outcomes, the approval line (effective mode, plan
-   hash, and any recorded `auto`→`human` degradation), and any assumptions
-   recorded during the run. Then run
+   hash, and the authorization type — `human-approval` or `auto`), the answers
+   the user gave, and any assumptions recorded during the run. Then run
    `... next-actions --goal <goal-id>` and relay its menu — review, retry a
    failed task, revert one task's merge, commit remaining changes, push the
    run branch, create a PR/MR, merge into the target branch, exit — offer it,

@@ -11,7 +11,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fixtureClone } from "./fixtures";
-import { goalIds, repoRoot } from "./helpers";
+import { GRAPH_HEADER, GRAPH_HEADER_LINES, goalIds, repoRoot } from "./helpers";
 
 const CLI = join(repoRoot, "src/cli.ts");
 const cli = (cwd: string, ...args: string[]) =>
@@ -24,7 +24,7 @@ const spec = (task: string, scope: string) =>
 /** `n` independent root tasks with disjoint scopes. */
 function rootsGraph(cwd: string, n: number): string {
   mkdirSync(join(cwd, "specs"), { recursive: true });
-  const lines = ["goal: ship the widget", "tasks:"];
+  const lines = [...GRAPH_HEADER_LINES, "goal: ship the widget", "tasks:"];
   for (let i = 0; i < n; i++) {
     writeFileSync(join(cwd, "specs", `n${i}.yaml`), spec(`build part ${i}`, `src/n${i}/**`));
     lines.push(`  - alias: n${i}`, `    spec: specs/n${i}.yaml`);
@@ -179,7 +179,7 @@ describe("the canonical path does not downgrade", () => {
     writeFileSync(join(cwd, "specs", "a.yaml"), spec("do the widget work", "vendor/lib/**"));
     writeFileSync(
       join(cwd, "graph.yaml"),
-      "goal: ship the widget\ntasks:\n  - alias: a\n    spec: specs/a.yaml\n",
+      `${GRAPH_HEADER}goal: ship the widget\ntasks:\n  - alias: a\n    spec: specs/a.yaml\n`,
     );
 
     const r = cli(cwd, "graph", "create", "--graph", "graph.yaml");

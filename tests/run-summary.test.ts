@@ -16,7 +16,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { generateRunReport, renderRunReport } from "../src/lib/runreport";
 import { fixtureClone } from "./fixtures";
-import { fakeRedCheck, repoRoot } from "./helpers";
+import { fakeRedCheck, GRAPH_HEADER, GRAPH_HEADER_LINES, repoRoot } from "./helpers";
 
 const CLI = join(repoRoot, "src/cli.ts");
 const cli = (cwd: string, ...args: string[]) =>
@@ -37,6 +37,7 @@ function partialPlan(cwd: string): string {
   writeFileSync(
     join(cwd, "graph.yaml"),
     [
+      ...GRAPH_HEADER_LINES,
       "goal: ship the widget",
       "tasks:",
       "  - alias: ok",
@@ -179,7 +180,7 @@ describe("no per-task menu after verification", () => {
     writeFileSync(join(cwd, "specs", "ok.yaml"), spec("build the good part", "good"));
     writeFileSync(
       join(cwd, "graph.yaml"),
-      "goal: ship the widget\ntasks:\n  - alias: ok\n    spec: specs/ok.yaml\n",
+      `${GRAPH_HEADER}goal: ship the widget\ntasks:\n  - alias: ok\n    spec: specs/ok.yaml\n`,
     );
     const { byAlias } = create(cwd, "graph.yaml");
     const id = byAlias.ok as string;

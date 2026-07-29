@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fixtureClone, fixtureRepo } from "./fixtures";
-import { goalIds, readGoalAnywhere, repoRoot } from "./helpers";
+import { GRAPH_HEADER, goalIds, repoRoot } from "./helpers";
 
 const CLI_SRC = join(repoRoot, "src/cli.ts");
 
@@ -28,7 +28,7 @@ function planRepo(cwd: string): string {
   const rel = join(".sddx", "drafts", "graph.yaml");
   writeFileSync(
     join(cwd, rel),
-    `goal: ship the widget
+    `${GRAPH_HEADER}goal: ship the widget
 tasks:
   - alias: alpha
     spec: a.yaml
@@ -64,6 +64,65 @@ describe("graph create --dry-run", () => {
     expect(r.status).toBe(0);
     expect(sideEffects(cwd)).toEqual(before);
     expect(r.stdout).toContain("nothing written");
+  });
+
+  describe("renders the Goal Brief header", () => {
+    /** The plan repo above, with a full brief header in place of the bare one. */
+    function briefedRepo(cwd: string): string {
+      const rel = planRepo(cwd);
+      writeFileSync(
+        join(cwd, rel),
+        `${GRAPH_HEADER}goal: ship the widget
+answers:
+  - id: q1
+    question: which store?
+    answer: postgres
+assumptions:
+  - "the project uses Vite"
+unresolved:
+  - "whether to rotate secrets on deploy"
+tasks:
+  - alias: alpha
+    spec: a.yaml
+  - alias: beta
+    spec: b.yaml
+    depends_on: alpha
+`,
+      );
+      return rel;
+    }
+
+    test("shows what was answered, assumed, and left unresolved", () => {
+      const { clone: cwd } = fixtureClone();
+      const rel = briefedRepo(cwd);
+      const r = cli(cwd, "graph", "create", "--graph", rel, "--dry-run");
+      expect(r.status).toBe(0);
+      expect(r.stdout).toContain("which store?");
+      expect(r.stdout).toContain("postgres");
+      expect(r.stdout).toContain("the project uses Vite");
+      expect(r.stdout).toContain("whether to rotate secrets on deploy");
+    });
+
+    test("carries the same brief in the JSON payload", () => {
+      const { clone: cwd } = fixtureClone();
+      const rel = briefedRepo(cwd);
+      const r = cli(cwd, "graph", "create", "--graph", rel, "--dry-run", "--output", "json");
+      expect(r.status).toBe(0);
+      const brief = JSON.parse(r.stdout).data.brief;
+      expect(brief.interactionMode).toBe("human");
+      expect(brief.answers).toEqual([{ id: "q1", question: "which store?", answer: "postgres" }]);
+      expect(brief.assumptions).toEqual(["the project uses Vite"]);
+      expect(brief.unresolved).toEqual(["whether to rotate secrets on deploy"]);
+    });
+
+    test("omits the brief sections a header does not declare", () => {
+      const { clone: cwd } = fixtureClone();
+      const rel = planRepo(cwd); // header with no answers/assumptions/unresolved
+      const r = cli(cwd, "graph", "create", "--graph", rel, "--dry-run");
+      expect(r.status).toBe(0);
+      expect(r.stdout).not.toContain("answered:");
+      expect(r.stdout).not.toContain("unresolved:");
+    });
   });
 
   test("reports goal, node count, workspace mode, base sha, and validation verdict", () => {
@@ -117,7 +176,10 @@ describe("graph create --dry-run", () => {
     // no oracle → invalid
     writeFileSync(join(drafts, "a.yaml"), 'task: do a thing\nsuccess_criteria:\n  - "works"\n');
     const rel = join(".sddx", "drafts", "graph.yaml");
-    writeFileSync(join(cwd, rel), "goal: g\ntasks:\n  - alias: alpha\n    spec: a.yaml\n");
+    writeFileSync(
+      join(cwd, rel),
+      `${GRAPH_HEADER}goal: g\ntasks:\n  - alias: alpha\n    spec: a.yaml\n`,
+    );
 
     const r = cli(cwd, "graph", "create", "--graph", rel, "--dry-run");
     expect(r.status).not.toBe(0);
@@ -134,7 +196,7 @@ describe("graph create --dry-run", () => {
     const rel = join(".sddx", "drafts", "graph.yaml");
     writeFileSync(
       join(cwd, rel),
-      `goal: g
+      `${GRAPH_HEADER}goal: g
 tasks:
   - alias: alpha
     spec: a.yaml
@@ -245,6 +307,23 @@ oracle:
   test("changed stop_rules and out_of_scope are reported", () => {
     expect(reRenderAfter(`${BASE}stop_rules:\n  - max_iterations: 9\n`)).toContain("stop_rules");
     expect(reRenderAfter(`${BASE}out_of_scope:\n  - "auth"\n`)).toContain("out_of_scope");
+  });
+
+  test("an edited Goal Brief header is reported, not swallowed as none", () => {
+    // The header is what the whole plan was built ON. The diff covered only the
+    // node summaries, so revising a constraint, an acceptance criterion, or the
+    // unresolved list rendered as "changes since last render: none" — to a human
+    // told by the skill that a second read is cheap.
+    const { clone: cwd } = fixtureClone();
+    const rel = planRepo(cwd);
+    cli(cwd, "graph", "create", "--graph", rel, "--dry-run"); // seed the cache
+    const graph = readFileSync(join(cwd, rel), "utf8");
+    writeFileSync(join(cwd, rel), `constraints:\n  - "no new dependencies"\n${graph}`);
+
+    const out = cli(cwd, "graph", "create", "--graph", rel, "--dry-run").stdout;
+    expect(out).toContain("~ goal brief");
+    expect(out).toContain("constraints");
+    expect(out).not.toContain("changes since last render: none");
   });
 
   test("a genuinely unchanged plan still reports none", () => {

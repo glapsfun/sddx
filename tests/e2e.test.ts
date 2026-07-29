@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { sha256, validateReceipt, verifyChain } from "../src/lib/receipt";
 import { fixtureRepo } from "./fixtures";
-import { repoRoot } from "./helpers";
+import { createRun, repoRoot } from "./helpers";
 
 const CLI_SRC = join(repoRoot, "src/cli.ts");
 const CLI_DIST = join(repoRoot, "dist/cli.mjs");
@@ -15,15 +15,29 @@ function run(cwd: string, runtime: string[], ...args: string[]): string {
   return r.stdout;
 }
 
-function completeTask(cwd: string, runtime: string[], n: number): string {
+function completeTask(main: string, runtime: string[], n: number): string {
   // A real mini-task: check<n>.js requires greet<n>.js (RED), then we write it (GREEN).
-  writeFileSync(
-    join(cwd, `spec${n}.yaml`),
-    `task: add greet ${n}\nsuccess_criteria:\n  - "node check${n}.js exits 0"\noracle:\n  type: command\n  run: "node check${n}.js"\n`,
+  const { taskIds } = createRun(
+    main,
+    (c, ...a) => {
+      const r = spawnSync(runtime[0] as string, [...runtime.slice(1), ...a], {
+        cwd: c,
+        encoding: "utf8",
+      });
+      return { status: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+    },
+    `deliver greet ${n}`,
+    [
+      {
+        alias: `g${n}`,
+        spec: `task: add greet ${n}\nsuccess_criteria:\n  - "node check${n}.js exits 0"\nscope:\n  - "greet${n}.js"\n  - "check${n}.js"\noracle:\n  type: command\n  run: "node check${n}.js"\n`,
+      },
+    ],
+    { graphName: `graph${n}.yaml` },
   );
-  const id = /created (\S+)/.exec(
-    run(cwd, runtime, "task", "create", "--spec", `spec${n}.yaml`, "--workspace", "branch"),
-  )![1]!;
+  const id = taskIds[0] as string;
+  // the task's work happens in its own worktree, which is where its state lives
+  const cwd = join(main, ".sddx-worktrees", id);
 
   writeFileSync(join(cwd, `check${n}.js`), `require("./greet${n}.js");\n`);
   const red = spawnSync("node", [`check${n}.js`], { cwd });
@@ -38,9 +52,9 @@ function completeTask(cwd: string, runtime: string[], n: number): string {
   run(cwd, runtime, "task", "phase", id, "VERIFY");
   run(cwd, runtime, "verify", id);
 
-  // merge back to main so the next task branches from a repo containing this receipt
-  spawnSync("git", ["switch", "-q", "main"], { cwd });
-  spawnSync("git", ["merge", "-q", "--no-edit", `sddx/${id}`], { cwd });
+  // merge back into the main checkout so the next task's run forks from a repo
+  // containing this receipt — the chain has to span both tasks
+  spawnSync("git", ["merge", "-q", "--no-edit", `sddx/${id}`], { cwd: main });
   return id;
 }
 

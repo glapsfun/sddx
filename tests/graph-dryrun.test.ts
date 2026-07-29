@@ -142,16 +142,6 @@ tasks:
     expect(data.nodes.alpha.scope).toBe("src/alpha/**");
   });
 
-  test("reports the branch-mode downgrade a real create would apply", () => {
-    const { clone: cwd } = fixtureClone();
-    const rel = planRepo(cwd);
-    // an explicit --workspace branch is the same decision surface; the auto
-    // downgrade path is covered by pickWorkspaceMode's own tests
-    const r = cli(cwd, "graph", "create", "--graph", rel, "--dry-run", "--workspace", "branch");
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain("workspace: branch");
-  });
-
   test("render and real creation agree on workspace mode, base sha, and node set", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd);

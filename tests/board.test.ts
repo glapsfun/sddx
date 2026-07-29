@@ -18,7 +18,7 @@ const SPEC = {
 
 const makeTask = (repo: string, sentence = "board demo") =>
   createTask(repo, { ...SPEC, task: sentence }, ".sddx/specs/x.yaml", {
-    mode: "none",
+    mode: "worktree",
     branch: null,
     base_sha: "0".repeat(40),
   });
@@ -45,7 +45,9 @@ describe("renderBoard", () => {
     );
     const a = renderBoard(repo);
     expect(a).toBe(renderBoard(repo));
-    expect(a).toContain(`| ${t.id} | Ready | — | board demo | none | 0 | #3 | src/migration.sql |`);
+    expect(a).toContain(
+      `| ${t.id} | Ready | — | board demo | worktree | 0 | #3 | src/migration.sql |`,
+    );
     expect(a).not.toMatch(/\d{4}-\d{2}-\d{2}T/); // no timestamps anywhere
   });
 
@@ -56,7 +58,12 @@ describe("renderBoard", () => {
       repo,
       { ...SPEC, task: "child task" },
       ".sddx/specs/c.yaml",
-      { mode: "none", branch: null, base_sha: `pending:${parent.id}` },
+      {
+        mode: "deferred",
+        materialize_as: "worktree",
+        branch: null,
+        base_sha: `pending:${parent.id}`,
+      },
       { dependsOn: parent.id },
     );
 
@@ -122,7 +129,12 @@ describe("five-status board (Ready / Running / Blocked / Skipped / Completed)", 
       repo,
       { ...SPEC, task: "skipped dependent" },
       ".sddx/specs/skip.yaml",
-      { mode: "none", branch: null, base_sha: `pending:${failedParent.id}` },
+      {
+        mode: "deferred",
+        materialize_as: "worktree",
+        branch: null,
+        base_sha: `pending:${failedParent.id}`,
+      },
       { dependsOn: failedParent.id },
     );
 
@@ -131,7 +143,12 @@ describe("five-status board (Ready / Running / Blocked / Skipped / Completed)", 
       repo,
       { ...SPEC, task: "blocked dependent", on_dependency_failure: "block" },
       ".sddx/specs/block.yaml",
-      { mode: "none", branch: null, base_sha: `pending:${failedParent.id}` },
+      {
+        mode: "deferred",
+        materialize_as: "worktree",
+        branch: null,
+        base_sha: `pending:${failedParent.id}`,
+      },
       { dependsOn: failedParent.id },
     );
 

@@ -2,7 +2,7 @@
 // A pre-passing oracle discriminates nothing — the spec, not the code, is broken.
 import { runOracle } from "./oracle";
 import { sha256 } from "./receipt";
-import { readTask, writeTask } from "./task";
+import { assertAdvanceable, readTask, writeTask } from "./task";
 
 export interface RedCheckResult {
   ok: boolean;
@@ -11,6 +11,7 @@ export interface RedCheckResult {
 
 export function redCheck(cwd: string, id: string): RedCheckResult {
   const task = readTask(cwd, id);
+  assertAdvanceable(task);
   if (task.phase !== "RED") {
     throw new Error(
       `task ${id} is in ${task.phase}; red-check requires phase RED (a recorded failing test)`,

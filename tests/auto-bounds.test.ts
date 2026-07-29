@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { decideGate, SELF_MODIFYING_GLOBS } from "../src/lib/approval";
 import { scopesOverlap } from "../src/lib/glob-overlap";
 import { fixtureClone, fixtureRepo } from "./fixtures";
-import { GRAPH_HEADER_LINES, goalIds, repoRoot } from "./helpers";
+import { createRun, GRAPH_HEADER_LINES, goalIds, repoRoot } from "./helpers";
 
 const CLI_SRC = join(repoRoot, "src/cli.ts");
 function cli(cwd: string, env: NodeJS.ProcessEnv, ...args: string[]) {
@@ -102,22 +102,24 @@ describe("auto mode refuses a manual oracle", () => {
 });
 
 describe("auto mode never widens the TDD gate", () => {
-  function taskInRepo(cwd: string): string {
-    const spec = join(cwd, "spec.yaml");
-    writeFileSync(spec, SPEC("do the widget work"));
-    const r = cli(cwd, human, "task", "create", "--spec", "spec.yaml", "--workspace", "none");
-    expect(r.status).toBe(0);
-    return readdirSync(join(cwd, ".sddx", "tasks"))[0].replace(/\.json$/, "");
+  /** One task in its own one-node run; returns its id and its worktree, which
+   * is where the task state lives and where `task allow` is actually run. */
+  function taskInRepo(cwd: string): { id: string; wt: string } {
+    const { taskIds } = createRun(cwd, (c, ...a) => cli(c, human, ...a), "widget goal", [
+      { alias: "only", spec: SPEC("do the widget work", { scope: "src/widget/**" }) },
+    ]);
+    const id = taskIds[0] as string;
+    return { id, wt: join(cwd, ".sddx-worktrees", id) };
   }
 
   test("task allow is refused under auto mode with no entry written", () => {
     const cwd = fixtureRepo();
-    const id = taskInRepo(cwd);
+    const { id, wt } = taskInRepo(cwd);
     withMode(cwd, "auto");
     const r = cli(cwd, auto, "task", "allow", id, "src/migration.sql");
     expect(r.status).not.toBe(0);
     expect(r.stderr.toLowerCase()).toContain("human");
-    const task = JSON.parse(readFileSync(join(cwd, ".sddx", "tasks", `${id}.json`), "utf8"));
+    const task = JSON.parse(readFileSync(join(wt, ".sddx", "tasks", `${id}.json`), "utf8"));
     expect(task.allow ?? []).toEqual([]);
   });
 
@@ -131,18 +133,10 @@ describe("auto mode never widens the TDD gate", () => {
     const spec = join(cwd, "spec.yaml");
     writeFileSync(spec, SPEC("do the widget work"));
     withMode(cwd, "auto");
-    const created = cli(
-      cwd,
-      auto,
-      "task",
-      "create",
-      "--spec",
-      "spec.yaml",
-      "--workspace",
-      "worktree",
-    );
-    expect(created.status).toBe(0);
-    const id = readdirSync(join(cwd, ".sddx-worktrees"))[0] as string;
+    const { taskIds } = createRun(cwd, (c, ...a) => cli(c, auto, ...a), "worktree allow goal", [
+      { alias: "only", spec: SPEC("do the widget work", { scope: "src/widget/**" }) },
+    ]);
+    const id = taskIds[0] as string;
     const wt = join(cwd, ".sddx-worktrees", id);
     expect(existsSync(join(wt, ".sddx", "config.json"))).toBe(false);
 
@@ -155,11 +149,11 @@ describe("auto mode never widens the TDD gate", () => {
 
   test("task allow still succeeds under human mode and is recorded", () => {
     const cwd = fixtureRepo();
-    const id = taskInRepo(cwd);
+    const { id, wt } = taskInRepo(cwd);
     withMode(cwd, "human");
-    const r = cli(cwd, human, "task", "allow", id, "src/migration.sql");
+    const r = cli(wt, human, "task", "allow", id, "src/migration.sql");
     expect(r.status).toBe(0);
-    const task = JSON.parse(readFileSync(join(cwd, ".sddx", "tasks", `${id}.json`), "utf8"));
+    const task = JSON.parse(readFileSync(join(wt, ".sddx", "tasks", `${id}.json`), "utf8"));
     expect(task.allow).toContain("src/migration.sql");
   });
 });

@@ -138,10 +138,11 @@ costs you a read.
 `plan_sha256` covers the graph file's raw bytes plus every referenced spec's
 bytes. Reordering nodes invalidates it. A comment change invalidates it.
 
-The token additionally records the **workspace strategy** it was approved under,
-so pass the same `--workspace` to `approve` and `create`. Approving a `worktree`
-render does not authorize `--workspace none`, which would move every task out of
-its isolated worktree and into your live checkout; the mismatch exits 3.
+The token additionally records the **workspace strategy** it was approved under.
+Worktree is now the only strategy, so a mismatch can only mean a token written
+by an older sddx under `branch` or `none` — which must not authorize a canonical
+run it was never rendered for. `graph create` refuses and names it; re-render
+and re-approve.
 
 That is deliberate. A canonical *semantic* hash would have to enumerate every
 meaningful field correctly, and missing one — say `retry.max_attempts` — would
@@ -195,7 +196,6 @@ tripped an autonomy bound would produce exactly that hybrid.
 | any `scope` naming a protected area — `auth`, `migrations`, `secrets`, `credentials`, `billing` — or reaching `infra/**`, `terraform/**`, `k8s/**`, a `Dockerfile*`, a `docker-compose*`, or a `.env*` | a security, data, billing, or deployment decision is not one an unattended run may take |
 | a non-empty `unresolved` list in the Goal Brief header | intake reported a decision it could not safely take, so the plan rests on a choice nobody has made |
 | node count > `auto_max_tasks` (default 6) | blast radius ≈ worktrees forked |
-| `--workspace none` | every task runs in your live checkout instead of an isolated worktree |
 
 The path bounds use **two matchers**, because one does not work. Plain glob
 overlap asks "could any path match both", which against a pattern like

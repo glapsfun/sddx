@@ -7044,12 +7044,10 @@ function parseAgentModel(raw) {
   }
   return { models, warnings };
 }
-var WORKSPACE_MODES = ["auto", "worktree", "branch", "none"];
 var bool = (v) => typeof v === "boolean" ? v : null;
 function resolveConfig(root, env = process.env) {
   const cfg = readConfig(root);
   return {
-    workspace_mode: WORKSPACE_MODES.includes(cfg.workspace_mode ?? "") ? cfg.workspace_mode : "auto",
     test_globs: resolveValue({
       env,
       envVar: "SDDX_TEST_GLOBS",
@@ -7099,7 +7097,6 @@ function resolveConfig(root, env = process.env) {
     }),
     pr_host: cfg.pr_host ?? null,
     agent_model: parseAgentModel(cfg.agent_model).models,
-    prefer_solo: resolveValue({ configValue: cfg.prefer_solo, configParse: bool, fallback: false }),
     verbose: resolveValue({ configValue: cfg.verbose, configParse: bool, fallback: false }),
     interaction_mode: interactionMode(root),
     auto_max_tasks: autoMaxTasks(root)
@@ -7110,7 +7107,6 @@ var isBoolean = (v) => typeof v === "boolean";
 var isPositiveInt = (v) => positiveInt(v) !== null;
 var isOneOf = (values) => (v) => typeof v === "string" && values.includes(v);
 var CONFIG_SCHEMA = [
-  ["workspace_mode", isOneOf(WORKSPACE_MODES), `one of ${WORKSPACE_MODES.join("|")}`],
   ["test_globs", isString, "a string"],
   ["exempt_globs", isString, "a string"],
   ["max_iterations_default", isPositiveInt, "a positive integer"],
@@ -7120,16 +7116,30 @@ var CONFIG_SCHEMA = [
   ["stuck_threshold", isPositiveInt, "a positive integer"],
   ["pr_host", isOneOf(["gh", "glab"]), "one of gh|glab"],
   ["agent_model", isString, "a string"],
-  ["prefer_solo", isBoolean, "a boolean"],
   ["verbose", isBoolean, "a boolean"],
   ["interaction_mode", isOneOf(INTERACTION_MODES), `one of ${INTERACTION_MODES.join("|")}`],
   ["execution_mode", isOneOf(INTERACTION_MODES), `one of ${INTERACTION_MODES.join("|")}`],
   ["auto_max_tasks", isPositiveInt, "a positive integer"]
 ];
 var KNOWN_CONFIG_KEYS = new Set(CONFIG_SCHEMA.map(([key]) => key));
+var REMOVED_CONFIG_KEYS = new Map([
+  [
+    "workspace_mode",
+    "removed in sddx 4.0 — worktree is the only workspace strategy, so there is nothing to select. Remove the key; runs are unaffected."
+  ],
+  [
+    "prefer_solo",
+    "removed in sddx 4.0 along with `--solo` and `/sddx:quick` — a trivial task is a one-node `/sddx:run`. Remove the key; runs are unaffected."
+  ]
+]);
 function validateConfigObject(obj) {
   const warnings = [];
   for (const key of Object.keys(obj)) {
+    const removed = REMOVED_CONFIG_KEYS.get(key);
+    if (removed !== undefined) {
+      warnings.push(`"${key}" ${removed}`);
+      continue;
+    }
     if (!KNOWN_CONFIG_KEYS.has(key))
       warnings.push(`unrecognized key "${key}"`);
   }
@@ -7298,7 +7308,25 @@ function writeTask(cwd, t) {
   writeFileSync(taskPath(cwd, t.id), `${JSON.stringify(t, null, 2)}
 `);
 }
+var LEGACY_WORKSPACE_MODES = new Set(["branch", "none"]);
+function legacyWorkspaceOf(t) {
+  const w = t.workspace;
+  if (!w || typeof w !== "object")
+    return null;
+  for (const candidate of [w.mode, w.materialize_as]) {
+    if (typeof candidate === "string" && LEGACY_WORKSPACE_MODES.has(candidate))
+      return candidate;
+  }
+  return null;
+}
+function assertAdvanceable(t) {
+  const mode = legacyWorkspaceOf(t);
+  if (mode === null || isTerminal(t.phase))
+    return;
+  throw new Error(`task ${t.id} records the "${mode}" workspace mode, which was removed in sddx 4.0, and is unfinished (phase ${t.phase}). ` + "It cannot be advanced by this version. Either complete it with a compatible older sddx (3.x), " + `or close it out with \`sddx task phase ${t.id} ABANDONED\` and recreate the work as a canonical run with \`sddx graph create\`. ` + "Its state has not been modified.");
+}
 function transition(t, to, opts = {}) {
+  assertAdvanceable(t);
   if (!TRANSITIONS[t.phase].includes(to)) {
     throw new Error(`illegal transition ${t.phase} → ${to}`);
   }
@@ -7329,6 +7357,7 @@ function allowPath(t, path) {
   if (isTerminal(t.phase)) {
     throw new Error(`task ${t.id} is ${t.phase}; allow-list is frozen on terminal tasks`);
   }
+  assertAdvanceable(t);
   const normalized = normalizeRelPath(path);
   if (normalized === "" || normalized.startsWith("/") || normalized.split("/").includes("..")) {
     throw new Error(`allow requires a repo-relative path, got: ${path}`);
@@ -7373,6 +7402,12 @@ function abandonOrRetry(t) {
   const policy = retryPolicyOf(t);
   const attempts = t.attempt_count ?? 1;
   const at = new Date().toISOString();
+  const legacy = legacyWorkspaceOf(t);
+  if (attempts < policy.max_attempts && legacy !== null) {
+    t.phase = "ABANDONED";
+    t.history.push({ phase: "ABANDONED", at });
+    return { retried: false, attempt_count: attempts, max_attempts: policy.max_attempts };
+  }
   if (attempts < policy.max_attempts) {
     t.attempt_count = attempts + 1;
     t.phase = "PLAN";
@@ -7440,9 +7475,6 @@ function git(cwd, ...args) {
 }
 var headSha = (cwd) => git(cwd, "rev-parse", "HEAD");
 var currentBranch = (cwd) => git(cwd, "rev-parse", "--abbrev-ref", "HEAD");
-var createBranch = (cwd, name) => {
-  git(cwd, "switch", "-c", name);
-};
 var createBranchAt = (cwd, name, sha) => {
   git(cwd, "branch", name, sha);
 };
@@ -7652,19 +7684,11 @@ function mergeParentsSequential(worktreePath, remaining) {
   }
   return git(worktreePath, "rev-parse", "HEAD");
 }
-function mergeParentsInBranch(cwd, taskId2, remaining) {
-  const tmpPath = join3(worktreesDir(cwd), `materialize-${taskId2}`);
-  git(cwd, "worktree", "add", "-q", tmpPath, `sddx/${taskId2}`);
-  try {
-    return mergeParentsSequential(tmpPath, remaining);
-  } finally {
-    removeWorktreeForced(cwd, tmpPath);
-  }
-}
 function materializeDependent(cwd, taskId2) {
   const task = resolveTaskState(cwd, taskId2);
   if (!task)
     throw new Error(`no such task: ${taskId2}`);
+  assertAdvanceable(task);
   const parentIds = dependsOnList(task);
   if (parentIds.length === 0) {
     throw new Error(`task ${taskId2} has no depends_on to materialize from`);
@@ -7685,21 +7709,6 @@ function materializeDependent(cwd, taskId2) {
   }
   const forkSha = parentShas[0];
   const rest = parentShas.slice(1);
-  const targetMode = task.workspace.materialize_as ?? task.workspace.mode;
-  if (targetMode === "branch") {
-    git(cwd, "branch", `sddx/${taskId2}`, forkSha);
-    let finalSha2 = forkSha;
-    if (rest.length > 0) {
-      try {
-        finalSha2 = mergeParentsInBranch(cwd, taskId2, rest);
-      } catch (e) {
-        throw new Error(`cannot materialize ${taskId2}: fan-in merge conflict combining parents [${parentIds.join(", ")}] — ${e.message}`);
-      }
-    }
-    task.workspace = { mode: "branch", branch: `sddx/${taskId2}`, base_sha: finalSha2 };
-    writeTask(cwd, task);
-    return { baseSha: finalSha2, mode: "branch" };
-  }
   const path = createWorktree(cwd, taskId2, forkSha);
   let finalSha = forkSha;
   if (rest.length > 0) {
@@ -7733,7 +7742,7 @@ function retryWorkspace(cwd, task) {
   const root = resolveMainRepoRoot(cwd);
   if (policy.workspace === "fresh") {
     const branch = `sddx/${task.id}`;
-    if (task.workspace.mode === "worktree" && task.workspace.path) {
+    if (task.workspace.path) {
       const oldAbs = join3(root, task.workspace.path);
       const specAbs = join3(oldAbs, task.spec_path);
       const specBytes = existsSync3(specAbs) ? readFileSync3(specAbs) : null;
@@ -7751,8 +7760,6 @@ function retryWorkspace(cwd, task) {
         writeFileSync2(join3(newAbs, task.spec_path), specBytes);
       }
       task.workspace = { ...task.workspace, path: relative(root, newAbs) };
-    } else if (task.workspace.mode === "branch" && task.workspace.branch) {
-      git(root, "branch", "-f", branch, task.workspace.base_sha);
     }
   }
   rematerializeStaleDependents(root, task.id);
@@ -7783,7 +7790,7 @@ function rematerializeStaleDependents(cwd, retriedTaskId) {
     if (!isMaterialized(t))
       continue;
     const staleBranch = `sddx/${id}`;
-    if (t.workspace.mode === "worktree" && t.workspace.path) {
+    if (t.workspace.path) {
       const abs = join3(cwd, t.workspace.path);
       if (existsSync3(abs)) {
         try {
@@ -7795,7 +7802,7 @@ function rematerializeStaleDependents(cwd, retriedTaskId) {
       forceDeleteBranch(cwd, staleBranch);
     t.workspace = {
       mode: "deferred",
-      materialize_as: t.workspace.mode === "branch" ? "branch" : "worktree",
+      materialize_as: "worktree",
       branch: null,
       base_sha: `pending:${dependsOnList(t).join(",")}`
     };
@@ -7843,10 +7850,6 @@ function listSddxWorktrees(cwd) {
     }
   }
   return entries;
-}
-function hasSubmodules(cwd, baseSha) {
-  const r = spawnSync3("git", ["cat-file", "-e", `${baseSha}:.gitmodules`], { cwd });
-  return r.status === 0;
 }
 function submodulePaths(cwd, baseSha) {
   const r = spawnSync3("git", ["show", `${baseSha}:.gitmodules`], { cwd, encoding: "utf8" });
@@ -8858,6 +8861,7 @@ function verifySignature(cwd, payload, sig, namespace = DEFAULT_NAMESPACE) {
 }
 
 // src/lib/approval.ts
+var WORKSPACE = "worktree";
 var approvalsDir = (cwd) => join8(sddxDir(cwd), "approvals");
 var approvalPath = (cwd, hash) => join8(approvalsDir(cwd), `${hash}.json`);
 function planHash(graphPath) {
@@ -8966,26 +8970,26 @@ function namesSensitiveArea(scope) {
   return;
 }
 var REMEDY = 'To review and run this plan yourself, set "interaction_mode": "human" in .sddx/config.json.';
-function decideGate(cwd, graphPath, nodes, requestedMode, ceiling, overlaps2, workspaceMode) {
+function decideGate(cwd, graphPath, nodes, requestedMode, ceiling, overlaps2) {
   const { hash, errors: errors2 } = planHash(graphPath);
   const base = { hash, requestedMode, nodeCount: nodes.length };
   if (hash === "") {
     return { ...base, ok: false, mode: "human", reason: errors2.join("; ") || "plan unreadable" };
   }
   if (requestedMode === "auto") {
-    const blocker = autoRefusal(nodes, ceiling, overlaps2, workspaceMode, unresolvedOf(graphPath));
+    const blocker = autoRefusal(nodes, ceiling, overlaps2, unresolvedOf(graphPath));
     if (blocker) {
       return { ...base, ok: false, mode: "auto", refusal: renderBlocker(blocker), blocker };
     }
   }
   const approval = readApproval(cwd, hash);
   if (approval) {
-    if (workspaceMode !== undefined && approval.workspace_mode !== undefined && approval.workspace_mode !== workspaceMode) {
+    if (approval.workspace_mode !== undefined && approval.workspace_mode !== WORKSPACE) {
       return {
         ...base,
         ok: false,
         mode: "human",
-        reason: `plan ${hash.slice(0, 12)} was approved for workspace "${approval.workspace_mode}", not "${workspaceMode}" — re-render and re-approve to change the workspace strategy`
+        reason: `plan ${hash.slice(0, 12)} was approved for workspace "${approval.workspace_mode}", which is no longer supported — re-render and re-approve this plan`
       };
     }
     return { ...base, ok: true, mode: approval.mode, hash };
@@ -9000,7 +9004,7 @@ function decideGate(cwd, graphPath, nodes, requestedMode, ceiling, overlaps2, wo
   }
   return { ...base, ok: true, mode: "auto" };
 }
-function autoRefusal(nodes, ceiling, overlaps2, workspaceMode, unresolved = []) {
+function autoRefusal(nodes, ceiling, overlaps2, unresolved = []) {
   const manual = nodes.find((n) => n.oracleType === "manual");
   if (manual) {
     return {
@@ -9018,14 +9022,6 @@ function autoRefusal(nodes, ceiling, overlaps2, workspaceMode, unresolved = []) 
       decision: `${unresolved.length} decision${unresolved.length === 1 ? "" : "s"} intake could not safely take: ${list}`,
       impact: "the plan rests on a choice nobody has made, and an unattended run would make it by accident",
       next_step: `Decide them and record them as answers in the Goal Brief header, or run in human mode. ${REMEDY}`
-    };
-  }
-  if (workspaceMode === "none") {
-    return {
-      bound: "workspace",
-      decision: 'workspace "none" was requested',
-      impact: "every task would run directly in the working checkout instead of an isolated worktree, mutating the branch you are sitting on",
-      next_step: `Use the default worktree isolation, or run in human mode. ${REMEDY}`
     };
   }
   const unconfined = nodes.find((n) => n.scope.length === 0);
@@ -9729,6 +9725,9 @@ function recordTestRun(cwd, command, exitCode, output = "") {
   if (res.kind !== "task")
     return { matched: true, transitioned: null };
   const task = res.task;
+  if (legacyWorkspaceOf(task) !== null && !isTerminal(task.phase)) {
+    return { matched: true, transitioned: null };
+  }
   const at = new Date().toISOString();
   if (exitCode !== 0) {
     const fp = failureFingerprint(exitCode, output, command);

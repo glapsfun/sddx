@@ -67,14 +67,23 @@ proof is truly gone, re-run `sddx verify` for that task.
 **Fix:** run inside a git repo with the full plugin installed; verify per
 [install-sddx.md](install-sddx.md#verifying-the-install).
 
-## Worktree mode downgraded to branch mode
+## A run is refused because worktrees are unavailable
 
-You'll see `submodules detected → branch mode` (or
-`git worktree unavailable → branch mode`) from `task create`.
+You'll see `worktree unavailable: git cannot create worktrees for this
+repository. No run was started.` or `unsupported layout: task "<alias>"
+declares scope <glob>, which reaches the submodule <path>.`
 
-**Cause:** worktrees crossing submodule boundaries are unsafe, so `auto`
-falls back to a sequential `sddx/<id>` branch. **This is expected behavior**,
-not an error — the task runs the same loop, just not in parallel isolation.
+**Cause:** worktree isolation is a hard precondition, not a preference. There
+is no branch-mode fallback to downgrade into — a failed precondition refuses
+the run loudly rather than silently moving your work into weaker isolation you
+did not ask for. Nothing was created.
+
+**Fix:** for the submodule case, declare a narrower `scope` that does not reach
+into the submodule — the check is scope-scoped, so a vendored submodule no task
+touches is not a reason to refuse. For the worktree-unavailable case, use a
+checkout where `git worktree list` succeeds. Upgrading from 3.x and expecting
+the old automatic downgrade? See
+[migrate-to-v4.md](migrate-to-v4.md#repositories-that-only-worked-in-branch-mode).
 
 ## The Stop hook refuses to end the session
 

@@ -52,14 +52,17 @@ anything, and there is no flag or environment override.
    unset unless this task specifically needs to block on (rather than skip
    past) a failed ancestor, or needs more than one automatic attempt.
 
-4. **Register it.** Save the YAML to `.sddx/drafts/<date>-<slug>.yaml` (dated
-   so same-wording plans on different days never collide) and run:
-   `... task create --spec .sddx/drafts/<date>-<slug>.yaml --workspace branch`
-   (in-session flow; /sddx:run uses `--workspace auto` for worktrees instead).
-   The CLI rejects any spec without a valid oracle — fix the spec, never work
-   around the rejection. On success it prints the task id and switches to the
-   `sddx/<id>` branch.
-5. Hand off to /sddx:quick to execute.
+4. **Save it as a draft.** Write the YAML to `.sddx/drafts/<date>-<slug>.yaml`
+   (dated so same-wording plans on different days never collide), plus the Goal
+   Brief graph header naming it as the single node. **Register nothing.** This
+   skill creates no task, no goal, no branch, and no worktree — that is
+   `/sddx:run`'s job, and doing it here would produce a task outside the
+   canonical lifecycle.
+5. **Check it without writing.** `... graph create --graph <path> --dry-run`
+   parses every spec and reports what a real run would refuse — a missing or
+   invalid oracle, an id collision, a scope overlap the schedule does not order.
+   Fix the spec; never work around a rejection.
+6. Hand off to `/sddx:run` to execute. A single task is a one-node run.
 
 ## Plan only, run later
 

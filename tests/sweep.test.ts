@@ -4,23 +4,38 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSyn
 import { join, relative } from "node:path";
 import { createWorktree, resolveBaseRef, sweep } from "../src/lib/worktree";
 import { fixtureClone } from "./fixtures";
-import { fakeRedCheck, repoRoot } from "./helpers";
+import { createRun, fakeRedCheck, repoRoot } from "./helpers";
 
 const CLI_SRC = join(repoRoot, "src/cli.ts");
 const SPEC = (n: number) =>
   `task: sweep fixture ${n}\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\n`;
 
 function cli(cwd: string, ...args: string[]) {
-  const r = spawnSync("bun", [CLI_SRC, ...args], { cwd, encoding: "utf8" });
+  const r = spawn(cwd, ...args);
   if (r.status !== 0) throw new Error(`cli ${args.join(" ")}: ${r.stderr}${r.stdout}`);
   return r.stdout;
 }
 
+const spawn = (cwd: string, ...args: string[]) =>
+  spawnSync("bun", [CLI_SRC, ...args], { cwd, encoding: "utf8" });
+
+/** One task in its own one-node run. Each fixture task gets its own goal so the
+ * run branches never collide — a run is the only way to create a task now. */
+function makeTask(clone: string, n: number): { id: string; wt: string } {
+  const { taskIds } = createRun(
+    clone,
+    spawn,
+    `sweep goal ${n}`,
+    [{ alias: `t${n}`, spec: SPEC(n) }],
+    { graphName: `graph${n}.yaml` },
+  );
+  const id = taskIds[0] as string;
+  return { id, wt: join(clone, ".sddx-worktrees", id) };
+}
+
 /** Create a worktree task and drive it to DONE (verified, receipt committed). */
 function doneTask(clone: string, n: number): { id: string; wt: string } {
-  writeFileSync(join(clone, `spec${n}.yaml`), SPEC(n));
-  const id = /created (\S+)/.exec(cli(clone, "task", "create", "--spec", `spec${n}.yaml`))![1]!;
-  const wt = join(clone, ".sddx-worktrees", id);
+  const { id, wt } = makeTask(clone, n);
   cli(wt, "task", "phase", id, "RED", "--test-exit", "1");
   cli(wt, "task", "phase", id, "GREEN", "--test-exit", "0");
   cli(wt, "task", "phase", id, "VERIFY");
@@ -54,11 +69,7 @@ test("sweep removes DONE+clean+receipt, keeps branches, skips dirty and in-progr
   writeFileSync(join(dirty.wt, "scratch.txt"), "uncommitted\n");
 
   // in-progress task: created but never verified
-  writeFileSync(join(clone, "spec3.yaml"), SPEC(3));
-  const inProgressId = /created (\S+)/.exec(
-    cli(clone, "task", "create", "--spec", "spec3.yaml"),
-  )![1]!;
-  const inProgressWt = join(clone, ".sddx-worktrees", inProgressId);
+  const { wt: inProgressWt } = makeTask(clone, 3);
 
   const res = sweep(clone);
   expect(res.locked).toBe(false);
@@ -149,4 +160,46 @@ test("sddx sweep CLI reports removals and skips", () => {
   const out = cli(clone, "sweep");
   expect(out).toContain("swept ");
   expect(out).toContain("sweep: 1 removed, 0 skipped");
+});
+
+test("guarded cleanup survives the branch-mode removals: dirty and receiptless are never touched", () => {
+  // `retire-alternate-flows` deleted the branch/none cleanup paths. The two
+  // guarantees that matter are NOT part of that deletion and must be provably
+  // intact: sweep never touches a worktree with uncommitted changes, and never
+  // removes a DONE worktree whose receipt is missing.
+  const { clone } = fixtureClone();
+
+  // (a) DONE + clean + receipt → removable, and its branch survives
+  const removable = doneTask(clone, 1);
+
+  // (b) DONE + receipt, but dirty → skipped, contents untouched
+  const dirty = doneTask(clone, 2);
+  writeFileSync(join(dirty.wt, "uncommitted.txt"), "work in progress\n");
+
+  // (c) DONE but receipt deleted → skipped, never removed
+  const receiptless = doneTask(clone, 3);
+  rmSync(join(receiptless.wt, ".sddx", "receipts", `${receiptless.id}.json`), { force: true });
+  cli(receiptless.wt, "task", "show", receiptless.id); // state still readable
+  spawnSync("git", ["rm", "-q", "--cached", `.sddx/receipts/${receiptless.id}.json`], {
+    cwd: receiptless.wt,
+  });
+  spawnSync("git", ["commit", "-qm", "drop receipt"], { cwd: receiptless.wt });
+
+  const res = sweep(clone);
+  expect(res.locked).toBe(false);
+
+  expect(res.removed).toEqual([removable.wt]);
+  expect(existsSync(removable.wt)).toBe(false);
+  expect(
+    spawnSync("git", ["rev-parse", "--verify", `refs/heads/sddx/${removable.id}`], {
+      cwd: clone,
+    }).status,
+  ).toBe(0);
+
+  expect(existsSync(dirty.wt)).toBe(true);
+  expect(readFileSync(join(dirty.wt, "uncommitted.txt"), "utf8")).toBe("work in progress\n");
+  expect(res.skipped).toContainEqual({ path: dirty.wt, reason: "dirty" });
+
+  expect(existsSync(receiptless.wt)).toBe(true);
+  expect(res.skipped).toContainEqual({ path: receiptless.wt, reason: "DONE without receipt" });
 });

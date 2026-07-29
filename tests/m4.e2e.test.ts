@@ -5,8 +5,9 @@ import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { chmodSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { sha256 } from "../src/lib/receipt";
 import { fixtureClone } from "./fixtures";
-import { fakeRedCheck, repoRoot } from "./helpers";
+import { createRun, fakeRedCheck, repoRoot } from "./helpers";
 
 const HOOKS = join(repoRoot, "dist", "hooks.mjs");
 const CLI = join(repoRoot, "dist", "cli.mjs");
@@ -39,11 +40,12 @@ out_of_scope: []
 `;
 
 function completedTask(): { repo: string; id: string } {
-  const { clone: repo } = fixtureClone();
-  writeFileSync(join(repo, "spec.yaml"), SPEC_YAML);
-  const created = sddx(repo, "task", "create", "--spec", "spec.yaml", "--workspace", "none");
-  expect(created.status).toBe(0);
-  const id = /created (\S+) /.exec(created.stdout)?.[1] as string;
+  const { clone: main } = fixtureClone();
+  const { taskIds } = createRun(main, sddx, "m4 goal", [{ alias: "only", spec: SPEC_YAML }]);
+  const id = taskIds[0] as string;
+  // Everything below happens where the task lives — its own worktree. The board
+  // and receipt chain it produces are read from there too.
+  const repo = join(main, ".sddx-worktrees", id);
 
   // red → green earned through the recorder, exactly as hooks would observe it
   hook(repo, "record-test", {
@@ -71,7 +73,7 @@ describe("M4 oracle", () => {
     const board = sddx(repo, "board");
     expect(board.status).toBe(0);
     const rendered = readFileSync(join(repo, ".sddx", "BOARD.md"), "utf8");
-    expect(rendered).toContain(`| ${id} | Completed | — | m4 full loop | none | 1 | #1 |`);
+    expect(rendered).toContain(`| ${id} | Completed | — | m4 full loop | worktree | 1 | #1 |`);
 
     // byte-identical re-render, reported as unchanged
     const again = sddx(repo, "board");
@@ -105,25 +107,18 @@ describe("M4 oracle", () => {
 
   test("deleted receipt breaks the chain loudly", () => {
     const { repo, id } = completedTask();
-    // second task so the survivor's prev points at the deleted receipt
-    writeFileSync(join(repo, "spec2.yaml"), SPEC_YAML.replace("m4 full loop", "second loop"));
-    const created = sddx(repo, "task", "create", "--spec", "spec2.yaml", "--workspace", "none");
-    const id2 = /created (\S+) /.exec(created.stdout)?.[1] as string;
-    hook(repo, "record-test", {
-      tool_input: { command: "bun test" },
-      tool_response: { exit_code: 1 },
-      cwd: repo,
-    });
-    hook(repo, "record-test", {
-      tool_input: { command: "bun test" },
-      tool_response: { exit_code: 0 },
-      cwd: repo,
-    });
-    fakeRedCheck(repo, id2);
-    expect(sddx(repo, "task", "phase", id2, "VERIFY").status).toBe(0);
-    expect(sddx(repo, "verify", id2).status).toBe(0);
-
-    rmSync(join(repo, ".sddx", "receipts", `${id}.json`));
+    // A second receipt in the SAME chain, so the survivor's prev points at the
+    // deleted one. Written directly: a second run would chain in its own
+    // worktree, which is a different receipts directory.
+    const id2 = `${id}-second`;
+    const first = join(repo, ".sddx", "receipts", `${id}.json`);
+    const second = join(repo, ".sddx", "receipts", `${id2}.json`);
+    const base = JSON.parse(readFileSync(first, "utf8"));
+    writeFileSync(
+      second,
+      `${JSON.stringify({ ...base, task_id: id2, prev: sha256(readFileSync(first, "utf8")) }, null, 2)}\n`,
+    );
+    rmSync(first);
     const audit = sddx(repo, "audit");
     expect(audit.status).toBe(1);
     expect(audit.stderr).toMatch(/prev hash matches no receipt|seq/);

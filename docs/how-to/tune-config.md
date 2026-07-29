@@ -19,7 +19,7 @@ always fine (`sddx config show` reports the effective values).
 
 ```json
 {
-  "workspace_mode": "branch",
+  "oracle_runs_default": 3,
   "stuck_threshold": 5
 }
 ```
@@ -30,7 +30,8 @@ Environment variable → `.sddx/config.json` → built-in default, highest
 first. Only some keys have an environment variable at all (see the table in
 [config.md](../reference/config.md)) — setting `SDDX_STUCK_THRESHOLD=7`
 outranks a config-file `stuck_threshold`, but there's no equivalent variable
-for `workspace_mode`.
+for `interaction_mode` — which is deliberate, since an env var would be a
+second way for an agent to switch off the gate it is subject to.
 
 ## Seeing what won
 
@@ -60,9 +61,12 @@ Set both and `interaction_mode` wins, with a warning saying so. See
 
 `sddx config validate` checks `.sddx/config.json` against the schema and
 reports unrecognized keys and out-of-domain values (not just wrong
-`typeof` — `stuck_threshold: -2` and a typo'd `workspace_mode` are both
+`typeof` — `stuck_threshold: -2` and a typo'd `interaction_mode` are both
 caught) as **warnings** — exit 0, since a structurally-parseable file with a
-bad key shouldn't block anything. The one case that fails outright (exit 1)
+bad key shouldn't block anything. Keys removed in 4.0 (`workspace_mode`,
+`prefer_solo`) are reported **as removed** rather than as unrecognized typos,
+and naming the replacement — see
+[migrate-to-v4.md](migrate-to-v4.md). The one case that fails outright (exit 1)
 is unparseable JSON, or JSON that isn't an object — that's a broken file, not
 a schema disagreement. A missing `.sddx/config.json` is not an error either
 way; built-in defaults apply.

@@ -19,7 +19,7 @@ const SPEC = {
 
 function makeTask(repo: string, sentence = "demo task"): string {
   const t = createTask(repo, { ...SPEC, task: sentence }, ".sddx/specs/x.yaml", {
-    mode: "none",
+    mode: "worktree",
     branch: null,
     base_sha: "0".repeat(40),
   });

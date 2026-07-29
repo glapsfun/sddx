@@ -30,9 +30,18 @@ retry:
   max_attempts: 2
   workspace: fresh
 EOF
-OUT=$(./sddx task create --spec spec.yaml --workspace worktree)
+cat > graph.yaml <<'EOF'
+schema_version: "1.0"
+interaction_mode: human
+goal: survive a flaky task
+tasks:
+  - alias: flaky
+    spec: spec.yaml
+EOF
+./sddx graph approve --graph graph.yaml
+OUT=$(./sddx graph create --graph graph.yaml)
 echo "$OUT"
-ID=$(echo "$OUT" | grep '^created' | awk '{print $2}')
+ID=$(echo "$OUT" | grep -o 'created [0-9]\{8\}-[a-z0-9-]*' | head -1 | awk '{print $2}')
 BASE=$(git -C ".sddx-worktrees/$ID" rev-parse HEAD)
 ```
 

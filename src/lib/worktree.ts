@@ -16,6 +16,7 @@ import { dirname, isAbsolute, join, relative } from "node:path";
 import { branchExists, forceDeleteBranch, git } from "./git";
 import { scopesOverlap } from "./glob-overlap";
 import {
+  assertAdvanceable,
   dependsOnList,
   isDeferred,
   type Phase,
@@ -156,20 +157,6 @@ function mergeParentsSequential(worktreePath: string, remaining: readonly string
   return git(worktreePath, "rev-parse", "HEAD");
 }
 
-/** Branch mode has no isolated worktree of its own, so a fan-in merge borrows a
- * throwaway one (the same technique `pr.ts` uses for goal-branch assembly):
- * check the branch out into a scratch worktree, merge there, force-remove the
- * scratch worktree — the branch pointer keeps the merge commit. */
-function mergeParentsInBranch(cwd: string, taskId: string, remaining: readonly string[]): string {
-  const tmpPath = join(worktreesDir(cwd), `materialize-${taskId}`);
-  git(cwd, "worktree", "add", "-q", tmpPath, `sddx/${taskId}`);
-  try {
-    return mergeParentsSequential(tmpPath, remaining);
-  } finally {
-    removeWorktreeForced(cwd, tmpPath);
-  }
-}
-
 /**
  * Materialize a deferred dependent task's workspace once every named parent is
  * DONE. With one parent, the workspace forks directly from its DONE commit
@@ -178,22 +165,25 @@ function mergeParentsInBranch(cwd: string, taskId: string, remaining: readonly s
  * (fan-in), it forks from the first-listed parent's commit and sequentially
  * merges the rest in — safe by construction because `graph create`'s overlap
  * ⟹ ordered gate already proved every pair of co-parents has disjoint scope.
- * Honors the mode chosen at create time:
- *   - worktree → a worktree forked from the fork/merge commit; the task state
- *     + spec move into it (where resolveTaskState finds the live copy first)
- *     and the deferred main-checkout copies are removed.
- *   - branch → a `sddx/<id>` branch at the fork/merge commit; the task stays
- *     in the main checkout (worktrees would be unsafe here — this is why
- *     branch mode was chosen, e.g. submodules).
- * Fails loud — never forks from a wrong or partial base — if any parent is not
- * DONE, a parent's commit is unresolvable, or the merge conflicts.
+ *
+ * Always a worktree: the task state and spec move into it (where
+ * resolveTaskState finds the live copy first) and the deferred main-checkout
+ * copies are removed. Fails loud — never forks from a wrong or partial base —
+ * if any parent is not DONE, a parent's commit is unresolvable, or the merge
+ * conflicts.
+ *
+ * A 3.x dependent recorded `materialize_as: "branch"` is refused rather than
+ * quietly built as a worktree. This is the one legacy path the mode check alone
+ * cannot see — a deferred task's `mode` is `"deferred"` — and converting it
+ * would construct exactly the worktree that branch mode existed to avoid.
  */
 export function materializeDependent(
   cwd: string,
   taskId: string,
-): { path?: string; baseSha: string; mode: "worktree" | "branch" } {
+): { path: string; baseSha: string; mode: "worktree" } {
   const task = resolveTaskState(cwd, taskId);
   if (!task) throw new Error(`no such task: ${taskId}`);
+  assertAdvanceable(task);
   const parentIds = dependsOnList(task);
   if (parentIds.length === 0) {
     throw new Error(`task ${taskId} has no depends_on to materialize from`);
@@ -217,28 +207,6 @@ export function materializeDependent(
   }
   const forkSha = parentShas[0] as string;
   const rest = parentShas.slice(1);
-
-  // While deferred, the eventual mode lives in `materialize_as`. Legacy state
-  // recorded it in `mode` directly, so fall back to that.
-  const targetMode = task.workspace.materialize_as ?? task.workspace.mode;
-  if (targetMode === "branch") {
-    // no worktree — worktrees are unsafe in this repo (why branch mode was picked).
-    // Create the branch at the fork commit; the task/spec stay in the main checkout.
-    git(cwd, "branch", `sddx/${taskId}`, forkSha);
-    let finalSha = forkSha;
-    if (rest.length > 0) {
-      try {
-        finalSha = mergeParentsInBranch(cwd, taskId, rest);
-      } catch (e) {
-        throw new Error(
-          `cannot materialize ${taskId}: fan-in merge conflict combining parents [${parentIds.join(", ")}] — ${(e as Error).message}`,
-        );
-      }
-    }
-    task.workspace = { mode: "branch", branch: `sddx/${taskId}`, base_sha: finalSha };
-    writeTask(cwd, task);
-    return { baseSha: finalSha, mode: "branch" };
-  }
 
   const path = createWorktree(cwd, taskId, forkSha);
   let finalSha = forkSha;
@@ -293,7 +261,7 @@ export function retryWorkspace(cwd: string, task: TaskState): void {
   const root = resolveMainRepoRoot(cwd);
   if (policy.workspace === "fresh") {
     const branch = `sddx/${task.id}`;
-    if (task.workspace.mode === "worktree" && task.workspace.path) {
+    if (task.workspace.path) {
       const oldAbs = join(root, task.workspace.path);
       const specAbs = join(oldAbs, task.spec_path);
       const specBytes = existsSync(specAbs) ? readFileSync(specAbs) : null;
@@ -312,11 +280,7 @@ export function retryWorkspace(cwd: string, task: TaskState): void {
         writeFileSync(join(newAbs, task.spec_path), specBytes);
       }
       task.workspace = { ...task.workspace, path: relative(root, newAbs) };
-    } else if (task.workspace.mode === "branch" && task.workspace.branch) {
-      // never left the main checkout — just park the branch back at its base
-      git(root, "branch", "-f", branch, task.workspace.base_sha);
     }
-    // mode "none": nothing isolated to reset
   }
   rematerializeStaleDependents(root, task.id);
 }
@@ -351,7 +315,7 @@ export function rematerializeStaleDependents(cwd: string, retriedTaskId: string)
     if (!isMaterialized(t)) continue; // not yet materialized — nothing to discard
 
     const staleBranch = `sddx/${id}`;
-    if (t.workspace.mode === "worktree" && t.workspace.path) {
+    if (t.workspace.path) {
       const abs = join(cwd, t.workspace.path);
       if (existsSync(abs)) {
         try {
@@ -361,14 +325,13 @@ export function rematerializeStaleDependents(cwd: string, retriedTaskId: string)
         }
       }
     }
-    // the stale branch (worktree or branch mode) must go too, or re-materializing
-    // via createWorktree/`git branch` would collide with the old tip
+    // the stale branch must go too, or re-materializing via createWorktree
+    // would collide with the old tip
     if (branchExists(cwd, staleBranch)) forceDeleteBranch(cwd, staleBranch);
-    // reset to deferred so materializeDependent treats it as a fresh dispatch,
-    // remembering the mode it must return to
+    // reset to deferred so materializeDependent treats it as a fresh dispatch
     t.workspace = {
       mode: "deferred",
-      materialize_as: t.workspace.mode === "branch" ? "branch" : "worktree",
+      materialize_as: "worktree",
       branch: null,
       base_sha: `pending:${dependsOnList(t).join(",")}`,
     };
@@ -431,11 +394,6 @@ export function listSddxWorktrees(cwd: string): WorktreeInfo[] {
     }
   }
   return entries;
-}
-
-export function hasSubmodules(cwd: string, baseSha: string): boolean {
-  const r = spawnSync("git", ["cat-file", "-e", `${baseSha}:.gitmodules`], { cwd });
-  return r.status === 0;
 }
 
 /**

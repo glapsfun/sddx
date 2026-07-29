@@ -61,10 +61,10 @@ until every named parent reaches `DONE`. Once unblocked (status flips to
 `sddx task materialize <id>` refuses with `not DONE` if any named parent
 hasn't finished yet.
 
-## Branch mode
+## Fan-in leaves no scratch state behind
 
-The same fan-in mechanics apply in branch mode (`--workspace branch`, or the
-automatic submodule fallback — see
-[use-branch-mode.md](use-branch-mode.md)): a fan-in merge uses a throwaway
-worktree to perform the merge, then removes it — the branch pointer keeps the
-merge commit, and no worktree is left behind.
+A fan-in merge happens inside the dependent's own worktree, forked from the
+first-listed parent's commit with each remaining parent merged in sequentially
+— never an octopus merge. If a merge conflicts, materialization aborts and
+reports the failing SHA rather than auto-resolving: a conflict here means the
+`overlap ⟹ ordered` gate had a blind spot, not something to paper over.

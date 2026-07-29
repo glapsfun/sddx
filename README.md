@@ -47,10 +47,12 @@ mkdir demo && cd demo && git init
 git commit --allow-empty -m init
 ```
 
-Then follow [Getting started](docs/tutorials/01-getting-started.md) — the
-same loop `/sddx:quick`/`--solo` drive inside Claude Code, one command at a
-time, ending in a verified receipt. Every command there (and in every guide
-below) is also a copy-paste-able scaffold under
+Then follow [Getting started](docs/tutorials/01-getting-started.md) — a
+**one-node run**, one command at a time, ending in a verified receipt. A single
+task is not a special mode: it is a run with one node, and it gets the same
+goal, run branch, worktree, oracle, and receipt as any other. That is the loop
+`/sddx:run` drives for you inside Claude Code. Every command there (and in
+every guide below) is also a copy-paste-able scaffold under
 [examples/](examples/README.md).
 
 ## Documentation
@@ -65,12 +67,12 @@ below) is also a copy-paste-able scaffold under
 - [Install sddx](docs/how-to/install-sddx.md)
 - [Model DAG dependencies](docs/how-to/model-dag-dependencies.md)
 - [Configure retry and skip/block](docs/how-to/configure-retry-and-skip.md)
-- [Use branch mode](docs/how-to/use-branch-mode.md)
 - [Choose an oracle type](docs/how-to/choose-an-oracle-type.md)
 - [Verify and audit receipts](docs/how-to/verify-and-audit-receipts.md)
 - [Ship a goal as a PR](docs/how-to/ship-a-goal-as-a-pr.md)
 - [Tune config](docs/how-to/tune-config.md)
 - [Troubleshooting](docs/how-to/troubleshoot-common-problems.md)
+- [Migrate to sddx 4.0](docs/how-to/migrate-to-v4.md) — old-to-new command mappings
 
 **Reference**
 

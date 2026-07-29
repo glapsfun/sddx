@@ -18,7 +18,7 @@ const SPEC = {
 
 function redTask(repo: string): TaskState {
   const t = createTask(repo, SPEC, ".sddx/specs/x.yaml", {
-    mode: "none",
+    mode: "worktree",
     branch: null,
     base_sha: "0".repeat(40),
   });
@@ -38,7 +38,7 @@ describe("tddGate", () => {
   test("denies implementation-first write in PLAN", () => {
     const repo = fixtureRepo();
     createTask(repo, SPEC, ".sddx/specs/x.yaml", {
-      mode: "none",
+      mode: "worktree",
       branch: null,
       base_sha: "0".repeat(40),
     });
@@ -106,7 +106,7 @@ describe("tddGate", () => {
     const repo = fixtureRepo();
     redTask(repo);
     const other = createTask(repo, { ...SPEC, task: "second thing" }, ".sddx/specs/y.yaml", {
-      mode: "none",
+      mode: "worktree",
       branch: null,
       base_sha: "0".repeat(40),
     });
@@ -130,7 +130,7 @@ describe("scope confinement", () => {
 
   function scopedGreenTask(repo: string): TaskState {
     const t = createTask(repo, SCOPED, ".sddx/specs/x.yaml", {
-      mode: "none",
+      mode: "worktree",
       branch: null,
       base_sha: "0".repeat(40),
     });
@@ -175,7 +175,7 @@ describe("scope confinement", () => {
   test("no declared scope means no confinement", () => {
     const repo = fixtureRepo();
     const t = createTask(repo, SPEC, ".sddx/specs/x.yaml", {
-      mode: "none",
+      mode: "worktree",
       branch: null,
       base_sha: "0".repeat(40),
     });

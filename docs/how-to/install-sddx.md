@@ -28,14 +28,12 @@ hand-edited config files and no environment variables:
 
 | Setting                  | Default | Meaning                                                              |
 | ------------------------ | ------- | -------------------------------------------------------------------- |
-| `workspace_mode`         | `auto`  | Task workspace strategy: `worktree` \| `branch` \| `auto`            |
 | `test_globs`             | *(empty)* | Space-separated extra globs classified as test files by the TDD gate |
 | `exempt_globs`           | *(empty)* | Space-separated extra globs exempt from the RED-phase write block    |
 | `max_iterations_default` | `5`     | Default stop rule: max loop iterations per task                      |
 | `board_enabled`          | `true`  | Regenerate `.sddx/BOARD.md` automatically                            |
 | `pr_host`                | *(auto-detected)* | PR-host CLI for `sddx pr create`: `gh` \| `glab`. Unset detects from the `origin` remote (`github.com` → `gh`, `gitlab.com` → `glab`); refuses if neither matches |
-| `agent_model`             | *(empty)* | Comma-separated `role=model` pairs (`orchestrator`, `planner`, `tddExecutor`, `verifier`) — **advisory**: read by `/sddx:run`/`/sddx:quick` via `sddx config show --json` when dispatching a subagent, not enforced by any hook |
-| `prefer_solo`             | `false` | **Advisory** hint `/sddx:run` reads to steer a single trivial task toward `--solo`/`/sddx:quick` instead of the full worktree flow |
+| `agent_model`             | *(empty)* | Comma-separated `role=model` pairs (`orchestrator`, `planner`, `tddExecutor`, `verifier`) — **advisory**: read by `/sddx:run` via `sddx config show --json` when dispatching a subagent, not enforced by any hook |
 | `verbose`                 | `false` | When true, `sddx config show` also prints which source (env var, `.sddx/config.json`, or built-in default) resolved each key |
 
 See [../reference/cli.md](../reference/cli.md#sddx-config-show) for `sddx config show`/`sddx config validate`, which read and check this table's values.
@@ -61,7 +59,7 @@ It does **not** install the Claude Code plugin (skills, agents, hooks) — there
 is no TDD-gate hook enforcement without the plugin; see
 [skills-only mode](#skills-only-mode) below for the same caveat in the
 opposite direction. Use the marketplace install above if you want the
-conversational `/sddx:run` / `/sddx:quick` skills and the hard-blocking hooks.
+conversational `/sddx:run` skill and the hard-blocking hooks.
 
 ## Local development
 

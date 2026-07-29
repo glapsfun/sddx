@@ -4,8 +4,8 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { blockedOn, resolveTaskState } from "../src/lib/task";
 import { rematerializeStaleDependents } from "../src/lib/worktree";
-import { fixtureClone, fixtureRepo } from "./fixtures";
-import { fakeRedCheck, GRAPH_HEADER, repoRoot } from "./helpers";
+import { fixtureClone } from "./fixtures";
+import { createRun, fakeRedCheck, GRAPH_HEADER, repoRoot } from "./helpers";
 
 const CLI = join(repoRoot, "src/cli.ts");
 const cli = (cwd: string, ...args: string[]) =>
@@ -18,21 +18,12 @@ const g = (cwd: string, ...args: string[]) =>
  * steps a user takes — rather than sidestepping the gate with auto mode. */
 function approveAndCreate(cwd: string, ...args: string[]) {
   const graphIdx = args.indexOf("--graph");
-  const wsIdx = args.indexOf("--workspace");
   // The token records the workspace strategy it was approved for, so approve
   // must be given the same one the create will use.
-  const approve = spawnSync(
-    "bun",
-    [
-      CLI,
-      "graph",
-      "approve",
-      "--graph",
-      args[graphIdx + 1],
-      ...(wsIdx === -1 ? [] : ["--workspace", args[wsIdx + 1]]),
-    ],
-    { cwd, encoding: "utf8" },
-  );
+  const approve = spawnSync("bun", [CLI, "graph", "approve", "--graph", args[graphIdx + 1]], {
+    cwd,
+    encoding: "utf8",
+  });
   if (approve.status !== 0) return approve;
   return cli(cwd, ...args);
 }
@@ -97,41 +88,6 @@ describe("dependency chain end-to-end", () => {
     expect(resolveTaskState(clone, bId)!.workspace.base_sha).toBe(
       g(clone, "rev-parse", `sddx/${aId}`),
     );
-  });
-
-  test("branch-mode dependent materializes as a branch, not a worktree", () => {
-    const cwd = fixtureRepo();
-    scopedGraph(cwd);
-    const created = approveAndCreate(
-      cwd,
-      "graph",
-      "create",
-      "--graph",
-      "graph.yaml",
-      "--workspace",
-      "branch",
-    );
-    expect(created.status).toBe(0);
-    const goalId = /created goal (\S+)/.exec(created.stdout)![1]!;
-    const [aId, bId] = JSON.parse(cli(cwd, "goal", "show", goalId).stdout).task_ids as [
-      string,
-      string,
-    ];
-
-    // graph create in branch mode leaves HEAD on the root's branch; drive it to DONE
-    cli(cwd, "task", "phase", aId, "RED", "--test-exit", "1");
-    cli(cwd, "task", "phase", aId, "GREEN", "--test-exit", "0");
-    cli(cwd, "task", "phase", aId, "VERIFY");
-    fakeRedCheck(cwd, aId);
-    expect(cli(cwd, "verify", aId).status).toBe(0);
-
-    const mat = cli(cwd, "task", "materialize", bId);
-    expect(mat.status).toBe(0);
-    expect(mat.stdout).toContain("branch");
-    // a branch at the parent's DONE commit, and NO worktree
-    expect(g(cwd, "rev-parse", `sddx/${bId}`)).toBe(g(cwd, "rev-parse", `sddx/${aId}`));
-    expect(existsSync(join(cwd, ".sddx-worktrees", bId))).toBe(false);
-    expect(resolveTaskState(cwd, bId)!.workspace.mode).toBe("branch");
   });
 
   test("materialize refuses while the parent is not DONE", () => {
@@ -217,12 +173,13 @@ describe("fan-in dependency end-to-end", () => {
 describe("retry end-to-end", () => {
   test("a fresh retry resets a worktree task to PLAN, then abandons once attempts are exhausted", () => {
     const { clone } = fixtureClone();
-    writeFileSync(
-      join(clone, "spec.yaml"),
-      `task: flaky root task\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\nretry:\n  max_attempts: 2\n  workspace: fresh\n`,
-    );
-    const created = cli(clone, "task", "create", "--spec", "spec.yaml", "--workspace", "worktree");
-    const id = /created (\S+)/.exec(created.stdout)![1]!;
+    const { taskIds } = createRun(clone, cli, "retry the flaky root", [
+      {
+        alias: "flaky",
+        spec: `task: flaky root task\nsuccess_criteria:\n  - a\nscope:\n  - "src/flaky/**"\noracle:\n  type: command\n  run: "exit 0"\nretry:\n  max_attempts: 2\n  workspace: fresh\n`,
+      },
+    ]);
+    const id = taskIds[0] as string;
     const wt = join(clone, ".sddx-worktrees", id);
     const originalBase = resolveTaskState(clone, id)!.workspace.base_sha;
 

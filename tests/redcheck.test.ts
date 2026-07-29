@@ -13,7 +13,7 @@ function taskInRed(cwd: string, oracleRun: string) {
     `task: red fixture\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "${oracleRun}"\n`,
   ).spec!;
   let t = createTask(cwd, spec, ".sddx/specs/x.yaml", {
-    mode: "none",
+    mode: "worktree",
     branch: null,
     base_sha: headSha(cwd),
   });
@@ -45,7 +45,11 @@ describe("redCheck", () => {
     const spec = parseSpec(
       "task: p\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: x\n",
     ).spec!;
-    const t = createTask(cwd, spec, "s", { mode: "none", branch: null, base_sha: headSha(cwd) });
+    const t = createTask(cwd, spec, "s", {
+      mode: "worktree",
+      branch: null,
+      base_sha: headSha(cwd),
+    });
     writeTask(cwd, t);
     expect(() => redCheck(cwd, t.id)).toThrow(/RED/);
   });

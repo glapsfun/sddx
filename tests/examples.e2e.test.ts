@@ -10,7 +10,6 @@ const EXPECTED = [
   "02-parallel-run",
   "03-dag-dependencies",
   "04-retry-and-skip",
-  "05-branch-mode",
   "06-oracle-types",
   "07-receipts-and-audit",
   "08-pr-from-goal",

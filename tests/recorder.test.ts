@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { matchTestRunner, recordTestRun } from "../src/lib/recorder";
 import { stopGate } from "../src/lib/stopgate";
 import { createTask, readTask, transition, writeTask } from "../src/lib/task";
@@ -18,7 +20,7 @@ const SPEC = {
 
 const makeTask = (repo: string) =>
   createTask(repo, SPEC, ".sddx/specs/x.yaml", {
-    mode: "none",
+    mode: "worktree",
     branch: null,
     base_sha: "0".repeat(40),
   });
@@ -122,5 +124,47 @@ describe("stopGate", () => {
     const d = stopGate({ cwd: repo });
     expect(d.block).toBe(true);
     expect(d.reason).toContain("receipt");
+  });
+});
+
+describe("the recorder is inert on a legacy task, not throwing", () => {
+  test("an unfinished legacy task makes recordTestRun a no-op with no error", () => {
+    // The recorder runs from PostToolUse — a hook the user never invoked. If
+    // the legacy guard threw here it would surface as a generic "sddx hook
+    // error" on EVERY observed test run in an upgraded checkout, and because
+    // the throw precedes writeTask it would also silently disable stuck-streak
+    // accumulation for that checkout. The migration refusal belongs on the
+    // commands a user actually types.
+    const repo = fixtureRepo();
+    const t = createTask(repo, SPEC, "s", {
+      mode: "branch",
+      branch: "sddx/legacy",
+      base_sha: "abc",
+    });
+    const before = readFileSync(join(repo, ".sddx", "tasks", `${t.id}.json`), "utf8");
+
+    let res: ReturnType<typeof recordTestRun> | undefined;
+    expect(() => {
+      res = recordTestRun(repo, "bun test", 1);
+    }).not.toThrow();
+    expect(res?.matched).toBe(true);
+    expect(res?.transitioned).toBeNull();
+    // and it wrote nothing — the refusal promises state is unmodified
+    expect(readFileSync(join(repo, ".sddx", "tasks", `${t.id}.json`), "utf8")).toBe(before);
+  });
+
+  test("a normal worktree task still records and transitions", () => {
+    // the guard must not go so wide that it breaks the ordinary path
+    const repo = fixtureRepo();
+    const t = createTask(repo, SPEC, "s", {
+      mode: "worktree",
+      branch: "sddx/ok",
+      base_sha: "abc",
+      path: ".",
+    });
+    const res = recordTestRun(repo, "bun test", 1);
+    expect(res.matched).toBe(true);
+    expect(res.transitioned).toBe("RED");
+    expect(readTask(repo, t.id).phase).toBe("RED");
   });
 });

@@ -150,8 +150,8 @@ describe("the canonical create path refuses rather than downgrading", () => {
     const repo = fixtureRepo();
     withGitmodules(repo, ["vendor/lib"]);
     const rel = planWithScope(repo, "src/**");
-    expect(cli(repo, "graph", "approve", "--graph", rel, "--workspace", "worktree").status).toBe(0);
-    const r = cli(repo, "graph", "create", "--graph", rel, "--workspace", "worktree");
+    expect(cli(repo, "graph", "approve", "--graph", rel).status).toBe(0);
+    const r = cli(repo, "graph", "create", "--graph", rel);
     expect(r.status).toBe(0);
     expect(r.stdout).not.toContain("branch mode");
   });
@@ -163,11 +163,11 @@ describe("the canonical create path refuses rather than downgrading", () => {
 
     // approve refuses too — it runs the same validation, so a plan that cannot
     // execute is never given a token a later create would honor
-    const approve = cli(repo, "graph", "approve", "--graph", rel, "--workspace", "worktree");
+    const approve = cli(repo, "graph", "approve", "--graph", rel);
     expect(approve.status).not.toBe(0);
     expect(approve.stderr).toContain("vendor/lib");
 
-    const r = cli(repo, "graph", "create", "--graph", rel, "--workspace", "worktree");
+    const r = cli(repo, "graph", "create", "--graph", rel);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("vendor/lib");
     expect(r.stderr).toContain('task "a"');
@@ -178,7 +178,7 @@ describe("the canonical create path refuses rather than downgrading", () => {
     const repo = fixtureRepo();
     withGitmodules(repo, ["vendor/lib"]);
     const rel = planWithScope(repo, null);
-    const r = cli(repo, "graph", "create", "--graph", rel, "--workspace", "worktree");
+    const r = cli(repo, "graph", "create", "--graph", rel);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("no scope");
     expect(goalIds(repo)).toEqual([]);
@@ -188,16 +188,7 @@ describe("the canonical create path refuses rather than downgrading", () => {
     const repo = fixtureRepo();
     withGitmodules(repo, ["vendor/lib"]);
     const rel = planWithScope(repo, "vendor/lib/**");
-    const dry = cli(
-      repo,
-      "graph",
-      "create",
-      "--graph",
-      rel,
-      "--workspace",
-      "worktree",
-      "--dry-run",
-    );
+    const dry = cli(repo, "graph", "create", "--graph", rel, "--dry-run");
     expect(dry.status).not.toBe(0);
     expect(dry.stderr).toContain("vendor/lib");
   });

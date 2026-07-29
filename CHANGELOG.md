@@ -4,6 +4,17 @@ All notable changes to sddx are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sddx adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [4.0.0](https://github.com/glapsfun/sddx/compare/v3.0.0...v4.0.0) (2026-07-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* a graph with `tasks:` must carry `schema_version` and `interaction_mode`; see docs/reference/config.md for the migration.
+
+### Added
+
+* interaction modes, an intake round, and a plan-review gate ([1f6f983](https://github.com/glapsfun/sddx/commit/1f6f98376f0587ae840d2e8477ad71524646913c))
+
 ## [3.0.0](https://github.com/glapsfun/sddx/compare/v2.3.0...v3.0.0) (2026-07-28)
 
 

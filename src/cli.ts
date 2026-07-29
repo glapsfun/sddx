@@ -3,6 +3,19 @@ import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { auditReceipts } from "./audit";
 import { computeBoard } from "./board";
 import {
+  ADAPTER_SCHEMA_VERSION,
+  type Adapter,
+  AdapterConflictError,
+  type AdapterContext,
+  applyAdapter,
+  declarationPath,
+  planAdapter,
+  planHasConflicts,
+  uninstallAdapter,
+  writeDeclaration,
+} from "./lib/adapter";
+import { claudeAdapter } from "./lib/adapters/claude";
+import {
   approvalPath,
   decideGate,
   type GateDecision,
@@ -52,14 +65,17 @@ import {
   truncateToHeader,
   validateSchedule,
 } from "./lib/graph";
+import { runHook } from "./lib/hookdispatch";
 import {
   applyInit,
+  type FileOp,
   InitApplyError,
   type InitOptions,
   type InitPlan,
   NotAGitRepositoryError,
   planInit,
   planIsNoop,
+  repositoryRoot,
 } from "./lib/init";
 import { parseQuestionBatch, QUESTION_CAP } from "./lib/intake";
 import { detectRunState, renderMenu, resolveSelection, runActions } from "./lib/next-actions";
@@ -68,6 +84,7 @@ import { createGoalPr } from "./lib/pr";
 import { sha256 } from "./lib/receipt";
 import { redCheck } from "./lib/redcheck";
 import { generateRunReport, renderRunReport } from "./lib/runreport";
+import { sddxCommand } from "./lib/runtime";
 import { parseSpec, type Spec } from "./lib/spec";
 import {
   abandonOrRetry,
@@ -100,6 +117,8 @@ import {
 const USAGE = `usage:
   sddx init [--runtime <global|project>] [--package-manager <npm|bun>]
             [--adapter <name>]... [--interaction-mode <human|auto>] [--yes] [--dry-run]
+  sddx sync --adapter <name> [--yes] [--force]
+  sddx uninstall --adapter <name>
   sddx task phase <id> <PHASE> [--test-exit <n>]
   sddx task allow <id> <path>
   sddx task show <id>
@@ -1347,6 +1366,139 @@ function cmdConfigShow(cwd: string, args: string[], format: OutputFormat, noColo
   reporter.finish(cfg);
 }
 
+/** The adapters sddx implements, by name. */
+const ADAPTERS: Record<string, Adapter> = { claude: claudeAdapter };
+
+/** Builds the generation context from committed policy — never from the machine. */
+function adapterContext(root: string, override?: Partial<AdapterContext>): AdapterContext {
+  const cfg = resolveConfig(root);
+  return {
+    runtimeScope: cfg.runtime_scope,
+    packageManager: cfg.package_manager,
+    invocation: sddxCommand(cfg.runtime_scope, cfg.package_manager),
+    sddxVersion: sddxVersion(),
+    ...override,
+  };
+}
+
+function requireAdapter(name: string | undefined): Adapter {
+  if (name === undefined)
+    fail(`--adapter requires a value (one of ${Object.keys(ADAPTERS).join(", ")})`, 2);
+  const adapter = ADAPTERS[name];
+  if (!adapter) {
+    fail(`unknown adapter "${name}" — known adapters: ${Object.keys(ADAPTERS).join(", ")}`, 2);
+  }
+  return adapter;
+}
+
+/**
+ * `sddx sync --adapter <name>` — bring generated files back in step with the
+ * committed policy, previewing every change first and writing only what the
+ * ownership manifest proves sddx owns.
+ */
+function cmdSync(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
+  currentCommand = "sync";
+  const adapter = requireAdapter(flag(args, "--adapter"));
+  const root = repositoryRoot(cwd);
+  const ctx = adapterContext(root);
+  const reporter = makeReporter("sync", format, noColor);
+
+  const plan = planAdapter(root, adapter, ctx);
+  const changing = plan.dispositions.filter((d) => d.kind === "create" || d.kind === "update");
+
+  for (const d of plan.dispositions) {
+    if (d.kind === "conflict") reporter.warn(`conflict  ${d.path} — ${d.reason}`);
+    else if (d.kind !== "unchanged") reporter.success(`${d.kind.padEnd(9)} ${d.path}`);
+  }
+
+  if (planHasConflicts(plan)) {
+    failWith(new AdapterConflictError(plan.conflicts).message.split("\n"), 3, { plan });
+  }
+  if (changing.length === 0) {
+    reporter.success(`${adapter.name}: already up to date`);
+    reporter.finish({ adapter: adapter.name, changed: [] });
+    return;
+  }
+  if (!args.includes("--yes")) {
+    reporter.success(`${changing.length} file(s) would change — re-run with --yes to apply`);
+    reporter.finish({
+      adapter: adapter.name,
+      changed: changing.map((d) => d.path),
+      applied: false,
+    });
+    return;
+  }
+
+  const result = applyAdapter(root, adapter, ctx, { force: args.includes("--force") });
+  reporter.success(`${adapter.name}: updated ${result.written.length} file(s)`);
+  reporter.finish({ adapter: adapter.name, changed: result.written, applied: true });
+}
+
+/** `sddx uninstall --adapter <name>` — remove only manifest-owned artifacts. */
+function cmdUninstall(cwd: string, args: string[], format: OutputFormat, noColor: boolean): void {
+  currentCommand = "uninstall";
+  const adapter = requireAdapter(flag(args, "--adapter"));
+  const root = repositoryRoot(cwd);
+  const reporter = makeReporter("uninstall", format, noColor);
+
+  const result = uninstallAdapter(root, adapter, adapterContext(root));
+  for (const p of result.removed) reporter.success(`removed   ${p}`);
+  for (const p of result.keptModified) {
+    reporter.warn(
+      `kept      ${p} — modified after sddx wrote it, remove it by hand if you meant to`,
+    );
+  }
+  reporter.success(
+    `${adapter.name}: removed ${result.removed.length} path(s), kept ${result.keptModified.length} modified`,
+  );
+  reporter.finish(result);
+}
+
+/**
+ * The adapter files an `init` would write, folded into its change plan.
+ *
+ * Generation reads the policy being proposed, not the policy on disk — during a
+ * first `init` there is no `.sddx/config.json` yet, and a preview computed from
+ * a default would show files that differ from the ones actually written.
+ */
+function adapterPlanFiles(root: string, opts: InitOptions): FileOp[] {
+  const files: FileOp[] = [];
+  const ctx: AdapterContext = {
+    runtimeScope: opts.runtimeScope,
+    packageManager: opts.packageManager,
+    invocation: sddxCommand(opts.runtimeScope, opts.packageManager),
+    sddxVersion: sddxVersion(),
+  };
+  for (const name of opts.adapters) {
+    const adapter = ADAPTERS[name];
+    if (!adapter) continue;
+    for (const d of planAdapter(root, adapter, ctx).dispositions) {
+      if (d.kind === "unchanged") {
+        files.push({ path: d.path, kind: "unchanged", reason: `${name} adapter` });
+      } else if (d.kind === "conflict") {
+        // Surfaced in the preview as a modification the apply will refuse, so
+        // the user sees it before confirming rather than after.
+        files.push({
+          path: d.path,
+          kind: "modify",
+          reason: `${name} adapter — CONFLICT: ${d.reason}`,
+        });
+      } else {
+        // Deliberately no `contents`: these entries exist to be PREVIEWED. The
+        // adapter applier writes them (and records ownership); a FileOp with
+        // contents would have the generic file loop write them first, leaving
+        // files on disk that no manifest accounts for.
+        files.push({
+          path: d.path,
+          kind: d.kind === "create" ? "create" : "modify",
+          reason: `${name} adapter`,
+        });
+      }
+    }
+  }
+  return files;
+}
+
 /** One choice `init` needs, and the flag that supplies it non-interactively. */
 interface InitChoice<T> {
   flag: string;
@@ -1472,7 +1624,7 @@ function cmdInit(cwd: string, args: string[], format: OutputFormat, noColor: boo
   const reporter = makeReporter("init", format, noColor);
   let plan: InitPlan;
   try {
-    plan = planInit(cwd, opts);
+    plan = planInit(cwd, opts, adapterPlanFiles);
   } catch (e) {
     if (e instanceof NotAGitRepositoryError) failWith(e.message.split("\n"), 1);
     throw e;
@@ -1493,7 +1645,24 @@ function cmdInit(cwd: string, args: string[], format: OutputFormat, noColor: boo
   }
 
   try {
-    const result = applyInit(plan);
+    const result = applyInit(plan, {
+      // Adapters run after the local files (so `.sddx/config.json` — the policy
+      // generation reads — already exists) and before the package manager.
+      runAdapters: (applied) => {
+        const written: string[] = [];
+        for (const name of opts.adapters) {
+          const adapter = ADAPTERS[name] as Adapter;
+          const ctx = adapterContext(applied.root);
+          writeDeclaration(applied.root, name, {
+            schema_version: ADAPTER_SCHEMA_VERSION,
+            adapter: name,
+          });
+          written.push(declarationPath(name));
+          written.push(...applyAdapter(applied.root, adapter, ctx).written);
+        }
+        return written;
+      },
+    });
     reporter.success(
       `initialized: ${result.written.length} file(s) written${
         result.packageOps.length > 0 ? `, ran ${result.packageOps.join(", ")}` : ""
@@ -1688,6 +1857,11 @@ function cmdGraphCancel(cwd: string, args: string[], format: OutputFormat, noCol
 
 function main(argv: string[]): void {
   const cwd = process.cwd();
+  // `hook` speaks the harness's protocol — event JSON on stdin, decision JSON
+  // on stdout, always exit 0 — not sddx's. It is intercepted ahead of output-
+  // flag parsing and removed-flag rejection so nothing in the CLI's own
+  // conventions can contaminate a decision the harness is waiting on.
+  if (argv[0] === "hook") runHook(argv[1]);
   const { format, noColor, rest: cleaned } = parseOutputFlag(argv);
   // set before any dispatch so fail()/failWith() are format-aware even when
   // called from validation code that runs ahead of a command's own Reporter
@@ -1880,8 +2054,21 @@ function main(argv: string[]): void {
       cmdNextActions(cwd, rest, format, noColor);
       return;
     }
+    if (cmd === "hook") {
+      // Never reached in practice: `hook` is intercepted before flag parsing
+      // (see main()). Kept so an unrouted call still behaves.
+      runHook(rest[0]);
+    }
     if (cmd === "init") {
       cmdInit(cwd, rest, format, noColor);
+      return;
+    }
+    if (cmd === "sync") {
+      cmdSync(cwd, rest, format, noColor);
+      return;
+    }
+    if (cmd === "uninstall") {
+      cmdUninstall(cwd, rest, format, noColor);
       return;
     }
     if (cmd === "config" && rest[0] === "show") {

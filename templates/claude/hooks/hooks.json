@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run\" \"${CLAUDE_PLUGIN_ROOT}/dist/hooks.mjs\" session-start",
+            "command": "{{SDDX}} hook session-start",
             "timeout": 10
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run\" \"${CLAUDE_PLUGIN_ROOT}/dist/hooks.mjs\" tdd-gate",
+            "command": "{{SDDX}} hook tdd-gate",
             "timeout": 10
           }
         ]
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run\" \"${CLAUDE_PLUGIN_ROOT}/dist/hooks.mjs\" bash-gate",
+            "command": "{{SDDX}} hook bash-gate",
             "timeout": 10
           }
         ]
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run\" \"${CLAUDE_PLUGIN_ROOT}/dist/hooks.mjs\" approval-gate",
+            "command": "{{SDDX}} hook approval-gate",
             "timeout": 10
           }
         ]
@@ -49,7 +49,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run\" \"${CLAUDE_PLUGIN_ROOT}/dist/hooks.mjs\" record-test",
+            "command": "{{SDDX}} hook record-test",
             "timeout": 10
           }
         ]
@@ -60,7 +60,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run\" \"${CLAUDE_PLUGIN_ROOT}/dist/hooks.mjs\" stop-gate",
+            "command": "{{SDDX}} hook stop-gate",
             "timeout": 10
           }
         ]
@@ -71,7 +71,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run\" \"${CLAUDE_PLUGIN_ROOT}/dist/hooks.mjs\" stop-gate",
+            "command": "{{SDDX}} hook stop-gate",
             "timeout": 10
           }
         ]

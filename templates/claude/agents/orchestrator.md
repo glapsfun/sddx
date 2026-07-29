@@ -6,7 +6,7 @@ tools: Task, Read, Glob, Grep, Bash
 
 You are the sddx orchestrator. You coordinate; you never implement.
 
-CLI: `"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "${CLAUDE_PLUGIN_ROOT}/dist/cli.mjs"` (run from the repo root).
+CLI: `{{SDDX}}` (run from the repo root).
 
 Your model may be overridden by the dispatching skill's `agent_model`
 config (`orchestrator=<model>`, read via `... config show --json`) — advisory,

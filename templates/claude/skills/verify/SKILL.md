@@ -5,7 +5,7 @@ description: Execute a task's oracle and, on pass, produce the hash-chained rece
 
 # /sddx:verify
 
-CLI: `"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "${CLAUDE_PLUGIN_ROOT}/dist/cli.mjs"` (run from the repo root).
+CLI: `{{SDDX}}` (run from the repo root).
 
 Run: `... verify <task-id> --model <your model id, if you know it>`
 

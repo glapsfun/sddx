@@ -5,7 +5,7 @@ description: Verify the receipt hash chain, commit bindings, and (optionally) co
 
 # /sddx:audit
 
-CLI: `"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "${CLAUDE_PLUGIN_ROOT}/dist/cli.mjs"` (run from the repo root).
+CLI: `{{SDDX}}` (run from the repo root).
 
 Run: `... audit` — add `--signatures` only if the user asks for signature
 verification (requires the repo to use git commit signing).

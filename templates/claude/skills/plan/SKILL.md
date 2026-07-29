@@ -5,7 +5,7 @@ description: Turn a development goal into a dense sddx spec — binary success c
 
 # /sddx:plan
 
-CLI: `"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "${CLAUDE_PLUGIN_ROOT}/dist/cli.mjs"` (run from the repo root).
+CLI: `{{SDDX}}` (run from the repo root).
 
 Read the interaction mode first — `.data.interaction_mode` from
 `... config show --output json`. It decides whether this skill may ask

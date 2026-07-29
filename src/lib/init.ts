@@ -200,8 +200,17 @@ function alreadyPinned(root: string): boolean {
 /**
  * Computes the full change plan. Pure with respect to the repository: it reads
  * to decide what would change, and writes nothing.
+ *
+ * `adapterFiles` is injected rather than imported so this module stays free of
+ * adapter specifics. It is not optional in spirit: a preview that omitted the
+ * files an adapter would write would be a preview the user could not trust,
+ * which is worse than showing none at all.
  */
-export function planInit(cwd: string, opts: InitOptions): InitPlan {
+export function planInit(
+  cwd: string,
+  opts: InitOptions,
+  adapterFiles?: (root: string, opts: InitOptions) => FileOp[],
+): InitPlan {
   const root = repositoryRoot(cwd);
   const files: FileOp[] = [];
 
@@ -226,6 +235,8 @@ export function planInit(cwd: string, opts: InitOptions): InitPlan {
       "ignore only the ephemeral sddx paths",
     ),
   );
+
+  if (adapterFiles) files.push(...adapterFiles(root, opts));
 
   const packageOps: PackageOp[] = [];
   if (opts.runtimeScope === "project" && !alreadyPinned(root)) {

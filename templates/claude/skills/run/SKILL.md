@@ -5,7 +5,7 @@ description: Flagship sddx flow — decompose a goal into oracle-backed task spe
 
 # /sddx:run
 
-CLI: `"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "${CLAUDE_PLUGIN_ROOT}/dist/cli.mjs"` (run from the repo root).
+CLI: `{{SDDX}}` (run from the repo root).
 
 This is the only execution entry point. A trivial single task is a **one-node
 run** — the same graph, run branch, worktree, oracle, and receipt as any other

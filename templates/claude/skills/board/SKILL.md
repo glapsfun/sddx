@@ -5,7 +5,7 @@ description: Regenerate .sddx/BOARD.md and show task status across the repo and 
 
 # /sddx:board
 
-CLI: `"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "${CLAUDE_PLUGIN_ROOT}/dist/cli.mjs"` (run from the repo root).
+CLI: `{{SDDX}}` (run from the repo root).
 
 Run: `... board`
 

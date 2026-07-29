@@ -5,7 +5,7 @@ description: Push a goal's run branch and open a PR/MR from it. Use when asked t
 
 # /sddx:pr
 
-CLI: `"${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "${CLAUDE_PLUGIN_ROOT}/dist/cli.mjs"` (run from the repo root).
+CLI: `{{SDDX}}` (run from the repo root).
 
 Run: `... pr create --goal <goal-id> [--title "<title>"]`
 

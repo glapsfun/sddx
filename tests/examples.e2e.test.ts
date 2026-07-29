@@ -22,10 +22,15 @@ describe("runnable examples", () => {
   });
 
   for (const name of EXPECTED) {
+    // Explicit timeout: each example now replays a full canonical run — approve,
+    // create, a worktree per root task — which is several seconds of real git
+    // and CLI process work. Standalone they finish in 1.5-3s, but under the
+    // whole suite's parallelism that crosses bun's 5s default and flakes. The
+    // other process-spawning e2e suites here declare theirs for the same reason.
     test(`${name} runs exactly as documented`, () => {
       const target = mkdtempSync(join(tmpdir(), `sddx-example-${name}-`));
       const result = runExample(repoRoot, name, target);
       expect(result.ok, result.message).toBe(true);
-    });
+    }, 30_000);
   }
 });

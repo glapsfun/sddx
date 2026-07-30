@@ -3,6 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import {
+  chmodSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -19,8 +20,32 @@ import { repoRoot } from "./helpers";
 const CLI = join(repoRoot, "src/cli.ts");
 
 function cli(cwd: string, ...args: string[]) {
-  const r = spawnSync("bun", [CLI, ...args], { cwd, encoding: "utf8" });
+  return cliWithPath(cwd, undefined, ...args);
+}
+
+function cliWithPath(cwd: string, extraPath: string | undefined, ...args: string[]) {
+  const env = extraPath
+    ? { ...process.env, PATH: `${extraPath}:${process.env.PATH}` }
+    : process.env;
+  const r = spawnSync("bun", [CLI, ...args], { cwd, encoding: "utf8", env });
   return { status: r.status ?? -1, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+}
+
+/**
+ * A directory holding a working `sddx` on PATH.
+ *
+ * Whether a machine happens to have a global sddx installed is not something a
+ * test may depend on: asserting "a healthy repository passes every check"
+ * while silently relying on the developer's own install passes locally and
+ * fails on a clean CI runner, which is exactly what happened. Providing the
+ * binary makes the precondition explicit and the result the same everywhere.
+ */
+function globalSddxOnPath(): string {
+  const dir = mkdtempSync(join(tmpdir(), "sddx-bin-"));
+  const shim = join(dir, "sddx");
+  writeFileSync(shim, `#!/bin/sh\nexec bun ${CLI} "$@"\n`);
+  chmodSync(shim, 0o755);
+  return dir;
 }
 
 interface Check {
@@ -30,8 +55,11 @@ interface Check {
   fix?: string;
 }
 
-function checks(cwd: string): { checks: Check[]; failed: boolean; status: number } {
-  const r = cli(cwd, "doctor", "--output", "json");
+function checks(
+  cwd: string,
+  extraPath?: string,
+): { checks: Check[]; failed: boolean; status: number } {
+  const r = cliWithPath(cwd, extraPath, "doctor", "--output", "json");
   const envelope = JSON.parse(r.stdout) as { data: { checks: Check[]; failed: boolean } };
   return { ...envelope.data, status: r.status };
 }
@@ -63,7 +91,9 @@ function initialized(...extra: string[]): string {
 
 describe("the full picture", () => {
   test("a healthy repository passes every check and exits 0", () => {
-    const { checks: list, failed, status } = checks(initialized());
+    // `runtime_scope: global` means "an sddx on PATH", so a genuinely healthy
+    // repository has one. Supplying it is part of the fixture, not a fudge.
+    const { checks: list, failed, status } = checks(initialized(), globalSddxOnPath());
     expect(failed).toBe(false);
     expect(status).toBe(0);
     for (const id of [
@@ -192,12 +222,11 @@ describe("runtime resolution", () => {
     cfg.runtime_scope = "project";
     write(root, ".sddx/config.json", `${JSON.stringify(cfg, null, 2)}\n`);
 
-    const mismatch = byId(checks(root).checks, "runtime-mismatch");
-    // Only meaningful when a global sddx actually exists on this machine.
-    if (mismatch) {
-      expect(mismatch.status).toBe("warn");
-      expect(mismatch.fix).toContain("npm exec --offline --no -- sddx");
-    }
+    // Supply the global binary rather than skipping when the machine lacks
+    // one: a conditional assertion silently tests nothing on a clean runner.
+    const mismatch = byId(checks(root, globalSddxOnPath()).checks, "runtime-mismatch")!;
+    expect(mismatch.status).toBe("warn");
+    expect(mismatch.fix).toContain("npm exec --offline --no -- sddx");
   });
 });
 

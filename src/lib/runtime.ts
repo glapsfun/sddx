@@ -44,6 +44,31 @@ export function sddxCommand(scope: RuntimeScope, pm: PackageManager): string {
   return sddxInvocation(scope, pm).join(" ");
 }
 
+/** Every invocation prefix sddx generates, across all scopes and managers. */
+export const ALL_INVOCATION_PREFIXES: readonly (readonly string[])[] = [
+  ["sddx"],
+  ...Object.values(LOCAL_EXEC),
+];
+
+/**
+ * Is this command line an sddx invocation, whatever wrapper it arrives in?
+ *
+ * The RED-phase Bash gate has to answer this. It used to test only whether the
+ * first word was `sddx`, which was correct while everything invoked the binary
+ * directly — but generated content now runs the package manager's no-install
+ * form, so `bunx --no-install sddx red-check` read as a `bunx` command, hit the
+ * allow-list, and was blocked. The phase machine became unreachable in exactly
+ * the phase that needs it, deadlocking every task in a bun-pinned repository.
+ *
+ * Matching the full prefix rather than allow-listing `bunx` outright keeps the
+ * hole narrow: `bunx some-other-package` stays blocked.
+ */
+export function isSddxInvocation(words: readonly string[]): boolean {
+  return ALL_INVOCATION_PREFIXES.some(
+    (prefix) => words.length >= prefix.length && prefix.every((word, i) => words[i] === word),
+  );
+}
+
 /**
  * The remediation a user needs when they invoked the wrong binary.
  *

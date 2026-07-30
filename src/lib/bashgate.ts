@@ -3,6 +3,7 @@
 // exist. Over-blocking is recoverable (userConfig red_bash_allow); a bypass is not.
 import { readConfig } from "./config";
 import { resolutionFailureReason, resolveTask } from "./resolve";
+import { isSddxInvocation } from "./runtime";
 import type { TaskState } from "./task";
 
 export const BASH_ALLOW_BASE: readonly string[] = [
@@ -164,8 +165,11 @@ export function checkBashCommand(command: string, extraAllow: readonly string[])
     const words = commandWords(segment);
     if (words.length === 0) continue;
     const cmd = commandBasename(words[0] as string);
-    // the plugin's own CLI must run in every phase — it is how phases get recorded
+    // sddx's own CLI must run in every phase — it is how phases get recorded.
+    // Matched by full invocation, not just the first word, because a
+    // project-pinned repository invokes it through its package manager.
     if (cmd === "sddx-run" || cmd === "sddx") continue;
+    if (isSddxInvocation(words.map((w) => commandBasename(w)))) continue;
     if (cmd === "git") {
       const sub = words.slice(1).find((w) => !w.startsWith("-"));
       if (sub === undefined || !GIT_READ_SUBCOMMANDS.includes(sub)) {

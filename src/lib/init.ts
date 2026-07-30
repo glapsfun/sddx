@@ -130,21 +130,51 @@ export function gitignoreBlock(): string {
  */
 export function withGitignoreBlock(existing: string): string {
   const block = gitignoreBlock();
-  const begin = existing.indexOf(GITIGNORE_BEGIN);
-  if (begin !== -1) {
-    const endMarker = existing.indexOf(GITIGNORE_END, begin);
-    if (endMarker !== -1) {
-      const end = endMarker + GITIGNORE_END.length;
-      return existing.slice(0, begin) + block + existing.slice(end);
+  // Trailing blank lines are normalized so the result is a FIXED POINT:
+  // removing a block leaves the blank line that separated it, and re-adding
+  // one after that would grow the file by a line on every run.
+  const stripped = stripGitignoreBlocks(existing).replace(/\s*$/, "");
+  return stripped === "" ? `${block}\n` : `${stripped}\n\n${block}\n`;
+}
+
+/**
+ * Removes every well-formed sddx block, leaving all other content untouched.
+ *
+ * A block is only well-formed when its END marker is the first one after its
+ * BEGIN *and* no second BEGIN intervenes. That second condition is the whole
+ * point: a file carrying a damaged BEGIN (hand edit, half-resolved merge
+ * conflict) followed later by a complete block used to be spliced from the
+ * damaged marker to the good block's END, deleting every user rule in
+ * between — `node_modules/`, `.env`, everything.
+ *
+ * A damaged marker is left in place. It is an inert comment line, and a human
+ * removing it is far cheaper than sddx guessing how far it was meant to reach.
+ */
+function stripGitignoreBlocks(existing: string): string {
+  let out = "";
+  let rest = existing;
+  while (true) {
+    const begin = rest.indexOf(GITIGNORE_BEGIN);
+    if (begin === -1) break;
+
+    const afterBegin = begin + GITIGNORE_BEGIN.length;
+    const endMarker = rest.indexOf(GITIGNORE_END, afterBegin);
+    const nextBegin = rest.indexOf(GITIGNORE_BEGIN, afterBegin);
+    const wellFormed = endMarker !== -1 && (nextBegin === -1 || nextBegin > endMarker);
+
+    if (!wellFormed) {
+      // Keep the damaged marker and move past it; a later block may still be
+      // complete, and it is that one we want to replace.
+      out += rest.slice(0, afterBegin);
+      rest = rest.slice(afterBegin);
+      continue;
     }
-    // A begin marker with no end: the block was hand-edited into something we
-    // cannot delimit. Replacing from the marker to end-of-file could eat the
-    // user's rules, so append a fresh block and leave the damaged one alone
-    // for a human to remove.
+    let end = endMarker + GITIGNORE_END.length;
+    if (rest[end] === "\n") end += 1; // take the block's own trailing newline
+    out += rest.slice(0, begin);
+    rest = rest.slice(end);
   }
-  const needsNewline = existing !== "" && !existing.endsWith("\n");
-  const separator = existing === "" ? "" : needsNewline ? "\n\n" : "\n";
-  return `${existing}${separator}${block}\n`;
+  return out + rest;
 }
 
 /** The config object `init` writes, in a stable key order. */
@@ -276,6 +306,26 @@ class InitRollback {
     });
   }
 
+  /**
+   * Records whatever is at `absPath` RIGHT NOW, so it can be restored.
+   *
+   * Called before an external writer (an adapter) touches a path, since we
+   * cannot know in advance whether it will create or modify it.
+   */
+  capture(absPath: string, rel: string): void {
+    if (existsSync(absPath)) {
+      let previous: string;
+      try {
+        previous = readFileSync(absPath, "utf8");
+      } catch {
+        return; // unreadable: nothing meaningful to restore
+      }
+      this.modifiedFile(absPath, rel, previous);
+    } else {
+      this.createdFile(absPath, rel);
+    }
+  }
+
   createdDir(absPath: string, rel: string): void {
     this.steps.push({
       describe: `remove ${rel}/`,
@@ -330,7 +380,18 @@ export class InitApplyError extends Error {
  */
 export function applyInit(
   plan: InitPlan,
-  opts: { runAdapters?: (plan: InitPlan) => string[]; runCommand?: (cmd: string[]) => void } = {},
+  opts: {
+    /**
+     * Installs adapters. MUST call `record(relPath)` before writing each path,
+     * so a later failure can undo the install: without it, a failing
+     * package-manager step rolled back `.sddx/` and `.gitignore` while leaving
+     * the entire generated harness integration on disk — hooks firing against
+     * a repository with no config, which is exactly the half-wired state this
+     * ordering exists to prevent.
+     */
+    runAdapters?: (plan: InitPlan, record: (relPath: string) => void) => string[];
+    runCommand?: (cmd: string[]) => void;
+  } = {},
 ): ApplyResult {
   const rollback = new InitRollback();
   const written: string[] = [];
@@ -363,7 +424,7 @@ export function applyInit(
 
   if (opts.runAdapters) {
     try {
-      written.push(...opts.runAdapters(plan));
+      written.push(...opts.runAdapters(plan, (rel) => rollback.capture(join(plan.root, rel), rel)));
     } catch (e) {
       return fail(`adapter installation failed: ${(e as Error).message}`);
     }

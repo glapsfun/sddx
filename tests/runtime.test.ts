@@ -5,8 +5,14 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { checkBashCommand } from "../src/lib/bashgate";
 import { PACKAGE_MANAGERS, RUNTIME_SCOPES } from "../src/lib/config";
-import { pinnedRuntimeAdvice, sddxCommand, sddxInvocation } from "../src/lib/runtime";
+import {
+  isSddxInvocation,
+  pinnedRuntimeAdvice,
+  sddxCommand,
+  sddxInvocation,
+} from "../src/lib/runtime";
 
 describe("invocation forms", () => {
   test("global scope is the bare command, whatever the package manager", () => {
@@ -130,4 +136,42 @@ describe("verified no-install behavior", () => {
       expect(combined).not.toContain("LOCAL BINARY RAN");
     });
   }
+});
+
+/**
+ * Regression from the high-effort review: sddx's own RED-phase Bash gate
+ * blocked the invocation sddx generates for a bun-pinned repository, so the
+ * phase machine was unreachable in the phase that needs it and no task could
+ * be driven from RED to GREEN.
+ */
+describe("every generated invocation survives the RED-phase Bash gate", () => {
+  for (const scope of RUNTIME_SCOPES) {
+    for (const pm of PACKAGE_MANAGERS) {
+      test(`${scope}/${pm}: the phase-machine commands are allowed`, () => {
+        const invocation = sddxCommand(scope, pm);
+        for (const sub of ["red-check t1", "task phase t1 RED --test-exit 1", "task allow t1 x"]) {
+          const r = checkBashCommand(`${invocation} ${sub}`, []);
+          const why = r.allow ? "" : ` — ${r.reason}`;
+          expect(r.allow, `${invocation} ${sub}${why}`).toBe(true);
+        }
+      });
+    }
+  }
+
+  test("the exemption does not open the wrapper up in general", () => {
+    // Allow-listing `bunx` outright would have been the easy fix and the wrong
+    // one: it would let any package run arbitrary code during RED.
+    expect(checkBashCommand("bunx some-other-package --write", []).allow).toBe(false);
+    expect(checkBashCommand("bunx --no-install prettier --write src/", []).allow).toBe(false);
+    expect(checkBashCommand("npm exec --offline --no -- rimraf src/", []).allow).toBe(true);
+  });
+
+  test("isSddxInvocation matches only a full prefix", () => {
+    expect(isSddxInvocation(["sddx", "board"])).toBe(true);
+    expect(isSddxInvocation(["bunx", "--no-install", "sddx", "board"])).toBe(true);
+    expect(isSddxInvocation(["npm", "exec", "--offline", "--no", "--", "sddx"])).toBe(true);
+    expect(isSddxInvocation(["bunx", "sddx"])).toBe(false);
+    expect(isSddxInvocation(["bunx", "--no-install", "other"])).toBe(false);
+    expect(isSddxInvocation([])).toBe(false);
+  });
 });

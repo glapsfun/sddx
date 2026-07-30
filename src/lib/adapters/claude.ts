@@ -7,6 +7,7 @@
 // `sddx uninstall` unable to promise it had cleaned up.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Adapter, AdapterContext, GeneratedFile, MergeTarget } from "../adapter";
 import { sha256 } from "../receipt";
 
@@ -31,7 +32,11 @@ export const INVOCATION_PLACEHOLDER = "{{SDDX}}";
 function templateRoot(): string {
   const candidates = ["../../../templates/claude", "../templates/claude"];
   for (const rel of candidates) {
-    const dir = new URL(`${rel}/`, import.meta.url).pathname;
+    // fileURLToPath, never URL.pathname: pathname is percent-encoded, so a
+    // path containing a space (`/Users/jane doe/…`, `C:\Program Files\…`)
+    // resolves to a directory that does not exist, and the user is told their
+    // package is corrupt.
+    const dir = fileURLToPath(new URL(`${rel}/`, import.meta.url));
     try {
       if (statSync(dir).isDirectory()) return dir;
     } catch {
@@ -97,15 +102,39 @@ function generate(ctx: AdapterContext): GeneratedFile[] {
 // Settings merge
 // ---------------------------------------------------------------------------
 
+/** The hook events sddx registers. Also the vocabulary ownership is matched on. */
+const HOOK_EVENTS = [
+  "session-start",
+  "tdd-gate",
+  "bash-gate",
+  "approval-gate",
+  "record-test",
+  "stop-gate",
+] as const;
+
 /**
- * The marker that makes an entry identifiable as sddx's.
+ * Recognizes a hook command as one sddx generated.
  *
- * Without it, sync and uninstall would have to identify their own entries by
- * diffing against freshly generated content — which breaks the moment the
- * generated form changes, stranding the previous generation's entries in the
- * user's settings forever with nothing able to remove them.
+ * Matching must be precise in BOTH directions, and the failure modes are not
+ * symmetric. Too loose and the merge deletes hooks the user wrote — silent,
+ * unrecoverable data loss in a committed file. Too tight and a previous
+ * generation's entries are stranded in the user's settings with nothing able
+ * to remove them.
+ *
+ * So it matches the shape sddx actually emits — an invocation ending in
+ * `… hook <known-event>` — rather than a substring. A bare `"sddx"` test was
+ * the original approach and was wrong: it claimed ownership of
+ * `/Users/me/dev/sddx-tools/audit.sh` and `notify-send 'sddx run finished'`,
+ * and of every user hook in any checkout whose path happens to contain the
+ * word. The plugin-era form is matched too, so migrating replaces those
+ * registrations instead of duplicating them.
  */
-const OWNED_MARKER = "sddx";
+const SDDX_HOOK_COMMAND = new RegExp(
+  `(?:^|[\\s"'/])(?:sddx|hooks\\.mjs)["']?\\s+(?:hook\\s+)?(?:${HOOK_EVENTS.join("|")})\\s*$`,
+);
+
+const isSddxCommand = (command: unknown): boolean =>
+  typeof command === "string" && SDDX_HOOK_COMMAND.test(command.trim());
 
 interface HookCommand {
   type: string;
@@ -120,9 +149,17 @@ interface HookEntry {
   [k: string]: unknown;
 }
 
+/**
+ * True only when EVERY command in the entry is one of ours.
+ *
+ * An entry mixing an sddx command with a user's own is the user's: dropping it
+ * to replace our half would take theirs with it, and there is no safe way to
+ * split someone else's grouping.
+ */
 const isSddxEntry = (entry: HookEntry): boolean =>
   Array.isArray(entry.hooks) &&
-  entry.hooks.some((h) => typeof h?.command === "string" && h.command.includes(OWNED_MARKER));
+  entry.hooks.length > 0 &&
+  entry.hooks.every((h) => isSddxCommand(h?.command));
 
 /** The hook registrations sddx contributes, read from the template. */
 function templateHooks(ctx: AdapterContext): Record<string, HookEntry[]> {
@@ -131,22 +168,45 @@ function templateHooks(ctx: AdapterContext): Record<string, HookEntry[]> {
   return parsed.hooks;
 }
 
+/** Raised when a settings file cannot be merged. Reported as a conflict. */
+export class SettingsUnreadableError extends Error {
+  constructor(reason: string) {
+    super(`${CLAUDE_DIR}/settings.json ${reason} — refusing to overwrite it`);
+    this.name = "SettingsUnreadableError";
+  }
+}
+
+/** The document's existing indentation, so the merge does not restyle it. */
+function detectIndent(source: string): number {
+  const m = /\n(\x20+)"/.exec(source);
+  return m ? (m[1] as string).length : 2;
+}
+
 /**
  * Settings JSON with sddx's hook entries present exactly once.
  *
- * Every unrelated key and every non-sddx hook entry survives verbatim; only
- * entries carrying the marker are replaced. Written with stable key ordering
- * and two-space indentation so re-running produces no diff — a merge that
- * reformatted the file would show up as damage in every review.
+ * Every unrelated key and every non-sddx hook entry survives verbatim, and
+ * that is meant literally: the document's key ORDER and indentation are
+ * preserved, and only the `hooks` value is rewritten. Key-sorting the whole
+ * document (the original approach) produced a whole-file diff attributed to
+ * sddx on a committed, team-shared file, which reviewers could not separate
+ * from the registration it was supposed to add.
+ *
+ * Re-running is byte-identical, because our own output is a fixed point: the
+ * entries we emit come from the template in a fixed order.
  */
 function mergeSettings(existing: string | null, ctx: AdapterContext): string {
   let doc: Record<string, unknown> = {};
-  if (existing !== null && existing.trim() !== "") {
-    const parsed: unknown = JSON.parse(existing);
+  const source = existing ?? "";
+  if (source.trim() !== "") {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(source);
+    } catch (e) {
+      throw new SettingsUnreadableError(`is not valid JSON (${(e as Error).message})`);
+    }
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      throw new Error(
-        `${CLAUDE_DIR}/settings.json is not a JSON object — refusing to overwrite it`,
-      );
+      throw new SettingsUnreadableError("is not a JSON object");
     }
     doc = parsed as Record<string, unknown>;
   }
@@ -162,27 +222,40 @@ function mergeSettings(existing: string | null, ctx: AdapterContext): string {
   // theirs, and remove the key entirely if nothing is left.
   for (const [event, entries] of Object.entries(hooks)) {
     if (event in ours) continue;
-    const theirs = entries.filter((e) => !isSddxEntry(e));
+    const theirs = (entries ?? []).filter((e) => !isSddxEntry(e));
     if (theirs.length === 0) delete hooks[event];
     else hooks[event] = theirs;
   }
 
-  return `${JSON.stringify(sortKeys({ ...doc, hooks }), null, 2)}\n`;
+  // Spread order preserves the document's existing key order; `hooks` lands in
+  // its original position when it was already present, and last when it was not.
+  return `${JSON.stringify({ ...doc, hooks }, null, detectIndent(source))}\n`;
 }
 
 /** Settings JSON with every sddx hook entry removed, user content untouched. */
 function unmergeSettings(existing: string): string {
-  const doc = JSON.parse(existing) as Record<string, unknown>;
+  let doc: Record<string, unknown>;
+  try {
+    const parsed: unknown = JSON.parse(existing);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      // Not ours to rewrite. Returning it unchanged leaves the user's file
+      // exactly as found, which is the right outcome for an uninstall.
+      return existing;
+    }
+    doc = parsed as Record<string, unknown>;
+  } catch {
+    return existing;
+  }
   const hooks = { ...((doc.hooks as Record<string, HookEntry[]> | undefined) ?? {}) };
   for (const [event, entries] of Object.entries(hooks)) {
-    const theirs = entries.filter((e) => !isSddxEntry(e));
+    const theirs = (entries ?? []).filter((e) => !isSddxEntry(e));
     if (theirs.length === 0) delete hooks[event];
     else hooks[event] = theirs;
   }
   const next: Record<string, unknown> = { ...doc };
   if (Object.keys(hooks).length === 0) delete next.hooks;
   else next.hooks = hooks;
-  return `${JSON.stringify(sortKeys(next), null, 2)}\n`;
+  return `${JSON.stringify(next, null, detectIndent(existing))}\n`;
 }
 
 /**

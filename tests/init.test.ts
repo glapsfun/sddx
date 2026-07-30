@@ -18,6 +18,7 @@ import { join, relative } from "node:path";
 import {
   applyInit,
   EPHEMERAL_PATHS,
+  gitignoreBlock,
   InitApplyError,
   type InitOptions,
   NotAGitRepositoryError,
@@ -332,5 +333,135 @@ describe("non-interactive contract", () => {
       package_manager: "npm",
       adapters: [],
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regressions from the high-effort review.
+// ---------------------------------------------------------------------------
+
+describe("a damaged .gitignore marker never eats user rules", () => {
+  test("a stray BEGIN plus a later complete block preserves everything between", () => {
+    // Run 1 appended a fresh block beside a damaged marker; run 2 used to
+    // splice from the damaged marker to the good block's END, deleting every
+    // rule in between — including .env.
+    const damaged = [
+      "# sddx (generated) — do not edit between markers",
+      "node_modules/",
+      "dist/",
+      ".env",
+      "coverage/",
+      "",
+    ].join("\n");
+
+    const once = withGitignoreBlock(damaged);
+    for (const rule of ["node_modules/", "dist/", ".env", "coverage/"]) {
+      expect(once).toContain(rule);
+    }
+
+    const twice = withGitignoreBlock(once);
+    for (const rule of ["node_modules/", "dist/", ".env", "coverage/"]) {
+      expect(twice, `${rule} must survive the second run`).toContain(rule);
+    }
+    // still exactly one well-formed block
+    expect(twice.match(/# end sddx/g)).toHaveLength(1);
+    // and it is now a fixed point
+    expect(withGitignoreBlock(twice)).toBe(twice);
+  });
+
+  test("a well-formed block is replaced in place, not duplicated", () => {
+    const user = "node_modules/\n";
+    const once = withGitignoreBlock(user);
+    const twice = withGitignoreBlock(once);
+    expect(twice).toBe(once);
+    expect(twice.match(/# sddx \(generated\)/g)).toHaveLength(1);
+  });
+
+  test("two complete blocks collapse to one without losing rules between them", () => {
+    const doubled = `${withGitignoreBlock("a-rule\n")}between-rule\n${gitignoreBlock()}\n`;
+    const fixed = withGitignoreBlock(doubled);
+    expect(fixed).toContain("a-rule");
+    expect(fixed).toContain("between-rule");
+    expect(fixed.match(/# end sddx/g)).toHaveLength(1);
+  });
+});
+
+describe("rollback undoes adapter writes too", () => {
+  test("a failing package-manager step leaves no adapter files behind", () => {
+    // Previously the .claude/ install survived a rolled-back init, leaving
+    // hooks firing against a repository with no .sddx/config.json.
+    const root = fixtureRepo();
+    const before = snapshot(root);
+    const plan = planInit(root, { ...OPTS, runtimeScope: "project" });
+
+    expect(() =>
+      applyInit(plan, {
+        runAdapters: (applied, record) => {
+          record(".claude/settings.json");
+          record(".claude/agents/sddx-planner.md");
+          mkdirSync(join(applied.root, ".claude/agents"), { recursive: true });
+          writeFileSync(join(applied.root, ".claude/settings.json"), "{}\n");
+          writeFileSync(join(applied.root, ".claude/agents/sddx-planner.md"), "generated\n");
+          return [".claude/settings.json", ".claude/agents/sddx-planner.md"];
+        },
+        runCommand: () => {
+          throw new Error("registry unreachable");
+        },
+      }),
+    ).toThrow(InitApplyError);
+
+    expect(existsSync(join(root, ".claude/settings.json"))).toBe(false);
+    expect(existsSync(join(root, ".claude/agents/sddx-planner.md"))).toBe(false);
+    expect(snapshot(root)).toEqual(before);
+  });
+
+  test("a pre-existing settings file is restored to its original bytes", () => {
+    const root = fixtureRepo();
+    mkdirSync(join(root, ".claude"), { recursive: true });
+    const original = '{\n  "model": "opus"\n}\n';
+    writeFileSync(join(root, ".claude/settings.json"), original);
+
+    expect(() =>
+      applyInit(planInit(root, { ...OPTS, runtimeScope: "project" }), {
+        runAdapters: (applied, record) => {
+          record(".claude/settings.json");
+          writeFileSync(join(applied.root, ".claude/settings.json"), "{}\n");
+          return [".claude/settings.json"];
+        },
+        runCommand: () => {
+          throw new Error("boom");
+        },
+      }),
+    ).toThrow(InitApplyError);
+
+    expect(readFileSync(join(root, ".claude/settings.json"), "utf8")).toBe(original);
+  });
+});
+
+describe("--force is honored by init", () => {
+  test("a collision refuses without it and succeeds with it", () => {
+    const root = fixtureRepo();
+    const mine = "# my own run skill\n";
+    mkdirSync(join(root, ".claude/skills/sddx-run"), { recursive: true });
+    writeFileSync(join(root, ".claude/skills/sddx-run/SKILL.md"), mine);
+
+    const refused = cli(root, "init", "--yes", "--runtime", "global", "--adapter", "claude");
+    expect(refused.status).not.toBe(0);
+    expect(readFileSync(join(root, ".claude/skills/sddx-run/SKILL.md"), "utf8")).toBe(mine);
+
+    const forced = cli(
+      root,
+      "init",
+      "--yes",
+      "--force",
+      "--runtime",
+      "global",
+      "--adapter",
+      "claude",
+    );
+    expect(forced.status).toBe(0);
+    // the original is preserved as a backup, and the generated file is in place
+    expect(readFileSync(join(root, ".claude/skills/sddx-run/SKILL.md.bak"), "utf8")).toBe(mine);
+    expect(readFileSync(join(root, ".claude/skills/sddx-run/SKILL.md"), "utf8")).not.toBe(mine);
   });
 });

@@ -9795,6 +9795,25 @@ function approvalGate(event) {
   }
 }
 
+// src/lib/runtime.ts
+var LOCAL_EXEC = {
+  npm: ["npm", "exec", "--offline", "--no", "--", "sddx"],
+  bun: ["bunx", "--no-install", "sddx"]
+};
+function sddxInvocation(scope, pm) {
+  return scope === "global" ? ["sddx"] : [...LOCAL_EXEC[pm]];
+}
+function sddxCommand(scope, pm) {
+  return sddxInvocation(scope, pm).join(" ");
+}
+var ALL_INVOCATION_PREFIXES = [
+  ["sddx"],
+  ...Object.values(LOCAL_EXEC)
+];
+function isSddxInvocation(words) {
+  return ALL_INVOCATION_PREFIXES.some((prefix) => words.length >= prefix.length && prefix.every((word, i) => words[i] === word));
+}
+
 // src/lib/bashgate.ts
 var BASH_ALLOW_BASE = [
   "bun",
@@ -9907,6 +9926,8 @@ function checkBashCommand(command, extraAllow) {
       continue;
     const cmd = commandBasename(words[0]);
     if (cmd === "sddx-run" || cmd === "sddx")
+      continue;
+    if (isSddxInvocation(words.map((w) => commandBasename(w))))
       continue;
     if (cmd === "git") {
       const sub = words.slice(1).find((w) => !w.startsWith("-"));

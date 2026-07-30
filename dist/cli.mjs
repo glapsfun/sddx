@@ -12009,7 +12009,18 @@ function readManifest(root, adapter) {
     return null;
   try {
     const parsed = JSON.parse(raw);
-    return typeof parsed === "object" && parsed !== null ? parsed : null;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+      return null;
+    const m = parsed;
+    const record = (v) => typeof v === "object" && v !== null && !Array.isArray(v) ? v : {};
+    return {
+      schema_version: typeof m.schema_version === "string" ? m.schema_version : "",
+      adapter: typeof m.adapter === "string" ? m.adapter : adapter,
+      sddx_version: typeof m.sddx_version === "string" ? m.sddx_version : "",
+      invocation: typeof m.invocation === "string" ? m.invocation : "",
+      files: record(m.files),
+      merged: record(m.merged)
+    };
   } catch {
     return null;
   }
@@ -12034,7 +12045,12 @@ function disposeFile(root, file, manifest) {
 }
 function disposeMerge(root, target, manifest) {
   const current = readIfPresent(join10(root, target.path));
-  const merged = target.merge(current);
+  let merged;
+  try {
+    merged = target.merge(current);
+  } catch (e) {
+    return { kind: "conflict", path: target.path, reason: e.message };
+  }
   if (current === null)
     return { kind: "create", path: target.path, contents: merged };
   if (current === merged)
@@ -12053,11 +12069,35 @@ function disposeMerge(root, target, manifest) {
     reason: "sddx's entries in this file were modified after they were generated"
   };
 }
+function disposeRetired(root, adapter, ctx, manifest) {
+  if (manifest === null)
+    return [];
+  const current = new Set(adapter.generate(ctx).map((f) => f.path));
+  const out = [];
+  for (const [path, recordedHash] of Object.entries(manifest.files)) {
+    if (current.has(path))
+      continue;
+    const onDisk = readIfPresent(join10(root, path));
+    if (onDisk === null)
+      continue;
+    if (hash(onDisk) !== recordedHash) {
+      out.push({
+        kind: "conflict",
+        path,
+        reason: "sddx no longer generates this file, and it was modified after sddx wrote it"
+      });
+      continue;
+    }
+    out.push({ kind: "remove", path });
+  }
+  return out;
+}
 function planAdapter(root, adapter, ctx) {
   const manifest = readManifest(root, adapter.name);
   const dispositions = [
     ...adapter.generate(ctx).map((f) => disposeFile(root, f, manifest)),
-    ...adapter.mergeTargets(ctx).map((t) => disposeMerge(root, t, manifest))
+    ...adapter.mergeTargets(ctx).map((t) => disposeMerge(root, t, manifest)),
+    ...disposeRetired(root, adapter, ctx, manifest)
   ];
   const conflicts = dispositions.filter((d) => d.kind === "conflict").map(({ path, reason }) => ({ path, reason }));
   return { adapter: adapter.name, dispositions, conflicts };
@@ -12092,6 +12132,7 @@ function applyAdapter(root, adapter, ctx, opts = {}) {
     throw new AdapterConflictError(plan.conflicts);
   const written = [];
   const backedUp = [];
+  const removed = [];
   const files = adapter.generate(ctx);
   const targets = adapter.mergeTargets(ctx);
   const byPath = new Map(plan.dispositions.map((d) => [d.path, d]));
@@ -12113,15 +12154,30 @@ function applyAdapter(root, adapter, ctx, opts = {}) {
       continue;
     const abs = join10(root, target.path);
     const current = readIfPresent(abs);
-    if (d?.kind === "conflict" && current !== null) {
+    const conflicting = d?.kind === "conflict";
+    if (conflicting && current !== null) {
       writeFile(root, `${target.path}.bak`, current);
       backedUp.push(`${target.path}.bak`);
     }
-    writeFile(root, target.path, target.merge(current));
+    let contents;
+    try {
+      contents = target.merge(current);
+    } catch {
+      if (!conflicting)
+        throw new AdapterConflictError([{ path: target.path, reason: "unmergeable" }]);
+      contents = target.merge(null);
+    }
+    writeFile(root, target.path, contents);
     written.push(target.path);
   }
+  for (const d of plan.dispositions) {
+    if (d.kind !== "remove")
+      continue;
+    rmSync3(join10(root, d.path), { force: true });
+    removed.push(d.path);
+  }
   writeManifest(root, adapter, ctx);
-  return { written, backedUp };
+  return { written, backedUp, removed };
 }
 function writeManifest(root, adapter, ctx) {
   const files = {};
@@ -12152,18 +12208,19 @@ function uninstallAdapter(root, adapter, ctx) {
   const removed = [];
   const keptModified = [];
   const expected = new Map(adapter.generate(ctx).map((f) => [f.path, hash(f.contents)]));
-  for (const file of adapter.generate(ctx)) {
-    const abs = join10(root, file.path);
+  const owned = new Set([...expected.keys(), ...Object.keys(manifest?.files ?? {})]);
+  for (const path of owned) {
+    const abs = join10(root, path);
     const current = readIfPresent(abs);
     if (current === null)
       continue;
-    const recorded = manifest?.files[file.path] ?? expected.get(file.path);
+    const recorded = manifest?.files[path] ?? expected.get(path);
     if (recorded !== hash(current)) {
-      keptModified.push(file.path);
+      keptModified.push(path);
       continue;
     }
     rmSync3(abs, { force: true });
-    removed.push(file.path);
+    removed.push(path);
   }
   for (const target of adapter.mergeTargets(ctx)) {
     const abs = join10(root, target.path);
@@ -12197,11 +12254,12 @@ function uninstallAdapter(root, adapter, ctx) {
 // src/lib/adapters/claude.ts
 import { readdirSync as readdirSync7, readFileSync as readFileSync10, statSync as statSync2 } from "node:fs";
 import { join as join11 } from "node:path";
+import { fileURLToPath } from "node:url";
 var INVOCATION_PLACEHOLDER = "{{SDDX}}";
 function templateRoot() {
   const candidates = ["../../../templates/claude", "../templates/claude"];
   for (const rel of candidates) {
-    const dir = new URL(`${rel}/`, import.meta.url).pathname;
+    const dir = fileURLToPath(new URL(`${rel}/`, import.meta.url));
     try {
       if (statSync2(dir).isDirectory())
         return dir;
@@ -12239,19 +12297,45 @@ function generate(ctx) {
   }
   return files.sort((a, b) => a.path.localeCompare(b.path));
 }
-var OWNED_MARKER = "sddx";
-var isSddxEntry = (entry) => Array.isArray(entry.hooks) && entry.hooks.some((h) => typeof h?.command === "string" && h.command.includes(OWNED_MARKER));
+var HOOK_EVENTS = [
+  "session-start",
+  "tdd-gate",
+  "bash-gate",
+  "approval-gate",
+  "record-test",
+  "stop-gate"
+];
+var SDDX_HOOK_COMMAND = new RegExp(`(?:^|[\\s"'/])(?:sddx|hooks\\.mjs)["']?\\s+(?:hook\\s+)?(?:${HOOK_EVENTS.join("|")})\\s*$`);
+var isSddxCommand = (command) => typeof command === "string" && SDDX_HOOK_COMMAND.test(command.trim());
+var isSddxEntry = (entry) => Array.isArray(entry.hooks) && entry.hooks.length > 0 && entry.hooks.every((h) => isSddxCommand(h?.command));
 function templateHooks(ctx) {
   const raw = readFileSync10(join11(templateRoot(), "hooks", "hooks.json"), "utf8");
   const parsed = JSON.parse(substitute(raw, ctx));
   return parsed.hooks;
 }
+
+class SettingsUnreadableError extends Error {
+  constructor(reason) {
+    super(`${CLAUDE_DIR}/settings.json ${reason} — refusing to overwrite it`);
+    this.name = "SettingsUnreadableError";
+  }
+}
+function detectIndent(source) {
+  const m = /\n(\x20+)"/.exec(source);
+  return m ? m[1].length : 2;
+}
 function mergeSettings(existing, ctx) {
   let doc = {};
-  if (existing !== null && existing.trim() !== "") {
-    const parsed = JSON.parse(existing);
+  const source = existing ?? "";
+  if (source.trim() !== "") {
+    let parsed;
+    try {
+      parsed = JSON.parse(source);
+    } catch (e) {
+      throw new SettingsUnreadableError(`is not valid JSON (${e.message})`);
+    }
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      throw new Error(`${CLAUDE_DIR}/settings.json is not a JSON object — refusing to overwrite it`);
+      throw new SettingsUnreadableError("is not a JSON object");
     }
     doc = parsed;
   }
@@ -12264,20 +12348,29 @@ function mergeSettings(existing, ctx) {
   for (const [event, entries] of Object.entries(hooks)) {
     if (event in ours)
       continue;
-    const theirs = entries.filter((e) => !isSddxEntry(e));
+    const theirs = (entries ?? []).filter((e) => !isSddxEntry(e));
     if (theirs.length === 0)
       delete hooks[event];
     else
       hooks[event] = theirs;
   }
-  return `${JSON.stringify(sortKeys({ ...doc, hooks }), null, 2)}
+  return `${JSON.stringify({ ...doc, hooks }, null, detectIndent(source))}
 `;
 }
 function unmergeSettings(existing) {
-  const doc = JSON.parse(existing);
+  let doc;
+  try {
+    const parsed = JSON.parse(existing);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return existing;
+    }
+    doc = parsed;
+  } catch {
+    return existing;
+  }
   const hooks = { ...doc.hooks ?? {} };
   for (const [event, entries] of Object.entries(hooks)) {
-    const theirs = entries.filter((e) => !isSddxEntry(e));
+    const theirs = (entries ?? []).filter((e) => !isSddxEntry(e));
     if (theirs.length === 0)
       delete hooks[event];
     else
@@ -12288,7 +12381,7 @@ function unmergeSettings(existing) {
     delete next.hooks;
   else
     next.hooks = hooks;
-  return `${JSON.stringify(sortKeys(next), null, 2)}
+  return `${JSON.stringify(next, null, detectIndent(existing))}
 `;
 }
 function settingsFingerprint(existing) {
@@ -12348,6 +12441,13 @@ function sddxInvocation(scope, pm) {
 }
 function sddxCommand(scope, pm) {
   return sddxInvocation(scope, pm).join(" ");
+}
+var ALL_INVOCATION_PREFIXES = [
+  ["sddx"],
+  ...Object.values(LOCAL_EXEC)
+];
+function isSddxInvocation(words) {
+  return ALL_INVOCATION_PREFIXES.some((prefix) => words.length >= prefix.length && prefix.every((word, i) => words[i] === word));
 }
 
 // src/lib/doctor.ts
@@ -13255,6 +13355,8 @@ function checkBashCommand(command, extraAllow) {
     const cmd = commandBasename(words[0]);
     if (cmd === "sddx-run" || cmd === "sddx")
       continue;
+    if (isSddxInvocation(words.map((w) => commandBasename(w))))
+      continue;
     if (cmd === "git") {
       const sub = words.slice(1).find((w) => !w.startsWith("-"));
       if (sub === undefined || !GIT_READ_SUBCOMMANDS.includes(sub)) {
@@ -13639,22 +13741,37 @@ function gitignoreBlock() {
 }
 function withGitignoreBlock(existing) {
   const block = gitignoreBlock();
-  const begin = existing.indexOf(GITIGNORE_BEGIN);
-  if (begin !== -1) {
-    const endMarker = existing.indexOf(GITIGNORE_END, begin);
-    if (endMarker !== -1) {
-      const end = endMarker + GITIGNORE_END.length;
-      return existing.slice(0, begin) + block + existing.slice(end);
-    }
-  }
-  const needsNewline = existing !== "" && !existing.endsWith(`
-`);
-  const separator = existing === "" ? "" : needsNewline ? `
+  const stripped = stripGitignoreBlocks(existing).replace(/\s*$/, "");
+  return stripped === "" ? `${block}
+` : `${stripped}
 
-` : `
+${block}
 `;
-  return `${existing}${separator}${block}
-`;
+}
+function stripGitignoreBlocks(existing) {
+  let out = "";
+  let rest = existing;
+  while (true) {
+    const begin = rest.indexOf(GITIGNORE_BEGIN);
+    if (begin === -1)
+      break;
+    const afterBegin = begin + GITIGNORE_BEGIN.length;
+    const endMarker = rest.indexOf(GITIGNORE_END, afterBegin);
+    const nextBegin = rest.indexOf(GITIGNORE_BEGIN, afterBegin);
+    const wellFormed = endMarker !== -1 && (nextBegin === -1 || nextBegin > endMarker);
+    if (!wellFormed) {
+      out += rest.slice(0, afterBegin);
+      rest = rest.slice(afterBegin);
+      continue;
+    }
+    let end = endMarker + GITIGNORE_END.length;
+    if (rest[end] === `
+`)
+      end += 1;
+    out += rest.slice(0, begin);
+    rest = rest.slice(end);
+  }
+  return out + rest;
 }
 function configContents(opts) {
   return {
@@ -13733,6 +13850,19 @@ class InitRollback {
       undo: () => writeFileSync10(absPath, previous)
     });
   }
+  capture(absPath, rel) {
+    if (existsSync16(absPath)) {
+      let previous;
+      try {
+        previous = readFileSync16(absPath, "utf8");
+      } catch {
+        return;
+      }
+      this.modifiedFile(absPath, rel, previous);
+    } else {
+      this.createdFile(absPath, rel);
+    }
+  }
   createdDir(absPath, rel) {
     this.steps.push({
       describe: `remove ${rel}/`,
@@ -13794,7 +13924,7 @@ function applyInit(plan, opts = {}) {
   }
   if (opts.runAdapters) {
     try {
-      written.push(...opts.runAdapters(plan));
+      written.push(...opts.runAdapters(plan, (rel) => rollback.capture(join18(plan.root, rel), rel)));
     } catch (e) {
       return fail2(`adapter installation failed: ${e.message}`);
     }
@@ -14946,7 +15076,8 @@ function verifyTask(cwd, id, opts) {
 // src/cli.ts
 var USAGE = `usage:
   sddx init [--runtime <global|project>] [--package-manager <npm|bun>]
-            [--adapter <name>]... [--interaction-mode <human|auto>] [--yes] [--dry-run]
+            [--adapter <name>]... [--interaction-mode <human|auto>]
+            [--yes] [--dry-run] [--force]
   sddx doctor
   sddx sync --adapter <name> [--yes] [--force]
   sddx uninstall --adapter <name>
@@ -16017,6 +16148,7 @@ async function cmdInit(cwd, args, format, noColor) {
   currentCommand = "init";
   const dryRun = args.includes("--dry-run");
   const assumeYes = args.includes("--yes");
+  const force = args.includes("--force");
   const interactive = isInteractive() && !assumeYes && format === "terminal";
   const runtimeScope = choice(args, RUNTIME_CHOICE);
   const packageManager = choice(args, PM_CHOICE);
@@ -16088,17 +16220,24 @@ async function cmdInit(cwd, args, format, noColor) {
   }
   try {
     const result = applyInit(plan, {
-      runAdapters: (applied) => {
+      runAdapters: (applied, record) => {
         const written = [];
         for (const name of opts.adapters) {
           const adapter = ADAPTERS[name];
           const ctx = adapterContext(applied.root);
+          record(declarationPath(name));
+          record(manifestPath(name));
+          for (const d of planAdapter(applied.root, adapter, ctx).dispositions) {
+            if (d.kind !== "unchanged")
+              record(d.path);
+          }
           writeDeclaration(applied.root, name, {
             schema_version: ADAPTER_SCHEMA_VERSION,
             adapter: name
           });
           written.push(declarationPath(name));
-          written.push(...applyAdapter(applied.root, adapter, ctx).written);
+          const result2 = applyAdapter(applied.root, adapter, ctx, { force });
+          written.push(...result2.written);
         }
         return written;
       }

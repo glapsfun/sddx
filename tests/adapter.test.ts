@@ -16,6 +16,7 @@ import {
   uninstallAdapter,
 } from "../src/lib/adapter";
 import { claudeAdapter, INVOCATION_PLACEHOLDER } from "../src/lib/adapters/claude";
+import { sha256 } from "../src/lib/receipt";
 import { sddxCommand } from "../src/lib/runtime";
 import { fixtureRepo } from "./fixtures";
 import { repoRoot } from "./helpers";
@@ -447,5 +448,225 @@ describe("determinism across machines", () => {
       expect(listing).not.toContain(".mjs");
       expect(listing).not.toContain("sddx-run");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Regressions from the high-effort review. Each of these lost user data,
+// crashed a diagnostic command, or stranded files before it was fixed.
+// ---------------------------------------------------------------------------
+
+describe("hook ownership is matched precisely", () => {
+  test('a user hook whose command merely contains "sddx" is not claimed', () => {
+    // The original test was `command.includes("sddx")`, which silently deleted
+    // any user hook living under a path containing the word.
+    const root = fixtureRepo();
+    write(
+      root,
+      ".claude/settings.json",
+      `${JSON.stringify(
+        {
+          hooks: {
+            PreToolUse: [
+              { matcher: "Bash", hooks: [{ command: "/Users/me/dev/sddx-tools/audit.sh" }] },
+            ],
+            Notification: [{ hooks: [{ command: "notify-send 'sddx run finished'" }] }],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    applyAdapter(root, claudeAdapter, ctx());
+    const after = JSON.parse(read(root, ".claude/settings.json")) as {
+      hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+    };
+    const commands = Object.values(after.hooks)
+      .flat()
+      .flatMap((e) => e.hooks.map((h) => h.command));
+
+    expect(commands).toContain("/Users/me/dev/sddx-tools/audit.sh");
+    expect(commands).toContain("notify-send 'sddx run finished'");
+    expect(after.hooks.Notification).toBeDefined();
+  });
+
+  test("uninstall leaves those same user hooks in place", () => {
+    const root = fixtureRepo();
+    write(
+      root,
+      ".claude/settings.json",
+      `${JSON.stringify(
+        { hooks: { Notification: [{ hooks: [{ command: "echo sddx done" }] }] } },
+        null,
+        2,
+      )}\n`,
+    );
+    applyAdapter(root, claudeAdapter, ctx());
+    uninstallAdapter(root, claudeAdapter, ctx());
+
+    const after = JSON.parse(read(root, ".claude/settings.json")) as {
+      hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+    };
+    const commands = Object.values(after.hooks ?? {})
+      .flat()
+      .flatMap((e) => e.hooks.map((h) => h.command));
+    expect(commands).toEqual(["echo sddx done"]);
+  });
+
+  test("an entry mixing a user command with ours belongs to the user", () => {
+    const root = fixtureRepo();
+    write(
+      root,
+      ".claude/settings.json",
+      `${JSON.stringify(
+        {
+          hooks: {
+            PreToolUse: [
+              {
+                matcher: "Bash",
+                hooks: [{ command: "my-linter" }, { command: "sddx hook bash-gate" }],
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    applyAdapter(root, claudeAdapter, ctx());
+    expect(read(root, ".claude/settings.json")).toContain("my-linter");
+  });
+
+  test("plugin-era registrations are still recognized, so migration replaces them", () => {
+    const root = fixtureRepo();
+    const legacy = `"\${CLAUDE_PLUGIN_ROOT}/bin/sddx-run" "\${CLAUDE_PLUGIN_ROOT}/dist/hooks.mjs" tdd-gate`;
+    write(
+      root,
+      ".claude/settings.json",
+      `${JSON.stringify({ hooks: { PreToolUse: [{ hooks: [{ command: legacy }] }] } }, null, 2)}\n`,
+    );
+    applyAdapter(root, claudeAdapter, ctx());
+    const after = read(root, ".claude/settings.json");
+    expect(after).not.toContain("CLAUDE_PLUGIN_ROOT");
+    expect(after).toContain("sddx hook tdd-gate");
+  });
+});
+
+describe("the merge does not restyle the user's file", () => {
+  test("key order and indentation are preserved", () => {
+    const root = fixtureRepo();
+    const original = [
+      "{",
+      '    "permissions": {',
+      '        "allow": [',
+      '            "Bash(ls:*)"',
+      "        ]",
+      "    },",
+      '    "model": "opus"',
+      "}",
+      "",
+    ].join("\n");
+    write(root, ".claude/settings.json", original);
+
+    applyAdapter(root, claudeAdapter, ctx());
+    const after = read(root, ".claude/settings.json");
+
+    // 4-space indentation survives...
+    expect(after).toContain('\n    "permissions"');
+    // ...and permissions still precedes model, rather than being alphabetized
+    expect(after.indexOf('"permissions"')).toBeLessThan(after.indexOf('"model"'));
+  });
+});
+
+describe("a damaged settings file is a conflict, not a crash", () => {
+  test("planAdapter reports it instead of throwing", () => {
+    const root = fixtureRepo();
+    write(root, ".claude/settings.json", "oops not json\n");
+    const plan = planAdapter(root, claudeAdapter, ctx());
+    expect(planHasConflicts(plan)).toBe(true);
+    expect(plan.conflicts[0]!.path).toBe(".claude/settings.json");
+  });
+
+  test("apply refuses and leaves the file untouched", () => {
+    const root = fixtureRepo();
+    write(root, ".claude/settings.json", "oops not json\n");
+    expect(() => applyAdapter(root, claudeAdapter, ctx())).toThrow(AdapterConflictError);
+    expect(read(root, ".claude/settings.json")).toBe("oops not json\n");
+  });
+
+  test("--force backs the unreadable file up and starts fresh", () => {
+    const root = fixtureRepo();
+    write(root, ".claude/settings.json", "oops not json\n");
+    const result = applyAdapter(root, claudeAdapter, ctx(), { force: true });
+    expect(result.backedUp).toContain(".claude/settings.json.bak");
+    expect(read(root, ".claude/settings.json.bak")).toBe("oops not json\n");
+    expect(read(root, ".claude/settings.json")).toContain("sddx hook tdd-gate");
+  });
+});
+
+describe("a damaged ownership manifest degrades rather than crashing", () => {
+  test("a manifest missing files/merged does not crash any command", () => {
+    const { root, ctx: c } = installed();
+    write(root, manifestPath("claude"), '{"schema_version":"1.0","adapter":"claude"}\n');
+    write(root, ".claude/agents/sddx-planner.md", "# drifted\n");
+
+    expect(() => planAdapter(root, claudeAdapter, c)).not.toThrow();
+    expect(() => uninstallAdapter(root, claudeAdapter, c)).not.toThrow();
+  });
+
+  test("unparseable manifest JSON reads as no manifest", () => {
+    const { root, ctx: c } = installed();
+    write(root, manifestPath("claude"), "{ truncated");
+    expect(readManifest(root, "claude")).toBeNull();
+    expect(() => planAdapter(root, claudeAdapter, c)).not.toThrow();
+  });
+});
+
+describe("files a previous version generated are pruned", () => {
+  test("sync removes a retired asset and doctor stops calling it healthy", () => {
+    const { root, ctx: c } = installed();
+    // Simulate an older version having generated a since-retired skill.
+    const retired = ".claude/skills/sddx-quick/SKILL.md";
+    const contents = "# retired skill\n";
+    write(root, retired, contents);
+    const manifest = JSON.parse(read(root, manifestPath("claude")));
+    manifest.files[retired] = sha256(contents);
+    write(root, manifestPath("claude"), `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const plan = planAdapter(root, claudeAdapter, c);
+    expect(plan.dispositions.some((d) => d.kind === "remove" && d.path === retired)).toBe(true);
+
+    const result = applyAdapter(root, claudeAdapter, c);
+    expect(result.removed).toContain(retired);
+    expect(existsSync(join(root, retired))).toBe(false);
+  });
+
+  test("uninstall removes a retired asset too", () => {
+    const { root, ctx: c } = installed();
+    const retired = ".claude/skills/sddx-quick/SKILL.md";
+    const contents = "# retired skill\n";
+    write(root, retired, contents);
+    const manifest = JSON.parse(read(root, manifestPath("claude")));
+    manifest.files[retired] = sha256(contents);
+    write(root, manifestPath("claude"), `${JSON.stringify(manifest, null, 2)}\n`);
+
+    const result = uninstallAdapter(root, claudeAdapter, c);
+    expect(result.removed).toContain(retired);
+    expect(existsSync(join(root, retired))).toBe(false);
+  });
+
+  test("a retired asset the user edited is kept, not silently deleted", () => {
+    const { root, ctx: c } = installed();
+    const retired = ".claude/skills/sddx-quick/SKILL.md";
+    write(root, retired, "# I edited this\n");
+    const manifest = JSON.parse(read(root, manifestPath("claude")));
+    manifest.files[retired] = sha256("# the original\n");
+    write(root, manifestPath("claude"), `${JSON.stringify(manifest, null, 2)}\n`);
+
+    expect(planHasConflicts(planAdapter(root, claudeAdapter, c))).toBe(true);
+    const result = uninstallAdapter(root, claudeAdapter, c);
+    expect(result.keptModified).toContain(retired);
+    expect(existsSync(join(root, retired))).toBe(true);
   });
 });

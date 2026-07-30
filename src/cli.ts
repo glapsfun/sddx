@@ -9,6 +9,7 @@ import {
   type AdapterContext,
   applyAdapter,
   declarationPath,
+  manifestPath,
   planAdapter,
   planHasConflicts,
   uninstallAdapter,
@@ -119,7 +120,8 @@ import {
 
 const USAGE = `usage:
   sddx init [--runtime <global|project>] [--package-manager <npm|bun>]
-            [--adapter <name>]... [--interaction-mode <human|auto>] [--yes] [--dry-run]
+            [--adapter <name>]... [--interaction-mode <human|auto>]
+            [--yes] [--dry-run] [--force]
   sddx doctor
   sddx sync --adapter <name> [--yes] [--force]
   sddx uninstall --adapter <name>
@@ -1635,6 +1637,10 @@ async function cmdInit(
   currentCommand = "init";
   const dryRun = args.includes("--dry-run");
   const assumeYes = args.includes("--yes");
+  // Advertised by AdapterConflictError's remediation, so it has to actually
+  // work: without parsing it here, the one documented escape hatch from an
+  // adapter collision was a silent no-op.
+  const force = args.includes("--force");
   // Prompting requires a real terminal on BOTH ends and no --yes. Anything
   // else — a pipe, CI, a subprocess — must be deterministic or fail, never
   // block: a command waiting on input it can never receive is a hang.
@@ -1732,17 +1738,28 @@ async function cmdInit(
     const result = applyInit(plan, {
       // Adapters run after the local files (so `.sddx/config.json` — the policy
       // generation reads — already exists) and before the package manager.
-      runAdapters: (applied) => {
+      runAdapters: (applied, record) => {
         const written: string[] = [];
         for (const name of opts.adapters) {
           const adapter = ADAPTERS[name] as Adapter;
           const ctx = adapterContext(applied.root);
+
+          // Register every path the adapter is about to touch BEFORE it does,
+          // so a later package-manager failure can undo the whole install
+          // rather than stranding a wired-up harness in a rolled-back repo.
+          record(declarationPath(name));
+          record(manifestPath(name));
+          for (const d of planAdapter(applied.root, adapter, ctx).dispositions) {
+            if (d.kind !== "unchanged") record(d.path);
+          }
+
           writeDeclaration(applied.root, name, {
             schema_version: ADAPTER_SCHEMA_VERSION,
             adapter: name,
           });
           written.push(declarationPath(name));
-          written.push(...applyAdapter(applied.root, adapter, ctx).written);
+          const result = applyAdapter(applied.root, adapter, ctx, { force });
+          written.push(...result.written);
         }
         return written;
       },

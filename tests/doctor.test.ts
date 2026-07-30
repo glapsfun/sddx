@@ -318,3 +318,48 @@ describe("generated files must reach teammates", () => {
     expect(byId(checks(initialized()).checks, "adapter:claude:tracked")).toBeUndefined();
   });
 });
+
+/**
+ * Regressions from the high-effort review. doctor is documented as read-only
+ * and degrading to a reportable state; these are the inputs that used to make
+ * it throw a bare parse error and print no checks at all — the one command a
+ * user reaches for when their setup is already broken.
+ */
+describe("doctor survives damaged inputs", () => {
+  test("a malformed .claude/settings.json is reported, not thrown", () => {
+    const root = initialized();
+    write(root, ".claude/settings.json", "oops not json\n");
+
+    const { checks: list } = checks(root);
+    expect(list.length).toBeGreaterThan(0);
+    const adapter = byId(list, "adapter:claude")!;
+    expect(adapter.status).toBe("fail");
+    expect(adapter.detail).toContain("settings.json");
+    expect(adapter.fix).toBeTruthy();
+  });
+
+  test("a settings file holding a JSON array is reported, not thrown", () => {
+    const root = initialized();
+    write(root, ".claude/settings.json", "[1, 2, 3]\n");
+    expect(byId(checks(root).checks, "adapter:claude")!.status).toBe("fail");
+  });
+
+  test("an ownership manifest missing its files key does not crash any command", () => {
+    const root = initialized();
+    write(root, ".sddx/local/adapters/claude-install.json", '{"schema_version":"1.0"}\n');
+    write(root, ".claude/agents/sddx-planner.md", "# drifted\n");
+
+    const { checks: list } = checks(root);
+    expect(list.length).toBeGreaterThan(0);
+    expect(cli(root, "sync", "--adapter", "claude").status).not.toBe(-1);
+    expect(cli(root, "uninstall", "--adapter", "claude").status).toBe(0);
+  });
+
+  test("a truncated manifest does not crash uninstall", () => {
+    const root = initialized();
+    write(root, ".sddx/local/adapters/claude-install.json", "{ truncated");
+    const r = cli(root, "uninstall", "--adapter", "claude");
+    expect(r.status).toBe(0);
+    expect(r.stderr).not.toContain("is not an object");
+  });
+});

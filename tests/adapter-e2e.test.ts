@@ -9,7 +9,16 @@
 // actually execute, so a wrong invocation cannot pass.
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { verifyChain } from "../src/lib/receipt";
 import { fixtureClone } from "./fixtures";
@@ -273,5 +282,47 @@ describe("no plugin anywhere", () => {
     const settings = readFileSync(join(root, ".claude/settings.json"), "utf8");
     expect(settings).not.toContain("CLAUDE_PLUGIN_ROOT");
     expect(settings).not.toContain("dist/hooks.mjs");
+  });
+});
+
+/**
+ * Regression from the high-effort review: templateRoot used `URL.pathname`,
+ * which is percent-encoded, so any install path containing a space resolved to
+ * a directory that does not exist and the user was told to reinstall.
+ */
+describe("install paths containing a space", () => {
+  test("the built bundle finds its templates and initializes a repository", () => {
+    const base = mkdtempSync(join(tmpdir(), "sddx-space "));
+    const home = join(base, "a dir with spaces");
+    mkdirSync(home, { recursive: true });
+    cpSync(join(repoRoot, "dist"), join(home, "dist"), { recursive: true });
+    cpSync(join(repoRoot, "templates"), join(home, "templates"), { recursive: true });
+
+    const probe = join(base, "probe");
+    mkdirSync(probe, { recursive: true });
+    for (const args of [
+      ["init", "-q", "-b", "main", "."],
+      ["config", "user.email", "t@e.invalid"],
+      ["config", "user.name", "t"],
+    ]) {
+      spawnSync("git", args, { cwd: probe, encoding: "utf8" });
+    }
+
+    const r = spawnSync(
+      "bun",
+      [
+        join(home, "dist", "cli.mjs"),
+        "init",
+        "--yes",
+        "--runtime",
+        "global",
+        "--adapter",
+        "claude",
+      ],
+      { cwd: probe, encoding: "utf8" },
+    );
+    expect(`${r.stdout}${r.stderr}`).not.toContain("templates not found");
+    expect(r.status).toBe(0);
+    expect(existsSync(join(probe, ".claude/skills/sddx-run/SKILL.md"))).toBe(true);
   });
 });

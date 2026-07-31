@@ -1,21 +1,18 @@
 #!/bin/sh
-# sddx launcher: prefer bun, fall back to node (>=18). No other runtimes.
+# sddx launcher: Bun only. There is deliberately no fallback runtime.
+#
+# Receipts record which runtime executed an oracle, and that claim only means
+# something if the supported set is small and enforced. A second runtime would
+# double the tested matrix and let a receipt be produced that a Bun-only
+# maintainer cannot reproduce.
 if [ "$#" -lt 1 ]; then
   echo "usage: sddx-run <script> [args...]" >&2
   exit 64
 fi
-if command -v bun >/dev/null 2>&1; then
-  exec bun "$@"
-fi
-if command -v node >/dev/null 2>&1; then
-  version=$(node --version) # vMAJOR.MINOR.PATCH — parsed in-shell, no extra process
-  version=${version#v}
-  major=${version%%.*}
-  if [ "$major" -ge 18 ] 2>/dev/null; then
-    exec node "$@"
-  fi
-  echo "sddx: node >= 18 required (found $(node --version))" >&2
+if ! command -v bun >/dev/null 2>&1; then
+  echo "sddx: bun is required and was not found on PATH." >&2
+  echo "sddx: install it with: curl -fsSL https://bun.sh/install | bash" >&2
+  echo "sddx: other install methods: https://bun.sh/docs/installation" >&2
   exit 1
 fi
-echo "sddx: neither bun nor node found on PATH" >&2
-exit 1
+exec bun "$@"

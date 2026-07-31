@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   autoMaxTasks,
   boardEnabled,
+  CONFIG_KEYS,
+  CONFIG_SCHEMA_VERSION,
   gateInteractionMode,
   interactionMode,
+  KNOWN_CONFIG_KEYS,
   oracleRuns,
   parseAgentModel,
   resolveConfig,
@@ -14,6 +17,7 @@ import {
   validateConfigObject,
 } from "../src/lib/config";
 import { fixtureRepo } from "./fixtures";
+import { repoRoot } from "./helpers";
 
 function withConfig(cwd: string, config: Record<string, unknown>): void {
   mkdirSync(join(cwd, ".sddx"), { recursive: true });
@@ -257,5 +261,86 @@ describe("interaction_mode (renamed from execution_mode)", () => {
       resolveConfig(cwd, { SDDX_INTERACTION_MODE: "auto", SDDX_EXECUTION_MODE: "auto" })
         .interaction_mode,
     ).toBe("human");
+  });
+});
+
+describe("CLI-owned config schema", () => {
+  test("every recognized key comes from the CLI schema, not a plugin manifest", () => {
+    // The schema used to live in .claude-plugin/plugin.json#userConfig, where a
+    // harness prompted for it at enable time. Nothing may read a manifest to
+    // learn what a key is.
+    const keys = CONFIG_KEYS.map((k) => k.key);
+    expect(new Set(keys)).toEqual(new Set(KNOWN_CONFIG_KEYS));
+    for (const spec of CONFIG_KEYS) {
+      expect(spec.title.length).toBeGreaterThan(0);
+      expect(spec.description.length).toBeGreaterThan(0);
+    }
+    // No manifest path is read to learn what a key is. (The doc comment may
+    // still *mention* the retired userConfig block — explaining the history is
+    // the point; reading the file is what must not happen.)
+    const configSource = readFileSync(join(repoRoot, "src/lib/config.ts"), "utf8");
+    expect(configSource).not.toContain(".claude-plugin");
+    expect(configSource).not.toContain("plugin.json");
+  });
+
+  test("bootstrap policy keys resolve to their defaults when absent", () => {
+    const cwd = fixtureRepo();
+    const cfg = resolveConfig(cwd);
+    expect(cfg.runtime_scope).toBe("global");
+    expect(cfg.package_manager).toBe("npm");
+    expect(cfg.adapters).toEqual([]);
+    expect(cfg.schema_version).toBeNull();
+  });
+
+  test("bootstrap policy keys resolve from the config file", () => {
+    const cwd = fixtureRepo();
+    withConfig(cwd, {
+      schema_version: CONFIG_SCHEMA_VERSION,
+      runtime_scope: "project",
+      package_manager: "bun",
+      adapters: ["claude"],
+    });
+    const cfg = resolveConfig(cwd);
+    expect(cfg.runtime_scope).toBe("project");
+    expect(cfg.package_manager).toBe("bun");
+    expect(cfg.adapters).toEqual(["claude"]);
+    expect(cfg.schema_version).toBe(CONFIG_SCHEMA_VERSION);
+  });
+
+  test("an environment variable cannot change the runtime scope", () => {
+    // Same threat model as interaction_mode: an env var is composable by the
+    // agent, and this key decides which sddx a generated adapter invokes.
+    const cwd = fixtureRepo();
+    withConfig(cwd, { runtime_scope: "project" });
+    expect(resolveConfig(cwd, { SDDX_RUNTIME_SCOPE: "global" }).runtime_scope).toBe("project");
+  });
+
+  test("an invalid bootstrap value falls back rather than throwing", () => {
+    const cwd = fixtureRepo();
+    withConfig(cwd, { runtime_scope: "nonsense", package_manager: "pnpm" });
+    const cfg = resolveConfig(cwd);
+    expect(cfg.runtime_scope).toBe("global");
+    expect(cfg.package_manager).toBe("npm");
+    // ...and validate names both, so the user is told why they were ignored
+    const warnings = validateConfigObject({ runtime_scope: "nonsense", package_manager: "pnpm" });
+    expect(warnings.some((w) => w.includes("runtime_scope"))).toBe(true);
+    expect(warnings.some((w) => w.includes("package_manager"))).toBe(true);
+  });
+
+  test("a stale schema_version is reported, never silently upgraded", () => {
+    const cwd = fixtureRepo();
+    withConfig(cwd, { schema_version: "0.9" });
+    const before = readFileSync(join(cwd, ".sddx", "config.json"), "utf8");
+
+    const warnings = validateConfigObject({ schema_version: "0.9" });
+    expect(warnings.some((w) => w.includes("0.9") && w.includes("sddx init"))).toBe(true);
+
+    // reading it changed nothing on disk
+    resolveConfig(cwd);
+    expect(readFileSync(join(cwd, ".sddx", "config.json"), "utf8")).toBe(before);
+  });
+
+  test("a current schema_version produces no warning", () => {
+    expect(validateConfigObject({ schema_version: CONFIG_SCHEMA_VERSION })).toEqual([]);
   });
 });

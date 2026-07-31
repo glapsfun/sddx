@@ -21,7 +21,7 @@
     "oracle"
   ],
   "engines": {
-    "node": ">=18"
+    "bun": ">=1.0.0"
   },
   "bin": {
     "sddx": "bin/sddx"
@@ -30,7 +30,7 @@
     "dist/cli.mjs",
     "bin/sddx",
     "bin/sddx-run",
-    ".claude-plugin/plugin.json",
+    "templates/",
     "README.md",
     "LICENSE"
   ],
@@ -45,6 +45,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.4",
+    "@clack/prompts": "^1.7.0",
     "@types/bun": "^1.3.12",
     "typescript": "^5.9.2",
     "yaml": "^2.9.0"

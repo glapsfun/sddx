@@ -9,14 +9,14 @@ import { repoRoot } from "./helpers";
 /** Minimal plugin root with one skill and one agent carrying the given descriptions. */
 function fixturePlugin(skillDesc: string, agentDesc: string): string {
   const root = mkdtempSync(join(tmpdir(), "sddx-budget-"));
-  mkdirSync(join(root, "skills", "demo"), { recursive: true });
-  mkdirSync(join(root, "agents"), { recursive: true });
+  mkdirSync(join(root, "templates", "claude", "skills", "demo"), { recursive: true });
+  mkdirSync(join(root, "templates", "claude", "agents"), { recursive: true });
   writeFileSync(
-    join(root, "skills", "demo", "SKILL.md"),
+    join(root, "templates", "claude", "skills", "demo", "SKILL.md"),
     `---\nname: demo\ndescription: ${skillDesc}\n---\n\nBody text is lazy-loaded and must not count.\n`,
   );
   writeFileSync(
-    join(root, "agents", "helper.md"),
+    join(root, "templates", "claude", "agents", "helper.md"),
     `---\nname: helper\ndescription: ${agentDesc}\n---\n\nAgent body, also not always-on.\n`,
   );
   return root;
@@ -34,8 +34,8 @@ describe("measureAlwaysOn", () => {
     const root = fixturePlugin("short", "short");
     const report = measureAlwaysOn(root);
     expect(report.items.map((i) => i.file).sort()).toEqual([
-      "agents/helper.md",
-      "skills/demo/SKILL.md",
+      "templates/claude/agents/helper.md",
+      "templates/claude/skills/demo/SKILL.md",
     ]);
     // "namedemodescriptionshort" scale, never the multi-line bodies
     for (const item of report.items) expect(item.tokens).toBeLessThan(20);

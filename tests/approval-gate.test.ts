@@ -272,7 +272,9 @@ describe("dispatcher wiring", () => {
 });
 
 describe("hook registration", () => {
-  const manifest = JSON.parse(readFileSync(join(repoRoot, "hooks/hooks.json"), "utf8")) as {
+  const manifest = JSON.parse(
+    readFileSync(join(repoRoot, "templates/claude/hooks/hooks.json"), "utf8"),
+  ) as {
     hooks: Record<string, Array<{ matcher?: string; hooks: Array<{ command: string }> }>>;
   };
 
@@ -283,7 +285,10 @@ describe("hook registration", () => {
     const gate = entries.find((e) => e.command.includes("approval-gate"));
     expect(gate).toBeDefined();
     expect(gate?.matcher).toBe("Bash");
-    expect(gate?.command).toContain("${CLAUDE_PLUGIN_ROOT}");
+    // The template carries the invocation placeholder, not a plugin root: the
+    // adapter substitutes the project's resolved sddx command at install time.
+    expect(gate?.command).toContain("{{SDDX}}");
+    expect(gate?.command).not.toContain("CLAUDE_PLUGIN_ROOT");
   });
 
   test("the approval gate is NOT on SessionStart or any other hot path", () => {

@@ -101,7 +101,7 @@ describe("verifyTask writes the current receipt version", () => {
     expect(receipt.version).toBe(4);
     expect(receipt.runs).toHaveLength(1);
     expect(receipt.runs![0]!.exit_code).toBe(0);
-    expect(receipt.env!.runtime === "bun" || receipt.env!.runtime === "node").toBe(true);
+    expect(receipt.env!.runtime).toBe("bun");
     expect(receipt.env!.runtime_version.length).toBeGreaterThan(0);
     expect(receipt.env!.dirty_tree).toBe(true); // impl.txt was uncommitted when the oracle ran
     expect(receipt.exit_code).toBeUndefined();

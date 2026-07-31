@@ -10,8 +10,12 @@ export function captureEnv(cwd: string): ReceiptEnv {
   return {
     os: platform(),
     arch: arch(),
-    runtime: bun ? "bun" : "node",
-    runtime_version: bun ? bun.version : process.versions.node,
+    // The launcher refuses to start without Bun, so the absent-Bun branch is
+    // unreachable in a supported install. It records `unknown` rather than
+    // naming whatever else is executing, because a receipt must not read as
+    // evidence that a second runtime is supported.
+    runtime: bun ? "bun" : "unknown",
+    runtime_version: bun ? bun.version : "unknown",
     dirty_tree: status.status === 0 && (status.stdout ?? "").trim() !== "",
   };
 }

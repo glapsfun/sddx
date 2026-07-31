@@ -1,7 +1,7 @@
 # CLI reference
 
-`sddx` is `bin/sddx-run dist/cli.mjs`, run from the plugin root: a bun-or-node
-launcher executing a dependency-free bundle. Run it from the root of the
+`sddx` is `bin/sddx-run dist/cli.mjs`: a Bun-required launcher executing a
+dependency-free bundle. Run it from the root of the
 repository you're working in — all paths (`.sddx/`, worktrees) resolve against
 the current directory.
 
@@ -369,7 +369,7 @@ currently-merged subset, not the full goal).
 
 This is a deliberately separate, explicitly-invoked command — `/sddx:run`
 never calls it automatically, the same way it never merges into the
-*original target branch* automatically. See [/sddx:pr](../../skills/pr/SKILL.md).
+*original target branch* automatically. See [/sddx:pr](../../templates/claude/skills/pr/SKILL.md).
 
 On GitLab this opens a **merge request** (`glab mr create`) — sddx calls the
 command and output `pr` uniformly across both hosts since the mechanics (one

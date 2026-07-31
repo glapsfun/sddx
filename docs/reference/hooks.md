@@ -5,7 +5,7 @@ harness enforces, not a request the model can skip. This page documents what
 each hook does, how the gate decides, and the one escape hatch.
 
 All hooks run one dependency-free bundle (`dist/hooks.mjs`) through the
-bun-or-node launcher, with a 10-second timeout.
+Bun-required launcher, with a 10-second timeout.
 
 ## The hooks
 

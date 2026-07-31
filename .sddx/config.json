@@ -1,0 +1,9 @@
+{
+  "schema_version": "1.0",
+  "interaction_mode": "human",
+  "runtime_scope": "global",
+  "package_manager": "npm",
+  "adapters": [
+    "claude"
+  ]
+}

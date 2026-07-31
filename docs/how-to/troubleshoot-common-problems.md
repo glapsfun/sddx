@@ -59,12 +59,13 @@ proof is truly gone, re-run `sddx verify` for that task.
 
 - the session started outside a git repository (there is no `.sddx/` to
   bootstrap);
-- the plugin isn't actually enabled (check `claude plugin list`);
-- you're on a **skills-only install** — copied `skills/` directories load the
-  workflows, but hooks (the TDD gate, recorder, stop gate) only ship with the
-  full plugin. See [install-sddx.md](install-sddx.md#skills-only-mode).
+- the repository was never initialized (`sddx init --adapter claude`);
+- the adapter's entries are missing from `.claude/settings.json`, or a
+  generated file drifted — `sddx doctor` reports both;
+- the repository gitignores `.claude/`, so the hooks exist on the machine that
+  ran `init` and nowhere else. `sddx doctor` warns about this specifically.
 
-**Fix:** run inside a git repo with the full plugin installed; verify per
+**Fix:** run `sddx doctor` and follow the remediation it prints; verify per
 [install-sddx.md](install-sddx.md#verifying-the-install).
 
 ## A run is refused because worktrees are unavailable

@@ -247,7 +247,7 @@ export const renderBlocker = (b: Blocker): string =>
  * edits the thing enforcing the plan always meets a human, in either mode. */
 export const SELF_MODIFYING_GLOBS = [
   "hooks/**",
-  ".claude-plugin/**",
+  "templates/**",
   ".github/workflows/**",
   // The gates users actually run are the COMPILED artifacts, not the sources:
   // hooks.json invokes `${CLAUDE_PLUGIN_ROOT}/bin/sddx-run ${CLAUDE_PLUGIN_ROOT}/dist/hooks.mjs`.

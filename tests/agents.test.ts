@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { parseAgentModel } from "../src/lib/config";
 import { repoRoot } from "./helpers";
 
-const AGENTS_DIR = join(repoRoot, "agents");
+const AGENTS_DIR = join(repoRoot, "templates", "claude", "agents");
 const ROLES = ["intake", "orchestrator", "planner", "tdd-executor", "verifier"];
 
 /** Frontmatter of an agent definition, as Claude Code reads it. */
@@ -108,7 +108,10 @@ describe("agent_model roles", () => {
 });
 
 describe("the run skill's intake round", () => {
-  const skill = readFileSync(join(repoRoot, "skills", "run", "SKILL.md"), "utf8");
+  const skill = readFileSync(
+    join(repoRoot, "templates", "claude", "skills", "run", "SKILL.md"),
+    "utf8",
+  );
 
   test("dispatches intake before the orchestrator", () => {
     expect(skill.indexOf("`intake` agent")).toBeGreaterThan(-1);
@@ -179,7 +182,10 @@ describe("intake in auto mode", () => {
 });
 
 describe("the plan skill's plan-only behavior", () => {
-  const skill = readFileSync(join(repoRoot, "skills", "plan", "SKILL.md"), "utf8");
+  const skill = readFileSync(
+    join(repoRoot, "templates", "claude", "skills", "plan", "SKILL.md"),
+    "utf8",
+  );
 
   test("human may approve for a later run without creating anything", () => {
     expect(skill).toContain("graph approve --graph <path>` records a token");

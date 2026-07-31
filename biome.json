@@ -38,7 +38,7 @@
       }
     },
     {
-      "includes": [".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"],
+      "includes": ["templates/claude/hooks/hooks.json"],
       "formatter": {
         "enabled": false
       }

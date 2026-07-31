@@ -1,5 +1,49 @@
 import { createRequire } from "node:module";
+var __create = Object.create;
+var __getProtoOf = Object.getPrototypeOf;
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __hasOwnProp = Object.prototype.hasOwnProperty;
+function __accessProp(key) {
+  return this[key];
+}
+var __toESMCache_node;
+var __toESMCache_esm;
+var __toESM = (mod, isNodeMode, target) => {
+  var canCache = mod != null && typeof mod === "object";
+  if (canCache) {
+    var cache = isNodeMode ? __toESMCache_node ??= new WeakMap : __toESMCache_esm ??= new WeakMap;
+    var cached = cache.get(mod);
+    if (cached)
+      return cached;
+  }
+  target = mod != null ? __create(__getProtoOf(mod)) : {};
+  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
+  for (let key of __getOwnPropNames(mod))
+    if (!__hasOwnProp.call(to, key))
+      __defProp(to, key, {
+        get: __accessProp.bind(mod, key),
+        enumerable: true
+      });
+  if (canCache)
+    cache.set(mod, to);
+  return to;
+};
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
+var __returnValue = (v) => v;
+function __exportSetter(name, newValue) {
+  this[name] = __returnValue.bind(null, newValue);
+}
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, {
+      get: all[name],
+      enumerable: true,
+      configurable: true,
+      set: __exportSetter.bind(all, name)
+    });
+};
+var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
 // node_modules/yaml/dist/nodes/identity.js
@@ -6943,9 +6987,2583 @@ var require_public_api = __commonJS((exports) => {
   exports.stringify = stringify;
 });
 
+// node_modules/fast-string-truncated-width/dist/utils.js
+var getCodePointsLength, isFullWidth = (x) => {
+  return x === 12288 || x >= 65281 && x <= 65376 || x >= 65504 && x <= 65510;
+}, isWideNotCJKTNotEmoji = (x) => {
+  return x === 8987 || x === 9001 || x >= 12272 && x <= 12287 || x >= 12289 && x <= 12350 || x >= 12441 && x <= 12543 || x >= 12549 && x <= 12591 || x >= 12593 && x <= 12686 || x >= 12688 && x <= 12771 || x >= 12783 && x <= 12830 || x >= 12832 && x <= 12871 || x >= 12880 && x <= 19903 || x >= 65040 && x <= 65049 || x >= 65072 && x <= 65106 || x >= 65108 && x <= 65126 || x >= 65128 && x <= 65131 || x >= 127488 && x <= 127490 || x >= 127504 && x <= 127547 || x >= 127552 && x <= 127560 || x >= 131072 && x <= 196605 || x >= 196608 && x <= 262141;
+};
+var init_utils = __esm(() => {
+  getCodePointsLength = (() => {
+    const SURROGATE_PAIR_RE = /[\uD800-\uDBFF][\uDC00-\uDFFF]/g;
+    return (input) => {
+      let surrogatePairsNr = 0;
+      SURROGATE_PAIR_RE.lastIndex = 0;
+      while (SURROGATE_PAIR_RE.test(input)) {
+        surrogatePairsNr += 1;
+      }
+      return input.length - surrogatePairsNr;
+    };
+  })();
+});
+
+// node_modules/fast-string-truncated-width/dist/index.js
+var ANSI_RE, CONTROL_RE, CJKT_WIDE_RE, TAB_RE, EMOJI_RE, LATIN_RE, MODIFIER_RE, NO_TRUNCATION, getStringTruncatedWidth = (input, truncationOptions = {}, widthOptions = {}) => {
+  const LIMIT = truncationOptions.limit ?? Infinity;
+  const ELLIPSIS = truncationOptions.ellipsis ?? "";
+  const ELLIPSIS_WIDTH = truncationOptions?.ellipsisWidth ?? (ELLIPSIS ? getStringTruncatedWidth(ELLIPSIS, NO_TRUNCATION, widthOptions).width : 0);
+  const ANSI_WIDTH = 0;
+  const CONTROL_WIDTH = widthOptions.controlWidth ?? 0;
+  const TAB_WIDTH = widthOptions.tabWidth ?? 8;
+  const EMOJI_WIDTH = widthOptions.emojiWidth ?? 2;
+  const FULL_WIDTH_WIDTH = 2;
+  const REGULAR_WIDTH = widthOptions.regularWidth ?? 1;
+  const WIDE_WIDTH = widthOptions.wideWidth ?? FULL_WIDTH_WIDTH;
+  const PARSE_BLOCKS = [
+    [LATIN_RE, REGULAR_WIDTH],
+    [ANSI_RE, ANSI_WIDTH],
+    [CONTROL_RE, CONTROL_WIDTH],
+    [TAB_RE, TAB_WIDTH],
+    [EMOJI_RE, EMOJI_WIDTH],
+    [CJKT_WIDE_RE, WIDE_WIDTH]
+  ];
+  let indexPrev = 0;
+  let index = 0;
+  let length = input.length;
+  let lengthExtra = 0;
+  let truncationEnabled = false;
+  let truncationIndex = length;
+  let truncationLimit = Math.max(0, LIMIT - ELLIPSIS_WIDTH);
+  let unmatchedStart = 0;
+  let unmatchedEnd = 0;
+  let width = 0;
+  let widthExtra = 0;
+  outer:
+    while (true) {
+      if (unmatchedEnd > unmatchedStart || index >= length && index > indexPrev) {
+        const unmatched = input.slice(unmatchedStart, unmatchedEnd) || input.slice(indexPrev, index);
+        lengthExtra = 0;
+        for (const char of unmatched.replaceAll(MODIFIER_RE, "")) {
+          const codePoint = char.codePointAt(0) || 0;
+          if (isFullWidth(codePoint)) {
+            widthExtra = FULL_WIDTH_WIDTH;
+          } else if (isWideNotCJKTNotEmoji(codePoint)) {
+            widthExtra = WIDE_WIDTH;
+          } else {
+            widthExtra = REGULAR_WIDTH;
+          }
+          if (width + widthExtra > truncationLimit) {
+            truncationIndex = Math.min(truncationIndex, Math.max(unmatchedStart, indexPrev) + lengthExtra);
+          }
+          if (width + widthExtra > LIMIT) {
+            truncationEnabled = true;
+            break outer;
+          }
+          lengthExtra += char.length;
+          width += widthExtra;
+        }
+        unmatchedStart = unmatchedEnd = 0;
+      }
+      if (index >= length) {
+        break outer;
+      }
+      for (let i = 0, l = PARSE_BLOCKS.length;i < l; i++) {
+        const [BLOCK_RE, BLOCK_WIDTH] = PARSE_BLOCKS[i];
+        BLOCK_RE.lastIndex = index;
+        if (BLOCK_RE.test(input)) {
+          lengthExtra = BLOCK_RE === CJKT_WIDE_RE ? getCodePointsLength(input.slice(index, BLOCK_RE.lastIndex)) : BLOCK_RE === EMOJI_RE ? 1 : BLOCK_RE.lastIndex - index;
+          widthExtra = lengthExtra * BLOCK_WIDTH;
+          if (width + widthExtra > truncationLimit) {
+            truncationIndex = Math.min(truncationIndex, index + Math.floor((truncationLimit - width) / BLOCK_WIDTH));
+          }
+          if (width + widthExtra > LIMIT) {
+            truncationEnabled = true;
+            break outer;
+          }
+          width += widthExtra;
+          unmatchedStart = indexPrev;
+          unmatchedEnd = index;
+          index = indexPrev = BLOCK_RE.lastIndex;
+          continue outer;
+        }
+      }
+      index += 1;
+    }
+  return {
+    width: truncationEnabled ? truncationLimit : width,
+    index: truncationEnabled ? truncationIndex : length,
+    truncated: truncationEnabled,
+    ellipsed: truncationEnabled && LIMIT >= ELLIPSIS_WIDTH
+  };
+}, dist_default;
+var init_dist = __esm(() => {
+  init_utils();
+  ANSI_RE = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]|\u001b\]8;[^;]*;.*?(?:\u0007|\u001b\u005c)/y;
+  CONTROL_RE = /[\x00-\x08\x0A-\x1F\x7F-\x9F]{1,1000}/y;
+  CJKT_WIDE_RE = /(?:(?![\uFF61-\uFF9F\uFF00-\uFFEF])[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Tangut}]){1,1000}/yu;
+  TAB_RE = /\t{1,1000}/y;
+  EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}]{2}|\u{1F3F4}[\u{E0061}-\u{E007A}]{2}[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]{1,3}\u{E007F}|(?:\p{Emoji}\uFE0F\u20E3?|\p{Emoji_Modifier_Base}\p{Emoji_Modifier}?|\p{Emoji_Presentation})(?:\u200D(?:\p{Emoji_Modifier_Base}\p{Emoji_Modifier}?|\p{Emoji_Presentation}|\p{Emoji}\uFE0F\u20E3?))*/yu;
+  LATIN_RE = /(?:[\x20-\x7E\xA0-\xFF](?!\uFE0F)){1,1000}/y;
+  MODIFIER_RE = /\p{M}+/gu;
+  NO_TRUNCATION = { limit: Infinity, ellipsis: "" };
+  dist_default = getStringTruncatedWidth;
+});
+
+// node_modules/fast-string-width/dist/index.js
+var NO_TRUNCATION2, fastStringWidth = (input, options = {}) => {
+  return dist_default(input, NO_TRUNCATION2, options).width;
+}, dist_default2;
+var init_dist2 = __esm(() => {
+  init_dist();
+  NO_TRUNCATION2 = {
+    limit: Infinity,
+    ellipsis: "",
+    ellipsisWidth: 0
+  };
+  dist_default2 = fastStringWidth;
+});
+
+// node_modules/fast-wrap-ansi/lib/main.js
+function wrapAnsi(string, columns, options) {
+  return String(string).normalize().split(CRLF_OR_LF).map((line) => exec(line, columns, options)).join(`
+`);
+}
+var ESC = "\x1B", CSI = "", END_CODE = 39, ANSI_ESCAPE_BELL = "\x07", ANSI_CSI = "[", ANSI_OSC = "]", ANSI_SGR_TERMINATOR = "m", ANSI_ESCAPE_LINK, GROUP_REGEX, getClosingCode = (openingCode) => {
+  if (openingCode >= 30 && openingCode <= 37)
+    return 39;
+  if (openingCode >= 90 && openingCode <= 97)
+    return 39;
+  if (openingCode >= 40 && openingCode <= 47)
+    return 49;
+  if (openingCode >= 100 && openingCode <= 107)
+    return 49;
+  if (openingCode === 1 || openingCode === 2)
+    return 22;
+  if (openingCode === 3)
+    return 23;
+  if (openingCode === 4)
+    return 24;
+  if (openingCode === 7)
+    return 27;
+  if (openingCode === 8)
+    return 28;
+  if (openingCode === 9)
+    return 29;
+  if (openingCode === 0)
+    return 0;
+  return;
+}, wrapAnsiCode = (code) => `${ESC}${ANSI_CSI}${code}${ANSI_SGR_TERMINATOR}`, wrapAnsiHyperlink = (url) => `${ESC}${ANSI_ESCAPE_LINK}${url}${ANSI_ESCAPE_BELL}`, wrapWord = (rows, word, columns) => {
+  const characters = word[Symbol.iterator]();
+  let isInsideEscape = false;
+  let isInsideLinkEscape = false;
+  let lastRow = rows.at(-1);
+  let visible = lastRow === undefined ? 0 : dist_default2(lastRow);
+  let currentCharacter = characters.next();
+  let nextCharacter = characters.next();
+  let rawCharacterIndex = 0;
+  while (!currentCharacter.done) {
+    const character = currentCharacter.value;
+    const characterLength = dist_default2(character);
+    if (visible + characterLength <= columns) {
+      rows[rows.length - 1] += character;
+    } else {
+      rows.push(character);
+      visible = 0;
+    }
+    if (character === ESC || character === CSI) {
+      isInsideEscape = true;
+      isInsideLinkEscape = word.startsWith(ANSI_ESCAPE_LINK, rawCharacterIndex + 1);
+    }
+    if (isInsideEscape) {
+      if (isInsideLinkEscape) {
+        if (character === ANSI_ESCAPE_BELL) {
+          isInsideEscape = false;
+          isInsideLinkEscape = false;
+        }
+      } else if (character === ANSI_SGR_TERMINATOR) {
+        isInsideEscape = false;
+      }
+    } else {
+      visible += characterLength;
+      if (visible === columns && !nextCharacter.done) {
+        rows.push("");
+        visible = 0;
+      }
+    }
+    currentCharacter = nextCharacter;
+    nextCharacter = characters.next();
+    rawCharacterIndex += character.length;
+  }
+  lastRow = rows.at(-1);
+  if (!visible && lastRow !== undefined && lastRow.length && rows.length > 1) {
+    rows[rows.length - 2] += rows.pop();
+  }
+}, stringVisibleTrimSpacesRight = (string) => {
+  const words = string.split(" ");
+  let last = words.length;
+  while (last) {
+    if (dist_default2(words[last - 1])) {
+      break;
+    }
+    last--;
+  }
+  if (last === words.length) {
+    return string;
+  }
+  return words.slice(0, last).join(" ") + words.slice(last).join("");
+}, exec = (string, columns, options = {}) => {
+  if (options.trim !== false && string.trim() === "") {
+    return "";
+  }
+  let returnValue = "";
+  let escapeCode;
+  let escapeUrl;
+  const words = string.split(" ");
+  let rows = [""];
+  let rowLength = 0;
+  for (let index = 0;index < words.length; index++) {
+    const word = words[index];
+    if (options.trim !== false) {
+      const row = rows.at(-1) ?? "";
+      const trimmed = row.trimStart();
+      if (row.length !== trimmed.length) {
+        rows[rows.length - 1] = trimmed;
+        rowLength = dist_default2(trimmed);
+      }
+    }
+    if (index !== 0) {
+      if (rowLength >= columns && (options.wordWrap === false || options.trim === false)) {
+        rows.push("");
+        rowLength = 0;
+      }
+      if (rowLength || options.trim === false) {
+        rows[rows.length - 1] += " ";
+        rowLength++;
+      }
+    }
+    const wordLength = dist_default2(word);
+    if (options.hard && wordLength > columns) {
+      const remainingColumns = columns - rowLength;
+      const breaksStartingThisLine = 1 + Math.floor((wordLength - remainingColumns - 1) / columns);
+      const breaksStartingNextLine = Math.floor((wordLength - 1) / columns);
+      if (breaksStartingNextLine < breaksStartingThisLine) {
+        rows.push("");
+      }
+      wrapWord(rows, word, columns);
+      rowLength = dist_default2(rows.at(-1) ?? "");
+      continue;
+    }
+    if (rowLength + wordLength > columns && rowLength && wordLength) {
+      if (options.wordWrap === false && rowLength < columns) {
+        wrapWord(rows, word, columns);
+        rowLength = dist_default2(rows.at(-1) ?? "");
+        continue;
+      }
+      rows.push("");
+      rowLength = 0;
+    }
+    if (rowLength + wordLength > columns && options.wordWrap === false) {
+      wrapWord(rows, word, columns);
+      rowLength = dist_default2(rows.at(-1) ?? "");
+      continue;
+    }
+    rows[rows.length - 1] += word;
+    rowLength += wordLength;
+  }
+  if (options.trim !== false) {
+    rows = rows.map((row) => stringVisibleTrimSpacesRight(row));
+  }
+  const preString = rows.join(`
+`);
+  let inSurrogate = false;
+  for (let i = 0;i < preString.length; i++) {
+    const character = preString[i];
+    returnValue += character;
+    if (!inSurrogate) {
+      inSurrogate = character >= "\uD800" && character <= "\uDBFF";
+      if (inSurrogate) {
+        continue;
+      }
+    } else {
+      inSurrogate = false;
+    }
+    if (character === ESC || character === CSI) {
+      GROUP_REGEX.lastIndex = i + 1;
+      const groupsResult = GROUP_REGEX.exec(preString);
+      const groups = groupsResult?.groups;
+      if (groups?.code !== undefined) {
+        const code = Number.parseFloat(groups.code);
+        escapeCode = code === END_CODE ? undefined : code;
+      } else if (groups?.uri !== undefined) {
+        escapeUrl = groups.uri.length === 0 ? undefined : groups.uri;
+      }
+    }
+    if (preString[i + 1] === `
+`) {
+      if (escapeUrl) {
+        returnValue += wrapAnsiHyperlink("");
+      }
+      const closingCode = escapeCode ? getClosingCode(escapeCode) : undefined;
+      if (escapeCode && closingCode) {
+        returnValue += wrapAnsiCode(closingCode);
+      }
+    } else if (character === `
+`) {
+      if (escapeCode && getClosingCode(escapeCode)) {
+        returnValue += wrapAnsiCode(escapeCode);
+      }
+      if (escapeUrl) {
+        returnValue += wrapAnsiHyperlink(escapeUrl);
+      }
+    }
+  }
+  return returnValue;
+}, CRLF_OR_LF;
+var init_main = __esm(() => {
+  init_dist2();
+  ANSI_ESCAPE_LINK = `${ANSI_OSC}8;;`;
+  GROUP_REGEX = new RegExp(`(?:\\${ANSI_CSI}(?<code>\\d+)m|\\${ANSI_ESCAPE_LINK}(?<uri>.*)${ANSI_ESCAPE_BELL})`, "y");
+  CRLF_OR_LF = /\r?\n/;
+});
+
+// node_modules/sisteransi/src/index.js
+var require_src = __commonJS((exports, module) => {
+  var ESC2 = "\x1B";
+  var CSI2 = `${ESC2}[`;
+  var beep = "\x07";
+  var cursor = {
+    to(x, y) {
+      if (!y)
+        return `${CSI2}${x + 1}G`;
+      return `${CSI2}${y + 1};${x + 1}H`;
+    },
+    move(x, y) {
+      let ret = "";
+      if (x < 0)
+        ret += `${CSI2}${-x}D`;
+      else if (x > 0)
+        ret += `${CSI2}${x}C`;
+      if (y < 0)
+        ret += `${CSI2}${-y}A`;
+      else if (y > 0)
+        ret += `${CSI2}${y}B`;
+      return ret;
+    },
+    up: (count = 1) => `${CSI2}${count}A`,
+    down: (count = 1) => `${CSI2}${count}B`,
+    forward: (count = 1) => `${CSI2}${count}C`,
+    backward: (count = 1) => `${CSI2}${count}D`,
+    nextLine: (count = 1) => `${CSI2}E`.repeat(count),
+    prevLine: (count = 1) => `${CSI2}F`.repeat(count),
+    left: `${CSI2}G`,
+    hide: `${CSI2}?25l`,
+    show: `${CSI2}?25h`,
+    save: `${ESC2}7`,
+    restore: `${ESC2}8`
+  };
+  var scroll = {
+    up: (count = 1) => `${CSI2}S`.repeat(count),
+    down: (count = 1) => `${CSI2}T`.repeat(count)
+  };
+  var erase = {
+    screen: `${CSI2}2J`,
+    up: (count = 1) => `${CSI2}1J`.repeat(count),
+    down: (count = 1) => `${CSI2}J`.repeat(count),
+    line: `${CSI2}2K`,
+    lineEnd: `${CSI2}K`,
+    lineStart: `${CSI2}1K`,
+    lines(count) {
+      let clear = "";
+      for (let i = 0;i < count; i++)
+        clear += this.line + (i < count - 1 ? cursor.up() : "");
+      if (count)
+        clear += cursor.left;
+      return clear;
+    }
+  };
+  module.exports = { cursor, scroll, erase, beep };
+});
+
+// node_modules/@clack/core/dist/index.mjs
+import { styleText } from "node:util";
+import { stdout, stdin } from "node:process";
+import * as l from "node:readline";
+import l__default from "node:readline";
+import { ReadStream } from "node:tty";
+function findCursor(s, o, l2) {
+  if (!l2.some((r) => !r.disabled))
+    return s;
+  const t = s + o, n = Math.max(l2.length - 1, 0), e = t < 0 ? n : t > n ? 0 : t;
+  return l2[e]?.disabled ? findCursor(e, o < 0 ? -1 : 1, l2) : e;
+}
+function findTextCursor(s, o, l2, i) {
+  const t = i.split(`
+`);
+  let n = 0, e = s;
+  for (const r of t) {
+    if (e <= r.length)
+      break;
+    e -= r.length + 1, n++;
+  }
+  for (n = Math.max(0, Math.min(t.length - 1, n + l2)), e = Math.min(e, t[n].length) + o;e < 0 && n > 0; )
+    n--, e += t[n].length + 1;
+  for (;e > t[n].length && n < t.length - 1; )
+    e -= t[n].length + 1, n++;
+  e = Math.max(0, Math.min(t[n].length, e));
+  let h = 0;
+  for (let r = 0;r < n; r++)
+    h += t[r].length + 1;
+  return h + e;
+}
+function updateSettings(n) {
+  if (n.aliases !== undefined) {
+    const e = n.aliases;
+    for (const s in e) {
+      if (!Object.hasOwn(e, s))
+        continue;
+      const i = e[s];
+      i === undefined || !settings.actions.has(i) || settings.aliases.has(s) || settings.aliases.set(s, i);
+    }
+  }
+  if (n.messages !== undefined) {
+    const e = n.messages;
+    e.cancel !== undefined && (settings.messages.cancel = e.cancel), e.error !== undefined && (settings.messages.error = e.error);
+  }
+  if (n.withGuide !== undefined && (settings.withGuide = n.withGuide !== false), n.date !== undefined) {
+    const e = n.date;
+    e.monthNames !== undefined && (settings.date.monthNames = [...e.monthNames]), e.messages !== undefined && (e.messages.required !== undefined && (settings.date.messages.required = e.messages.required), e.messages.invalidMonth !== undefined && (settings.date.messages.invalidMonth = e.messages.invalidMonth), e.messages.invalidDay !== undefined && (settings.date.messages.invalidDay = e.messages.invalidDay), e.messages.afterMin !== undefined && (settings.date.messages.afterMin = e.messages.afterMin), e.messages.beforeMax !== undefined && (settings.date.messages.beforeMax = e.messages.beforeMax));
+  }
+}
+function isActionKey(n, e) {
+  if (typeof n == "string")
+    return settings.aliases.get(n) === e;
+  for (const s of n)
+    if (s !== undefined && isActionKey(s, e))
+      return true;
+  return false;
+}
+function diffLines(i, s) {
+  if (i === s)
+    return;
+  const e = i.split(`
+`), t2 = s.split(`
+`), r = Math.max(e.length, t2.length), f = [];
+  for (let n = 0;n < r; n++)
+    e[n] !== t2[n] && f.push(n);
+  return {
+    lines: f,
+    numLinesBefore: e.length,
+    numLinesAfter: t2.length,
+    numLines: r
+  };
+}
+function isCancel(e) {
+  return e === CANCEL_SYMBOL;
+}
+function setRawMode(e, r) {
+  const o = e;
+  o.isTTY && o.setRawMode(r);
+}
+function block({
+  input: e = stdin,
+  output: r = stdout,
+  overwrite: o = true,
+  hideCursor: t2 = true
+} = {}) {
+  const s = l.createInterface({
+    input: e,
+    output: r,
+    prompt: "",
+    tabSize: 1
+  });
+  l.emitKeypressEvents(e, s), e instanceof ReadStream && e.isTTY && e.setRawMode(true);
+  const n = (f, { name: a, sequence: p }) => {
+    const c = String(f);
+    if (isActionKey([c, a, p], "cancel")) {
+      t2 && r.write(import_sisteransi.cursor.show), process.exit(0);
+      return;
+    }
+    if (!o)
+      return;
+    const i = a === "return" ? 0 : -1, m = a === "return" ? -1 : 0;
+    l.moveCursor(r, i, m, () => {
+      l.clearLine(r, 1, () => {
+        e.once("keypress", n);
+      });
+    });
+  };
+  return t2 && r.write(import_sisteransi.cursor.hide), e.once("keypress", n), () => {
+    e.off("keypress", n), t2 && r.write(import_sisteransi.cursor.show), e instanceof ReadStream && e.isTTY && !R && e.setRawMode(false), s.terminal = false, s.close();
+  };
+}
+function wrapTextWithPrefix(e, r, o, t2 = o, s = o, n) {
+  const f = getColumns(e ?? stdout);
+  return wrapAnsi(r, f - o.length, {
+    hard: true,
+    trim: false
+  }).split(`
+`).map((c, i, m) => {
+    const d = n ? n(c, i) : c;
+    return i === 0 ? `${t2}${d}` : i === m.length - 1 ? `${s}${d}` : `${o}${d}`;
+  }).join(`
+`);
+}
+function runValidation(e, n) {
+  if ("~standard" in e) {
+    const a = e["~standard"].validate(n);
+    if (a instanceof Promise)
+      throw new TypeError("Schema validation must be synchronous. Update `validate()` and remove any asynchronous logic.");
+    return a.issues?.at(0)?.message;
+  }
+  return e(n);
+}
+
+class V {
+  input;
+  output;
+  _abortSignal;
+  rl;
+  opts;
+  _render;
+  _track = false;
+  _prevFrame = "";
+  _subscribers = /* @__PURE__ */ new Map;
+  _cursor = 0;
+  state = "initial";
+  error = "";
+  value;
+  userInput = "";
+  constructor(t2, e = true) {
+    const { input: i = stdin, output: n = stdout, render: s, signal: r, ...o } = t2;
+    this.opts = o, this.onKeypress = this.onKeypress.bind(this), this.close = this.close.bind(this), this.render = this.render.bind(this), this._render = s.bind(this), this._track = e, this._abortSignal = r, this.input = i, this.output = n;
+  }
+  unsubscribe() {
+    this._subscribers.clear();
+  }
+  setSubscriber(t2, e) {
+    const i = this._subscribers.get(t2) ?? [];
+    i.push(e), this._subscribers.set(t2, i);
+  }
+  on(t2, e) {
+    this.setSubscriber(t2, { cb: e });
+  }
+  once(t2, e) {
+    this.setSubscriber(t2, { cb: e, once: true });
+  }
+  emit(t2, ...e) {
+    const i = this._subscribers.get(t2) ?? [], n = [];
+    for (const s of i)
+      s.cb(...e), s.once && n.push(() => i.splice(i.indexOf(s), 1));
+    for (const s of n)
+      s();
+  }
+  prompt() {
+    return new Promise((t2) => {
+      if (this._abortSignal) {
+        if (this._abortSignal.aborted)
+          return this.state = "cancel", this.close(), t2(CANCEL_SYMBOL);
+        this._abortSignal.addEventListener("abort", () => {
+          this.state = "cancel", this.close();
+        }, { once: true });
+      }
+      this.rl = l__default.createInterface({
+        input: this.input,
+        tabSize: 2,
+        prompt: "",
+        escapeCodeTimeout: 50,
+        terminal: true
+      }), this.rl.prompt(), this.opts.initialUserInput !== undefined && this._setUserInput(this.opts.initialUserInput, true), this.input.on("keypress", this.onKeypress), setRawMode(this.input, true), this.output.on("resize", this.render), this.render(), this.once("submit", () => {
+        this.output.write(import_sisteransi.cursor.show), this.output.off("resize", this.render), setRawMode(this.input, false), t2(this.value);
+      }), this.once("cancel", () => {
+        this.output.write(import_sisteransi.cursor.show), this.output.off("resize", this.render), setRawMode(this.input, false), t2(CANCEL_SYMBOL);
+      });
+    });
+  }
+  _isActionKey(t2, e) {
+    return t2 === "\t";
+  }
+  _shouldSubmit(t2, e) {
+    return true;
+  }
+  _setValue(t2) {
+    this.value = t2, this.emit("value", this.value);
+  }
+  _setUserInput(t2, e) {
+    this.userInput = t2 ?? "", this.emit("userInput", this.userInput), e && this._track && this.rl && (this.rl.write(this.userInput), this._cursor = this.rl.cursor);
+  }
+  _clearUserInput() {
+    this.rl?.write(null, { ctrl: true, name: "u" }), this._setUserInput("");
+  }
+  onKeypress(t2, e) {
+    if (this._track && e.name !== "return" && (e.name && this._isActionKey(t2, e) && this.rl?.write(null, { ctrl: true, name: "h" }), this._cursor = this.rl?.cursor ?? 0, this._setUserInput(this.rl?.line)), this.state === "error" && (this.state = "active"), e?.name && (!this._track && settings.aliases.has(e.name) && this.emit("cursor", settings.aliases.get(e.name)), settings.actions.has(e.name) && this.emit("cursor", e.name)), t2 && (t2.toLowerCase() === "y" || t2.toLowerCase() === "n") && this.emit("confirm", t2.toLowerCase() === "y"), this.emit("key", t2, e), e?.name === "return" && this._shouldSubmit(t2, e)) {
+      if (this.opts.validate) {
+        const i = runValidation(this.opts.validate, this.value);
+        i && (this.error = i instanceof Error ? i.message : i, this.state = "error", this.rl?.write(this.userInput));
+      }
+      this.state !== "error" && (this.state = "submit");
+    }
+    isActionKey([t2, e?.name, e?.sequence], "cancel") && (this.state = "cancel"), (this.state === "submit" || this.state === "cancel") && this.emit("finalize"), this.render(), (this.state === "submit" || this.state === "cancel") && this.close();
+  }
+  close() {
+    this.input.unpipe(), this.input.removeListener("keypress", this.onKeypress), this.output.write(`
+`), setRawMode(this.input, false), this.rl?.close(), this.rl = undefined, this.emit(`${this.state}`, this.value), this.unsubscribe();
+  }
+  restoreCursor() {
+    const t2 = wrapAnsi(this._prevFrame, process.stdout.columns, { hard: true, trim: false }).split(`
+`).length - 1;
+    this.output.write(import_sisteransi.cursor.move(-999, t2 * -1));
+  }
+  render() {
+    const t2 = wrapAnsi(this._render(this) ?? "", process.stdout.columns, {
+      hard: true,
+      trim: false
+    });
+    if (t2 !== this._prevFrame) {
+      if (this.state === "initial")
+        this.output.write(import_sisteransi.cursor.hide);
+      else {
+        const e = diffLines(this._prevFrame, t2), i = getRows(this.output);
+        if (this.restoreCursor(), e) {
+          const n = Math.max(0, e.numLinesAfter - i), s = Math.max(0, e.numLinesBefore - i);
+          let r = e.lines.find((o) => o >= n);
+          if (r === undefined) {
+            this._prevFrame = t2;
+            return;
+          }
+          if (e.lines.length === 1) {
+            this.output.write(import_sisteransi.cursor.move(0, r - s)), this.output.write(import_sisteransi.erase.lines(1));
+            const o = t2.split(`
+`);
+            this.output.write(o[r]), this._prevFrame = t2, this.output.write(import_sisteransi.cursor.move(0, o.length - r - 1));
+            return;
+          } else if (e.lines.length > 1) {
+            if (n < s)
+              r = n;
+            else {
+              const h = r - s;
+              h > 0 && this.output.write(import_sisteransi.cursor.move(0, h));
+            }
+            this.output.write(import_sisteransi.erase.down());
+            const f = t2.split(`
+`).slice(r);
+            this.output.write(f.join(`
+`)), this._prevFrame = t2;
+            return;
+          }
+        }
+        this.output.write(import_sisteransi.erase.down());
+      }
+      this.output.write(t2), this.state === "initial" && (this.state = "active"), this._prevFrame = t2;
+    }
+  }
+}
+function p$1(l2, e) {
+  if (l2 === undefined || e.length === 0)
+    return 0;
+  const i = e.findIndex((s) => s.value === l2);
+  return i !== -1 ? i : 0;
+}
+function g(l2, e) {
+  return (e.label ?? String(e.value)).toLowerCase().includes(l2.toLowerCase());
+}
+function m(l2, e) {
+  if (e)
+    return l2 ? e : e[0];
+}
+function M(r2) {
+  return [...r2].map((t2) => _[t2]);
+}
+function P(r2) {
+  const i = new Intl.DateTimeFormat(r2, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).formatToParts(new Date(2000, 0, 15)), s = [];
+  let n = "/";
+  for (const e of i)
+    e.type === "literal" ? n = e.value.trim() || e.value : (e.type === "year" || e.type === "month" || e.type === "day") && s.push({ type: e.type, len: e.type === "year" ? 4 : 2 });
+  return { segments: s, separator: n };
+}
+function p(r2) {
+  return Number.parseInt((r2 || "0").replace(/_/g, "0"), 10) || 0;
+}
+function f(r2) {
+  return {
+    year: p(r2.year),
+    month: p(r2.month),
+    day: p(r2.day)
+  };
+}
+function c(r2, t2) {
+  return new Date(r2 || 2001, t2 || 1, 0).getDate();
+}
+function b(r2) {
+  const { year: t2, month: i, day: s } = f(r2);
+  if (!t2 || t2 < 0 || t2 > 9999 || !i || i < 1 || i > 12 || !s || s < 1)
+    return;
+  const n = new Date(Date.UTC(t2, i - 1, s));
+  if (!(n.getUTCFullYear() !== t2 || n.getUTCMonth() !== i - 1 || n.getUTCDate() !== s))
+    return { year: t2, month: i, day: s };
+}
+function C(r2) {
+  const t2 = b(r2);
+  return t2 ? new Date(Date.UTC(t2.year, t2.month - 1, t2.day)) : undefined;
+}
+function T2(r2, t2, i, s) {
+  const n = i ? {
+    year: i.getUTCFullYear(),
+    month: i.getUTCMonth() + 1,
+    day: i.getUTCDate()
+  } : null, e = s ? {
+    year: s.getUTCFullYear(),
+    month: s.getUTCMonth() + 1,
+    day: s.getUTCDate()
+  } : null;
+  return r2 === "year" ? { min: n?.year ?? 1, max: e?.year ?? 9999 } : r2 === "month" ? {
+    min: n && t2.year === n.year ? n.month : 1,
+    max: e && t2.year === e.year ? e.month : 12
+  } : {
+    min: n && t2.year === n.year && t2.month === n.month ? n.day : 1,
+    max: e && t2.year === e.year && t2.month === e.month ? e.day : c(t2.year, t2.month)
+  };
+}
+var import_sisteransi, a$1, t, settings, R, CANCEL_SYMBOL, getColumns = (e) => ("columns" in e) && typeof e.columns == "number" ? e.columns : 80, getRows = (e) => ("rows" in e) && typeof e.rows == "number" ? e.rows : 20, T$1, r, _, U, u$2, o, h, a, u$1, n$1, u3, n2;
+var init_dist3 = __esm(() => {
+  init_main();
+  import_sisteransi = __toESM(require_src(), 1);
+  a$1 = ["up", "down", "left", "right", "space", "enter", "cancel"];
+  t = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December"
+  ];
+  settings = {
+    actions: new Set(a$1),
+    aliases: /* @__PURE__ */ new Map([
+      ["k", "up"],
+      ["j", "down"],
+      ["h", "left"],
+      ["l", "right"],
+      ["\x03", "cancel"],
+      ["escape", "cancel"]
+    ]),
+    messages: {
+      cancel: "Canceled",
+      error: "Something went wrong"
+    },
+    withGuide: true,
+    date: {
+      monthNames: [...t],
+      messages: {
+        required: "Please enter a valid date",
+        invalidMonth: "There are only 12 months in a year",
+        invalidDay: (n, e) => `There are only ${n} days in ${e}`,
+        afterMin: (n) => `Date must be on or after ${n.toISOString().slice(0, 10)}`,
+        beforeMax: (n) => `Date must be on or before ${n.toISOString().slice(0, 10)}`
+      }
+    }
+  };
+  R = globalThis.process.platform.startsWith("win");
+  CANCEL_SYMBOL = Symbol("clack:cancel");
+  T$1 = class T extends V {
+    filteredOptions;
+    multiple;
+    isNavigating = false;
+    selectedValues = [];
+    focusedValue;
+    #e = 0;
+    #s = "";
+    #t;
+    #i;
+    #n;
+    get cursor() {
+      return this.#e;
+    }
+    get userInputWithCursor() {
+      if (!this.userInput)
+        return styleText(["inverse", "hidden"], "_");
+      if (this._cursor >= this.userInput.length)
+        return `${this.userInput}█`;
+      const e = this.userInput.slice(0, this.cursor), t2 = this.userInput.slice(this.cursor, this.cursor + 1), i = this.userInput.slice(this.cursor + 1);
+      return `${e}${styleText("inverse", t2)}${i}`;
+    }
+    get options() {
+      return typeof this.#i == "function" ? this.#i() : this.#i;
+    }
+    constructor(e) {
+      super(e), this.#i = e.options, this.#n = e.placeholder;
+      const t2 = this.options;
+      this.filteredOptions = [...t2], this.multiple = e.multiple === true, this.#t = typeof e.options == "function" ? e.filter : e.filter ?? g;
+      let i;
+      if (e.initialValue && Array.isArray(e.initialValue) ? this.multiple ? i = e.initialValue : i = e.initialValue.slice(0, 1) : !this.multiple && this.options.length > 0 && (i = [this.options[0]?.value]), i)
+        for (const s of i) {
+          const n = t2.findIndex((o) => o.value === s);
+          n !== -1 && (this.toggleSelected(s), this.#e = n);
+        }
+      this.focusedValue = this.options[this.#e]?.value, this.on("key", (s, n) => this.#l(s, n)), this.on("userInput", (s) => this.#u(s));
+    }
+    _isActionKey(e, t2) {
+      return e === "\t" || this.multiple && this.isNavigating && t2.name === "space" && e !== undefined && e !== "";
+    }
+    #l(e, t2) {
+      const i = t2.name === "up", s = t2.name === "down", n = t2.name === "return", o = this.userInput === "" || this.userInput === "\t", u = this.#n, a = this.options, f = u !== undefined && u !== "" && a.some((r) => !r.disabled && (this.#t ? this.#t(u, r) : true));
+      if (t2.name === "tab" && o && f) {
+        this.userInput === "\t" && this._clearUserInput(), this._setUserInput(u, true), this.isNavigating = false;
+        return;
+      }
+      i || s ? (this.#e = findCursor(this.#e, i ? -1 : 1, this.filteredOptions), this.focusedValue = this.filteredOptions[this.#e]?.value, this.multiple || (this.selectedValues = [this.focusedValue]), this.isNavigating = true) : n ? this.value = m(this.multiple, this.selectedValues) : this.multiple ? this.focusedValue !== undefined && (t2.name === "tab" || this.isNavigating && t2.name === "space") ? this.toggleSelected(this.focusedValue) : this.isNavigating = false : (this.focusedValue && (this.selectedValues = [this.focusedValue]), this.isNavigating = false);
+    }
+    deselectAll() {
+      this.selectedValues = [];
+    }
+    toggleSelected(e) {
+      this.filteredOptions.length !== 0 && (this.multiple ? this.selectedValues.includes(e) ? this.selectedValues = this.selectedValues.filter((t2) => t2 !== e) : this.selectedValues = [...this.selectedValues, e] : this.selectedValues = [e]);
+    }
+    #u(e) {
+      if (e !== this.#s) {
+        this.#s = e;
+        const t2 = this.options;
+        e && this.#t ? this.filteredOptions = t2.filter((n) => this.#t?.(e, n)) : this.filteredOptions = [...t2];
+        const i = p$1(this.focusedValue, this.filteredOptions);
+        this.#e = findCursor(i, 0, this.filteredOptions);
+        const s = this.filteredOptions[this.#e];
+        s && !s.disabled ? this.focusedValue = s.value : this.focusedValue = undefined, this.multiple || (this.focusedValue !== undefined ? this.toggleSelected(this.focusedValue) : this.deselectAll());
+      }
+    }
+  };
+  r = class r extends V {
+    get cursor() {
+      return this.value ? 0 : 1;
+    }
+    get _value() {
+      return this.cursor === 0;
+    }
+    constructor(t2) {
+      super(t2, false), this.value = !!t2.initialValue, this.on("userInput", () => {
+        this.value = this._value;
+      }), this.on("confirm", (i) => {
+        this.output.write(import_sisteransi.cursor.move(0, -1)), this.value = i, this.state = "submit", this.close();
+      }), this.on("cursor", () => {
+        this.value = !this.value;
+      });
+    }
+  };
+  _ = {
+    Y: { type: "year", len: 4 },
+    M: { type: "month", len: 2 },
+    D: { type: "day", len: 2 }
+  };
+  U = class U extends V {
+    #i;
+    #o;
+    #t;
+    #h;
+    #u;
+    #e = { segmentIndex: 0, positionInSegment: 0 };
+    #n = true;
+    #s = null;
+    inlineError = "";
+    get segmentCursor() {
+      return { ...this.#e };
+    }
+    get segmentValues() {
+      return { ...this.#t };
+    }
+    get segments() {
+      return this.#i;
+    }
+    get separator() {
+      return this.#o;
+    }
+    get formattedValue() {
+      return this.#l(this.#t);
+    }
+    #l(t2) {
+      return this.#i.map((i) => t2[i.type]).join(this.#o);
+    }
+    #r() {
+      this._setUserInput(this.#l(this.#t)), this._setValue(C(this.#t) ?? undefined);
+    }
+    constructor(t2) {
+      const i = t2.format ? { segments: M(t2.format), separator: t2.separator ?? "/" } : P(t2.locale), s = t2.separator ?? i.separator, n = t2.format ? M(t2.format) : i.segments, e = t2.initialValue ?? t2.defaultValue, m2 = e ? {
+        year: String(e.getUTCFullYear()).padStart(4, "0"),
+        month: String(e.getUTCMonth() + 1).padStart(2, "0"),
+        day: String(e.getUTCDate()).padStart(2, "0")
+      } : { year: "____", month: "__", day: "__" }, o = n.map((a) => m2[a.type]).join(s);
+      super({ ...t2, initialUserInput: o }, false), this.#i = n, this.#o = s, this.#t = m2, this.#h = t2.minDate, this.#u = t2.maxDate, this.#r(), this.on("cursor", (a) => this.#f(a)), this.on("key", (a, u) => this.#y(a, u)), this.on("finalize", () => this.#p(t2));
+    }
+    #a() {
+      const t2 = Math.max(0, Math.min(this.#e.segmentIndex, this.#i.length - 1)), i = this.#i[t2];
+      if (i)
+        return this.#e.positionInSegment = Math.max(0, Math.min(this.#e.positionInSegment, i.len - 1)), { segment: i, index: t2 };
+    }
+    #m(t2) {
+      this.inlineError = "", this.#s = null;
+      const i = this.#a();
+      i && (this.#e.segmentIndex = Math.max(0, Math.min(this.#i.length - 1, i.index + t2)), this.#e.positionInSegment = 0, this.#n = true);
+    }
+    #d(t2) {
+      const i = this.#a();
+      if (!i)
+        return;
+      const { segment: s } = i, n = this.#t[s.type], e = !n || n.replace(/_/g, "") === "", m2 = Number.parseInt((n || "0").replace(/_/g, "0"), 10) || 0, o = T2(s.type, f(this.#t), this.#h, this.#u);
+      let a;
+      e ? a = t2 === 1 ? o.min : o.max : a = Math.max(Math.min(o.max, m2 + t2), o.min), this.#t = {
+        ...this.#t,
+        [s.type]: a.toString().padStart(s.len, "0")
+      }, this.#n = true, this.#s = null, this.#r();
+    }
+    #f(t2) {
+      if (t2)
+        switch (t2) {
+          case "right":
+            return this.#m(1);
+          case "left":
+            return this.#m(-1);
+          case "up":
+            return this.#d(1);
+          case "down":
+            return this.#d(-1);
+        }
+    }
+    #y(t2, i) {
+      if (i?.name === "backspace" || i?.sequence === "" || i?.sequence === "\b" || t2 === "" || t2 === "\b") {
+        this.inlineError = "";
+        const n = this.#a();
+        if (!n)
+          return;
+        if (!this.#t[n.segment.type].replace(/_/g, "")) {
+          this.#m(-1);
+          return;
+        }
+        this.#t[n.segment.type] = "_".repeat(n.segment.len), this.#n = true, this.#e.positionInSegment = 0, this.#r();
+        return;
+      }
+      if (i?.name === "tab") {
+        this.inlineError = "";
+        const n = this.#a();
+        if (!n)
+          return;
+        const e = i.shift ? -1 : 1, m2 = n.index + e;
+        m2 >= 0 && m2 < this.#i.length && (this.#e.segmentIndex = m2, this.#e.positionInSegment = 0, this.#n = true);
+        return;
+      }
+      if (t2 && /^[0-9]$/.test(t2)) {
+        const n = this.#a();
+        if (!n)
+          return;
+        const { segment: e } = n, m2 = !this.#t[e.type].replace(/_/g, "");
+        if (this.#n && this.#s !== null && !m2) {
+          const h = this.#s + t2, d = { ...this.#t, [e.type]: h }, g2 = this.#g(d, e);
+          if (g2) {
+            this.inlineError = g2, this.#s = null, this.#n = false;
+            return;
+          }
+          this.inlineError = "", this.#t[e.type] = h, this.#s = null, this.#n = false, this.#r(), n.index < this.#i.length - 1 && (this.#e.segmentIndex = n.index + 1, this.#e.positionInSegment = 0, this.#n = true);
+          return;
+        }
+        this.#n && !m2 && (this.#t[e.type] = "_".repeat(e.len), this.#e.positionInSegment = 0), this.#n = false, this.#s = null;
+        const o = this.#t[e.type], a = o.indexOf("_"), u = a >= 0 ? a : Math.min(this.#e.positionInSegment, e.len - 1);
+        if (u < 0 || u >= e.len)
+          return;
+        let l2 = o.slice(0, u) + t2 + o.slice(u + 1), D = false;
+        if (u === 0 && o === "__" && (e.type === "month" || e.type === "day")) {
+          const h = Number.parseInt(t2, 10);
+          l2 = `0${t2}`, D = h <= (e.type === "month" ? 1 : 2);
+        }
+        if (e.type === "year" && (l2 = (o.replace(/_/g, "") + t2).padStart(e.len, "_")), !l2.includes("_")) {
+          const h = { ...this.#t, [e.type]: l2 }, d = this.#g(h, e);
+          if (d) {
+            this.inlineError = d;
+            return;
+          }
+        }
+        this.inlineError = "", this.#t[e.type] = l2;
+        const y = l2.includes("_") ? undefined : b(this.#t);
+        if (y) {
+          const { year: h, month: d } = y, g2 = c(h, d);
+          this.#t = {
+            year: String(Math.max(0, Math.min(9999, h))).padStart(4, "0"),
+            month: String(Math.max(1, Math.min(12, d))).padStart(2, "0"),
+            day: String(Math.max(1, Math.min(g2, y.day))).padStart(2, "0")
+          };
+        }
+        this.#r();
+        const S = l2.indexOf("_");
+        D ? (this.#n = true, this.#s = t2) : S >= 0 ? this.#e.positionInSegment = S : a >= 0 && n.index < this.#i.length - 1 ? (this.#e.segmentIndex = n.index + 1, this.#e.positionInSegment = 0, this.#n = true) : this.#e.positionInSegment = Math.min(u + 1, e.len - 1);
+      }
+    }
+    #g(t2, i) {
+      const { month: s, day: n } = f(t2);
+      if (i.type === "month" && (s < 0 || s > 12))
+        return settings.date.messages.invalidMonth;
+      if (i.type === "day" && (n < 0 || n > 31))
+        return settings.date.messages.invalidDay(31, "any month");
+    }
+    #p(t2) {
+      const { year: i, month: s, day: n } = f(this.#t);
+      if (i && s && n) {
+        const e = c(i, s);
+        this.#t = {
+          ...this.#t,
+          day: String(Math.min(n, e)).padStart(2, "0")
+        };
+      }
+      this.value = C(this.#t) ?? t2.defaultValue ?? undefined;
+    }
+  };
+  u$2 = class u extends V {
+    options;
+    cursor = 0;
+    #t;
+    getGroupItems(t2) {
+      return this.options.filter((r2) => r2.group === t2);
+    }
+    isGroupSelected(t2) {
+      const r2 = this.getGroupItems(t2), e = this.value;
+      return e === undefined ? false : r2.every((s) => e.includes(s.value));
+    }
+    toggleValue() {
+      const t2 = this.options[this.cursor];
+      if (t2 !== undefined)
+        if (this.value === undefined && (this.value = []), t2.group === true) {
+          const r2 = t2.value, e = this.getGroupItems(r2);
+          this.isGroupSelected(r2) ? this.value = this.value.filter((s) => e.findIndex((i) => i.value === s) === -1) : this.value = [...this.value, ...e.map((s) => s.value)], this.value = Array.from(new Set(this.value));
+        } else {
+          const r2 = this.value.includes(t2.value);
+          this.value = r2 ? this.value.filter((e) => e !== t2.value) : [...this.value, t2.value];
+        }
+    }
+    constructor(t2) {
+      super(t2, false);
+      const { options: r2 } = t2;
+      this.#t = t2.selectableGroups !== false, this.options = Object.entries(r2).flatMap(([e, s]) => [
+        { value: e, group: true, label: e },
+        ...s.map((i) => ({ ...i, group: e }))
+      ]), this.value = [...t2.initialValues ?? []], this.cursor = Math.max(this.options.findIndex(({ value: e }) => e === t2.cursorAt), this.#t ? 0 : 1), this.on("cursor", (e) => {
+        switch (e) {
+          case "left":
+          case "up": {
+            this.cursor = this.cursor === 0 ? this.options.length - 1 : this.cursor - 1;
+            const s = this.options[this.cursor]?.group === true;
+            !this.#t && s && (this.cursor = this.cursor === 0 ? this.options.length - 1 : this.cursor - 1);
+            break;
+          }
+          case "down":
+          case "right": {
+            this.cursor = this.cursor === this.options.length - 1 ? 0 : this.cursor + 1;
+            const s = this.options[this.cursor]?.group === true;
+            !this.#t && s && (this.cursor = this.cursor === this.options.length - 1 ? 0 : this.cursor + 1);
+            break;
+          }
+          case "space":
+            this.toggleValue();
+            break;
+        }
+      });
+    }
+  };
+  o = /* @__PURE__ */ new Set(["up", "down", "left", "right"]);
+  h = class h extends V {
+    #t = false;
+    #s;
+    focused = "editor";
+    get userInputWithCursor() {
+      if (this.state === "submit")
+        return this.userInput;
+      const t2 = this.userInput;
+      if (this.cursor >= t2.length)
+        return `${t2}█`;
+      const s = t2.slice(0, this.cursor), r2 = t2.slice(this.cursor, this.cursor + 1), i = t2.slice(this.cursor + 1);
+      return r2 === `
+` ? `${s}█
+${i}` : `${s}${styleText("inverse", r2)}${i}`;
+    }
+    get cursor() {
+      return this._cursor;
+    }
+    #r(t2) {
+      if (this.userInput.length === 0) {
+        this._setUserInput(t2);
+        return;
+      }
+      this._setUserInput(this.userInput.slice(0, this.cursor) + t2 + this.userInput.slice(this.cursor));
+    }
+    #i(t2) {
+      const s = this.value ?? "";
+      switch (t2) {
+        case "up":
+          this._cursor = findTextCursor(this._cursor, 0, -1, s);
+          return;
+        case "down":
+          this._cursor = findTextCursor(this._cursor, 0, 1, s);
+          return;
+        case "left":
+          this._cursor = findTextCursor(this._cursor, -1, 0, s);
+          return;
+        case "right":
+          this._cursor = findTextCursor(this._cursor, 1, 0, s);
+          return;
+      }
+    }
+    _shouldSubmit(t2, s) {
+      if (this.#s)
+        return this.focused === "submit" ? true : (this.#r(`
+`), this._cursor++, false);
+      const r2 = this.#t;
+      return this.#t = true, r2 && this.cursor === this.userInput.length ? (this.userInput[this.cursor - 1] === `
+` && (this._setUserInput(this.userInput.slice(0, this.cursor - 1) + this.userInput.slice(this.cursor)), this._cursor--), true) : (this.#r(`
+`), this._cursor++, false);
+    }
+    constructor(t2) {
+      const s = t2.initialUserInput ?? t2.initialValue;
+      super({
+        ...t2,
+        initialUserInput: s
+      }, false), s !== undefined && (this._cursor = s.length), this.#s = t2.showSubmit ?? false, this.on("key", (r2, i) => {
+        if (i?.name && o.has(i.name)) {
+          this.#t = false, this.#i(i.name);
+          return;
+        }
+        if (r2 === "\t" && this.#s) {
+          this.focused = this.focused === "editor" ? "submit" : "editor";
+          return;
+        }
+        if (i?.name !== "return") {
+          if (this.#t = false, i?.name === "backspace" && this.cursor > 0) {
+            this._setUserInput(this.userInput.slice(0, this.cursor - 1) + this.userInput.slice(this.cursor)), this._cursor--;
+            return;
+          }
+          if (i?.name === "delete" && this.cursor < this.userInput.length) {
+            this._setUserInput(this.userInput.slice(0, this.cursor) + this.userInput.slice(this.cursor + 1));
+            return;
+          }
+          r2 && (this.#s && this.focused === "submit" && (this.focused = "editor"), this.#r(r2 ?? ""), this._cursor++);
+        }
+      }), this.on("userInput", (r2) => {
+        this._setValue(r2);
+      }), this.on("finalize", () => {
+        this.value || (this.value = t2.defaultValue), this.value === undefined && (this.value = "");
+      });
+    }
+  };
+  a = class a extends V {
+    options;
+    cursor = 0;
+    get _value() {
+      return this.options[this.cursor]?.value;
+    }
+    get _enabledOptions() {
+      return this.options.filter((e) => e.disabled !== true);
+    }
+    toggleAll() {
+      const e = this._enabledOptions, i = this.value !== undefined && this.value.length === e.length;
+      this.value = i ? [] : e.map((t2) => t2.value);
+    }
+    toggleInvert() {
+      const e = this.value;
+      if (!e)
+        return;
+      const i = this._enabledOptions.filter((t2) => !e.includes(t2.value));
+      this.value = i.map((t2) => t2.value);
+    }
+    toggleValue() {
+      this.value === undefined && (this.value = []);
+      const e = this.value.includes(this._value);
+      this.value = e ? this.value.filter((i) => i !== this._value) : [...this.value, this._value];
+    }
+    constructor(e) {
+      super(e, false), this.options = e.options, this.value = [...e.initialValues ?? []];
+      const i = Math.max(this.options.findIndex(({ value: t2 }) => t2 === e.cursorAt), 0);
+      this.cursor = this.options[i]?.disabled ? findCursor(i, 1, this.options) : i, this.on("key", (t2, l2) => {
+        l2.name === "a" && this.toggleAll(), l2.name === "i" && this.toggleInvert();
+      }), this.on("cursor", (t2) => {
+        switch (t2) {
+          case "left":
+          case "up":
+            this.cursor = findCursor(this.cursor, -1, this.options);
+            break;
+          case "down":
+          case "right":
+            this.cursor = findCursor(this.cursor, 1, this.options);
+            break;
+          case "space":
+            this.toggleValue();
+            break;
+        }
+      });
+    }
+  };
+  u$1 = class u2 extends V {
+    _mask = "•";
+    get cursor() {
+      return this._cursor;
+    }
+    get masked() {
+      return this.userInput.replaceAll(/./g, this._mask);
+    }
+    get userInputWithCursor() {
+      if (this.state === "submit" || this.state === "cancel")
+        return this.masked;
+      const t2 = this.userInput;
+      if (this.cursor >= t2.length)
+        return `${this.masked}${styleText(["inverse", "hidden"], "_")}`;
+      const s = this.masked, r2 = s.slice(0, this.cursor), i = s.slice(this.cursor, this.cursor + 1), o2 = s.slice(this.cursor + 1);
+      return `${r2}${styleText("inverse", i)}${o2}`;
+    }
+    clear() {
+      this._clearUserInput();
+    }
+    constructor({ mask: t2, ...s }) {
+      super(s), this._mask = t2 ?? "•", this.on("userInput", (r2) => {
+        this._setValue(r2);
+      }), this.on("finalize", () => {
+        this.value === undefined && (this.value = "");
+      });
+    }
+  };
+  n$1 = class n extends V {
+    options;
+    cursor = 0;
+    get _selectedValue() {
+      return this.options[this.cursor];
+    }
+    changeValue() {
+      const e = this._selectedValue;
+      this.value = e === undefined ? undefined : e.value;
+    }
+    constructor(e) {
+      super(e, false), this.options = e.options;
+      const o2 = this.options.findIndex(({ value: s }) => s === e.initialValue), t2 = o2 === -1 ? 0 : o2;
+      this.cursor = this.options[t2]?.disabled ? findCursor(t2, 1, this.options) : t2, this.changeValue(), this.on("cursor", (s) => {
+        switch (s) {
+          case "left":
+          case "up":
+            this.cursor = findCursor(this.cursor, -1, this.options);
+            break;
+          case "down":
+          case "right":
+            this.cursor = findCursor(this.cursor, 1, this.options);
+            break;
+        }
+        this.changeValue();
+      });
+    }
+  };
+  u3 = class u3 extends V {
+    options;
+    cursor = 0;
+    constructor(t2) {
+      super(t2, false), this.options = t2.options;
+      const s = t2.caseSensitive === true, i = this.options.map(({ value: [e] }) => s ? e : e?.toLowerCase());
+      this.cursor = Math.max(i.indexOf(t2.initialValue), 0), this.on("key", (e) => {
+        if (!e)
+          return;
+        const o2 = s ? e : e.toLowerCase();
+        if (!i.includes(o2))
+          return;
+        const n2 = this.options.find(({ value: [r2] }) => s ? r2 === o2 : r2?.toLowerCase() === o2);
+        n2 && (this.value = n2.value, this.state = "submit", this.emit("submit"));
+      });
+    }
+  };
+  n2 = class n2 extends V {
+    get userInputWithCursor() {
+      if (this.state === "submit")
+        return this.userInput;
+      const t2 = this.userInput;
+      if (this.cursor >= t2.length)
+        return `${this.userInput}█`;
+      const r2 = t2.slice(0, this.cursor), s = t2.slice(this.cursor, this.cursor + 1), e = t2.slice(this.cursor + 1);
+      return `${r2}${styleText("inverse", s)}${e}`;
+    }
+    get cursor() {
+      return this._cursor;
+    }
+    constructor(t2) {
+      super({
+        ...t2,
+        initialUserInput: t2.initialUserInput ?? t2.initialValue
+      }), this.on("userInput", (r2) => {
+        this._setValue(r2);
+      }), this.on("finalize", () => {
+        this.value || (this.value = t2.defaultValue), this.value === undefined && (this.value = "");
+      });
+    }
+  };
+});
+
+// node_modules/@clack/prompts/dist/index.mjs
+var exports_dist = {};
+__export(exports_dist, {
+  updateSettings: () => updateSettings,
+  unicodeOr: () => unicodeOr,
+  unicode: () => unicode,
+  text: () => text,
+  tasks: () => tasks,
+  taskLog: () => taskLog,
+  symbolBar: () => symbolBar,
+  symbol: () => symbol,
+  stream: () => stream,
+  spinner: () => spinner,
+  settings: () => settings,
+  selectKey: () => selectKey,
+  select: () => select,
+  progress: () => progress,
+  path: () => path,
+  password: () => password,
+  outro: () => outro,
+  note: () => note,
+  multiselect: () => multiselect,
+  multiline: () => multiline,
+  log: () => log,
+  limitOptions: () => limitOptions,
+  isTTY: () => isTTY,
+  isCancel: () => isCancel,
+  isCI: () => isCI,
+  intro: () => intro,
+  groupMultiselect: () => groupMultiselect,
+  group: () => group,
+  formatInstructionFooter: () => formatInstructionFooter,
+  date: () => date,
+  confirm: () => confirm,
+  cancel: () => cancel,
+  box: () => box,
+  autocompleteMultiselect: () => autocompleteMultiselect,
+  autocomplete: () => autocomplete,
+  S_WARN: () => S_WARN,
+  S_SUCCESS: () => S_SUCCESS,
+  S_STEP_SUBMIT: () => S_STEP_SUBMIT,
+  S_STEP_ERROR: () => S_STEP_ERROR,
+  S_STEP_CANCEL: () => S_STEP_CANCEL,
+  S_STEP_ACTIVE: () => S_STEP_ACTIVE,
+  S_RADIO_INACTIVE: () => S_RADIO_INACTIVE,
+  S_RADIO_ACTIVE: () => S_RADIO_ACTIVE,
+  S_PASSWORD_MASK: () => S_PASSWORD_MASK,
+  S_INFO: () => S_INFO,
+  S_ERROR: () => S_ERROR,
+  S_CORNER_TOP_RIGHT: () => S_CORNER_TOP_RIGHT,
+  S_CORNER_TOP_LEFT: () => S_CORNER_TOP_LEFT,
+  S_CORNER_BOTTOM_RIGHT: () => S_CORNER_BOTTOM_RIGHT,
+  S_CORNER_BOTTOM_LEFT: () => S_CORNER_BOTTOM_LEFT,
+  S_CONNECT_LEFT: () => S_CONNECT_LEFT,
+  S_CHECKBOX_SELECTED: () => S_CHECKBOX_SELECTED,
+  S_CHECKBOX_INACTIVE: () => S_CHECKBOX_INACTIVE,
+  S_CHECKBOX_ACTIVE: () => S_CHECKBOX_ACTIVE,
+  S_BAR_START_RIGHT: () => S_BAR_START_RIGHT,
+  S_BAR_START: () => S_BAR_START,
+  S_BAR_H: () => S_BAR_H,
+  S_BAR_END_RIGHT: () => S_BAR_END_RIGHT,
+  S_BAR_END: () => S_BAR_END,
+  S_BAR: () => S_BAR,
+  SELECT_INSTRUCTIONS: () => SELECT_INSTRUCTIONS,
+  MULTISELECT_INSTRUCTIONS: () => MULTISELECT_INSTRUCTIONS
+});
+import { styleText as styleText2, stripVTControlCharacters } from "node:util";
+import process$1 from "node:process";
+import { existsSync as existsSync17, lstatSync, readdirSync as readdirSync10 } from "node:fs";
+import { dirname as dirname8, join as join19 } from "node:path";
+function isUnicodeSupported() {
+  if (process$1.platform !== "win32") {
+    return process$1.env.TERM !== "linux";
+  }
+  return Boolean(process$1.env.CI) || Boolean(process$1.env.WT_SESSION) || Boolean(process$1.env.TERMINUS_SUBLIME) || process$1.env.ConEmuTask === "{cmd::Cmder}" || process$1.env.TERM_PROGRAM === "Terminus-Sublime" || process$1.env.TERM_PROGRAM === "vscode" || process$1.env.TERM === "xterm-256color" || process$1.env.TERM === "alacritty" || process$1.env.TERMINAL_EMULATOR === "JetBrains-JediTerm";
+}
+function formatInstructionFooter(o2, e) {
+  const r2 = [`${e ? `${styleText2("cyan", S_BAR)}  ` : ""}${o2.join(" • ")}`];
+  return e && r2.push(styleText2("cyan", S_BAR_END)), r2;
+}
+function P2(t2) {
+  return t2.label ?? String(t2.value ?? "");
+}
+function E(t2, c2) {
+  if (!t2)
+    return true;
+  const n3 = (c2.label ?? String(c2.value ?? "")).toLowerCase(), i = (c2.hint ?? "").toLowerCase(), l2 = String(c2.value).toLowerCase(), o2 = t2.toLowerCase();
+  return n3.includes(o2) || i.includes(o2) || l2.includes(o2);
+}
+function N(t2, c2) {
+  const n3 = [];
+  for (const i of c2)
+    t2.includes(i.value) && n3.push(i);
+  return n3;
+}
+function A$1(n3, e, t2, o2) {
+  let i = t2, f2 = t2;
+  return o2 === "center" ? i = Math.floor((e - n3) / 2) : o2 === "right" && (i = e - n3 - t2), f2 = e - i - n3, [i, f2];
+}
+function b2(e, r2) {
+  const { segmentValues: t2, segmentCursor: o2 } = e;
+  if (r2 === "submit" || r2 === "cancel")
+    return e.formattedValue;
+  const i = styleText2("gray", e.separator);
+  return e.segments.map((l2, d) => {
+    const c2 = d === o2.segmentIndex && !["submit", "cancel"].includes(r2), a2 = p2[l2.type];
+    return x(t2[l2.type], { isActive: c2, label: a2 });
+  }).join(i);
+}
+function x(e, r2) {
+  const t2 = !e || e.replace(/_/g, "") === "";
+  return r2.isActive ? styleText2("inverse", t2 ? r2.label : e.replace(/_/g, " ")) : t2 ? styleText2("dim", r2.label) : e.replace(/_/g, styleText2("dim", " "));
+}
+function progress({
+  style: o2 = "heavy",
+  max: d = 100,
+  size: v = 40,
+  ...x2
+} = {}) {
+  const r2 = spinner(x2);
+  let a2 = 0, n3 = "";
+  const c2 = Math.max(1, d), l2 = Math.max(1, v), S = (t2) => {
+    switch (t2) {
+      case "initial":
+      case "active":
+        return (e) => styleText2("magenta", e);
+      case "error":
+      case "cancel":
+        return (e) => styleText2("red", e);
+      case "submit":
+        return (e) => styleText2("green", e);
+      default:
+        return (e) => styleText2("magenta", e);
+    }
+  }, p3 = (t2, e) => {
+    const m3 = Math.floor(a2 / c2 * l2);
+    return `${S(t2)(u4[o2].repeat(m3))}${styleText2("dim", u4[o2].repeat(l2 - m3))} ${e}`;
+  }, h2 = (t2 = "") => {
+    n3 = t2, r2.start(p3("initial", t2));
+  }, g2 = (t2 = 1, e) => {
+    a2 = Math.min(c2, t2 + a2), r2.message(p3("active", e ?? n3)), n3 = e ?? n3;
+  };
+  return {
+    start: h2,
+    stop: r2.stop,
+    cancel: r2.cancel,
+    error: r2.error,
+    clear: r2.clear,
+    advance: g2,
+    isCancelled: r2.isCancelled,
+    message: (t2) => g2(0, t2)
+  };
+}
+var import_sisteransi2, unicode, isCI = () => process.env.CI === "true", isTTY = (o2) => o2.isTTY === true, unicodeOr = (o2, e) => unicode ? o2 : e, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, S_BAR_START, S_BAR, S_BAR_END, S_BAR_START_RIGHT, S_BAR_END_RIGHT, S_RADIO_ACTIVE, S_RADIO_INACTIVE, S_CHECKBOX_ACTIVE, S_CHECKBOX_SELECTED, S_CHECKBOX_INACTIVE, S_PASSWORD_MASK, S_BAR_H, S_CORNER_TOP_RIGHT, S_CONNECT_LEFT, S_CORNER_BOTTOM_RIGHT, S_CORNER_BOTTOM_LEFT, S_CORNER_TOP_LEFT, S_INFO, S_SUCCESS, S_WARN, S_ERROR, symbol = (o2) => {
+  switch (o2) {
+    case "initial":
+    case "active":
+      return styleText2("cyan", S_STEP_ACTIVE);
+    case "cancel":
+      return styleText2("red", S_STEP_CANCEL);
+    case "error":
+      return styleText2("yellow", S_STEP_ERROR);
+    case "submit":
+      return styleText2("green", S_STEP_SUBMIT);
+  }
+}, symbolBar = (o2) => {
+  switch (o2) {
+    case "initial":
+    case "active":
+      return styleText2("cyan", S_BAR);
+    case "cancel":
+      return styleText2("red", S_BAR);
+    case "error":
+      return styleText2("yellow", S_BAR);
+    case "submit":
+      return styleText2("green", S_BAR);
+  }
+}, I = (l2, e, w, p2, b2, C2 = false) => {
+  let r2 = e, O = 0;
+  if (C2)
+    for (let i = p2 - 1;i >= w; i--) {
+      const m2 = l2[i];
+      if (m2 && (r2 -= m2.length), O++, r2 <= b2)
+        break;
+    }
+  else
+    for (let i = w;i < p2; i++) {
+      const m2 = l2[i];
+      if (m2 && (r2 -= m2.length), O++, r2 <= b2)
+        break;
+    }
+  return { lineCount: r2, removals: O };
+}, limitOptions = ({
+  cursor: l2,
+  options: e,
+  style: w,
+  output: p2 = process.stdout,
+  maxItems: b2 = Number.POSITIVE_INFINITY,
+  columnPadding: C2 = 0,
+  rowPadding: r2 = 4
+}) => {
+  const i = getColumns(p2) - C2, m2 = getRows(p2), M2 = styleText2("dim", "..."), v = Math.max(m2 - r2, 0), a2 = Math.max(Math.min(b2, v), 5);
+  let f2 = 0;
+  l2 >= a2 - 3 && (f2 = Math.max(Math.min(l2 - a2 + 3, e.length - a2), 0));
+  let d = a2 < e.length && f2 > 0, c2 = a2 < e.length && f2 + a2 < e.length;
+  const W = Math.min(f2 + a2, e.length), s = [];
+  let g2 = 0;
+  d && g2++, c2 && g2++;
+  const T3 = f2 + (d ? 1 : 0), y = W - (c2 ? 1 : 0);
+  for (let t2 = T3;t2 < y; t2++) {
+    const n3 = e[t2], o2 = n3 ? w(n3, t2 === l2) : "", h2 = wrapAnsi(o2, i, {
+      hard: true,
+      trim: false
+    }).split(`
+`);
+    s.push(h2), g2 += h2.length;
+  }
+  if (g2 > v) {
+    let t2 = 0, n3 = 0, o2 = g2;
+    const h2 = l2 - T3;
+    let u4 = v;
+    const L = () => I(s, o2, 0, h2, u4), E = () => I(s, o2, h2 + 1, s.length, u4, true);
+    d ? ({ lineCount: o2, removals: t2 } = L(), o2 > u4 && (c2 || (u4 -= 1), { lineCount: o2, removals: n3 } = E())) : (c2 || (u4 -= 1), { lineCount: o2, removals: n3 } = E(), o2 > u4 && (u4 -= 1, { lineCount: o2, removals: t2 } = L())), t2 > 0 && (d = true, s.splice(0, t2)), n3 > 0 && (c2 = true, s.splice(s.length - n3, n3));
+  }
+  const x = [];
+  d && x.push(M2);
+  for (const t2 of s)
+    for (const n3 of t2)
+      x.push(n3);
+  return c2 && x.push(M2), x;
+}, autocomplete = (t2) => new T$1({
+  options: t2.options,
+  initialValue: t2.initialValue ? [t2.initialValue] : undefined,
+  initialUserInput: t2.initialUserInput,
+  placeholder: t2.placeholder,
+  filter: t2.filter ?? ((n3, i) => E(n3, i)),
+  signal: t2.signal,
+  input: t2.input,
+  output: t2.output,
+  validate: t2.validate,
+  render() {
+    const n3 = t2.withGuide ?? settings.withGuide, i = n3 ? [`${styleText2("gray", S_BAR)}`, `${symbol(this.state)}  ${t2.message}`] : [`${symbol(this.state)}  ${t2.message}`], l2 = this.userInput, o2 = this.options, m2 = t2.placeholder, p2 = l2 === "" && m2 !== undefined, $ = (r2, s) => {
+      const a2 = P2(r2), u4 = r2.hint && r2.value === this.focusedValue ? styleText2("dim", ` (${r2.hint})`) : "";
+      switch (s) {
+        case "active":
+          return `${styleText2("green", S_RADIO_ACTIVE)} ${a2}${u4}`;
+        case "inactive":
+          return `${styleText2("dim", S_RADIO_INACTIVE)} ${styleText2("dim", a2)}`;
+        case "disabled":
+          return `${styleText2("gray", S_RADIO_INACTIVE)} ${styleText2(["strikethrough", "gray"], a2)}`;
+      }
+    };
+    switch (this.state) {
+      case "submit": {
+        const r2 = N(this.selectedValues, o2), s = r2.length > 0 ? `  ${styleText2("dim", r2.map(P2).join(", "))}` : "", a2 = n3 ? styleText2("gray", S_BAR) : "";
+        return `${i.join(`
+`)}
+${a2}${s}`;
+      }
+      case "cancel": {
+        const r2 = l2 ? `  ${styleText2(["strikethrough", "dim"], l2)}` : "", s = n3 ? styleText2("gray", S_BAR) : "";
+        return `${i.join(`
+`)}
+${s}${r2}`;
+      }
+      default: {
+        const r2 = this.state === "error" ? "yellow" : "cyan", s = n3 ? `${styleText2(r2, S_BAR)}  ` : "", a2 = n3 ? styleText2(r2, S_BAR_END) : "";
+        let u4 = "";
+        if (this.isNavigating || p2) {
+          const d = p2 ? m2 : l2;
+          u4 = d !== "" ? ` ${styleText2("dim", d)}` : "";
+        } else
+          u4 = ` ${this.userInputWithCursor}`;
+        const V2 = this.filteredOptions.length !== o2.length ? styleText2("dim", ` (${this.filteredOptions.length} match${this.filteredOptions.length === 1 ? "" : "es"})`) : "", y = this.filteredOptions.length === 0 && l2 ? [`${s}${styleText2("yellow", "No matches found")}`] : [], b2 = this.state === "error" ? [`${s}${styleText2("yellow", this.error)}`] : [];
+        n3 && i.push(`${s.trimEnd()}`), i.push(`${s}${styleText2("dim", "Search:")}${u4}${V2}`, ...y, ...b2);
+        const v = [
+          `${styleText2("dim", "↑/↓")} to select`,
+          `${styleText2("dim", "Enter:")} confirm`,
+          `${styleText2("dim", "Type:")} to search`
+        ], g2 = [`${s}${v.join(" • ")}`, a2], O = this.filteredOptions.length === 0 ? [] : limitOptions({
+          cursor: this.cursor,
+          options: this.filteredOptions,
+          columnPadding: n3 ? 3 : 0,
+          rowPadding: i.length + g2.length,
+          style: (d, f2) => $(d, d.disabled ? "disabled" : f2 ? "active" : "inactive"),
+          maxItems: t2.maxItems,
+          output: t2.output
+        });
+        return [
+          ...i,
+          ...O.map((d) => `${s}${d}`),
+          ...g2
+        ].join(`
+`);
+      }
+    }
+  }
+}).prompt(), autocompleteMultiselect = (t2) => {
+  const c2 = (i, l2, o2, m2) => {
+    const p2 = o2.includes(i.value), $ = i.label ?? String(i.value ?? ""), r2 = i.hint && m2 !== undefined && i.value === m2 ? styleText2("dim", ` (${i.hint})`) : "", s = p2 ? styleText2("green", S_CHECKBOX_SELECTED) : styleText2("dim", S_CHECKBOX_INACTIVE);
+    return i.disabled ? `${styleText2("gray", S_CHECKBOX_INACTIVE)} ${styleText2(["strikethrough", "gray"], $)}` : l2 ? `${s} ${$}${r2}` : `${s} ${styleText2("dim", $)}`;
+  }, n3 = new T$1({
+    options: t2.options,
+    multiple: true,
+    placeholder: t2.placeholder,
+    filter: t2.filter ?? ((i, l2) => E(i, l2)),
+    validate: () => {
+      if (t2.required && n3.selectedValues.length === 0)
+        return "Please select at least one item";
+    },
+    initialValue: t2.initialValues,
+    signal: t2.signal,
+    input: t2.input,
+    output: t2.output,
+    render() {
+      const i = t2.withGuide ?? settings.withGuide, l2 = `${i ? `${styleText2("gray", S_BAR)}
+` : ""}${symbol(this.state)}  ${t2.message}
+`, o2 = this.userInput, m2 = t2.placeholder, p2 = o2 === "" && m2 !== undefined, $ = this.isNavigating || p2 ? styleText2("dim", p2 ? m2 : o2) : this.userInputWithCursor, r2 = this.options, s = this.filteredOptions.length !== r2.length ? styleText2("dim", ` (${this.filteredOptions.length} match${this.filteredOptions.length === 1 ? "" : "es"})`) : "";
+      switch (this.state) {
+        case "submit":
+          return `${l2}${i ? `${styleText2("gray", S_BAR)}  ` : ""}${styleText2("dim", `${this.selectedValues.length} items selected`)}`;
+        case "cancel":
+          return `${l2}${i ? `${styleText2("gray", S_BAR)}  ` : ""}${styleText2(["strikethrough", "dim"], o2)}`;
+        default: {
+          const a2 = this.state === "error" ? "yellow" : "cyan", u4 = i ? `${styleText2(a2, S_BAR)}  ` : "", V2 = i ? styleText2(a2, S_BAR_END) : "", y = [
+            `${styleText2("dim", "↑/↓")} to navigate`,
+            `${styleText2("dim", this.isNavigating ? "Space/Tab:" : "Tab:")} select`,
+            `${styleText2("dim", "Enter:")} confirm`,
+            `${styleText2("dim", "Type:")} to search`
+          ], b2 = this.filteredOptions.length === 0 && o2 ? [`${u4}${styleText2("yellow", "No matches found")}`] : [], v = this.state === "error" ? [`${u4}${styleText2("yellow", this.error)}`] : [], g2 = [
+            ...`${l2}${i ? styleText2(a2, S_BAR) : ""}`.split(`
+`),
+            `${u4}${styleText2("dim", "Search:")} ${$}${s}`,
+            ...b2,
+            ...v
+          ], O = [`${u4}${y.join(" • ")}`, V2], d = limitOptions({
+            cursor: this.cursor,
+            options: this.filteredOptions,
+            style: (f2, _2) => c2(f2, _2, this.selectedValues, this.focusedValue),
+            maxItems: t2.maxItems,
+            output: t2.output,
+            rowPadding: g2.length + O.length
+          });
+          return [
+            ...g2,
+            ...d.map((f2) => `${u4}${f2}`),
+            ...O
+          ].join(`
+`);
+        }
+      }
+    }
+  });
+  return n3.prompt();
+}, J, K, Q = (n3) => n3, box = (n3 = "", e = "", t2) => {
+  const o2 = t2?.output ?? process.stdout, i = getColumns(o2), R2 = 1 * 2, u4 = t2?.titlePadding ?? 1, h2 = t2?.contentPadding ?? 2, w = t2?.width === undefined || t2.width === "auto" ? 1 : Math.min(1, t2.width), m2 = t2?.withGuide ?? settings.withGuide ? `${S_BAR} ` : "", b2 = t2?.formatBorder ?? Q, a2 = ((t2?.rounded) ? J : K).map(b2), _2 = b2(S_BAR_H), B = b2(S_BAR), p2 = dist_default2(m2), x = dist_default2(e), O = i - p2;
+  let r2 = Math.floor(i * w) - p2;
+  if (t2?.width === "auto") {
+    const c2 = n3.split(`
+`);
+    let s = x + u4 * 2;
+    for (const G of c2) {
+      const P3 = dist_default2(G) + h2 * 2;
+      P3 > s && (s = P3);
+    }
+    const g2 = s + R2;
+    g2 < r2 && (r2 = g2);
+  }
+  r2 % 2 !== 0 && (r2 < O ? r2++ : r2--);
+  const d = r2 - R2, S = d - u4 * 2, T3 = x > S ? `${e.slice(0, S - 3)}...` : e, [y, W] = A$1(dist_default2(T3), d, u4, t2?.titleAlign), L = wrapAnsi(n3, d - h2 * 2, {
+    hard: true,
+    trim: false
+  });
+  o2.write(`${m2}${a2[0]}${_2.repeat(y)}${T3}${_2.repeat(W)}${a2[1]}
+`);
+  const E2 = L.split(`
+`);
+  for (const c2 of E2) {
+    const [s, g2] = A$1(dist_default2(c2), d, h2, t2?.contentAlign);
+    o2.write(`${m2}${B}${" ".repeat(s)}${c2}${" ".repeat(g2)}${B}
+`);
+  }
+  o2.write(`${m2}${a2[2]}${_2.repeat(d)}${a2[3]}
+`);
+}, confirm = (i) => {
+  const a2 = i.active ?? "Yes", s = i.inactive ?? "No";
+  return new r({
+    active: a2,
+    inactive: s,
+    signal: i.signal,
+    input: i.input,
+    output: i.output,
+    initialValue: i.initialValue ?? true,
+    render() {
+      const e = i.withGuide ?? settings.withGuide, u4 = `${symbol(this.state)}  `, l2 = e ? `${styleText2("gray", S_BAR)}  ` : "", f2 = wrapTextWithPrefix(i.output, i.message, l2, u4), o2 = `${e ? `${styleText2("gray", S_BAR)}
+` : ""}${f2}
+`, c2 = this.value ? a2 : s;
+      switch (this.state) {
+        case "submit": {
+          const r2 = e ? `${styleText2("gray", S_BAR)}  ` : "";
+          return `${o2}${r2}${styleText2("dim", c2)}`;
+        }
+        case "cancel": {
+          const r2 = e ? `${styleText2("gray", S_BAR)}  ` : "";
+          return `${o2}${r2}${styleText2(["strikethrough", "dim"], c2)}${e ? `
+${styleText2("gray", S_BAR)}` : ""}`;
+        }
+        default: {
+          const r2 = e ? `${styleText2("cyan", S_BAR)}  ` : "", g2 = e ? styleText2("cyan", S_BAR_END) : "";
+          return `${o2}${r2}${this.value ? `${styleText2("green", S_RADIO_ACTIVE)} ${a2}` : `${styleText2("dim", S_RADIO_INACTIVE)} ${styleText2("dim", a2)}`}${i.vertical ? e ? `
+${styleText2("cyan", S_BAR)}  ` : `
+` : ` ${styleText2("dim", "/")} `}${this.value ? `${styleText2("dim", S_RADIO_INACTIVE)} ${styleText2("dim", s)}` : `${styleText2("green", S_RADIO_ACTIVE)} ${s}`}
+${g2}
+`;
+        }
+      }
+    }
+  }).prompt();
+}, date = (e) => {
+  const r2 = e.validate;
+  return new U({
+    ...e,
+    validate(t2) {
+      if (t2 === undefined)
+        return e.defaultValue !== undefined ? undefined : r2 ? runValidation(r2, t2) : settings.date.messages.required;
+      const o2 = (i) => i.toISOString().slice(0, 10);
+      if (e.minDate && o2(t2) < o2(e.minDate))
+        return settings.date.messages.afterMin(e.minDate);
+      if (e.maxDate && o2(t2) > o2(e.maxDate))
+        return settings.date.messages.beforeMax(e.maxDate);
+      if (r2)
+        return runValidation(r2, t2);
+    },
+    render() {
+      const t2 = (e?.withGuide ?? settings.withGuide) !== false, i = `${`${t2 ? `${styleText2("gray", S_BAR)}
+` : ""}${symbol(this.state)}  `}${e.message}
+`, l2 = this.state !== "initial" ? this.state : "active", d = b2(this, l2), c2 = this.value instanceof Date ? this.formattedValue : "";
+      switch (this.state) {
+        case "error": {
+          const a2 = this.error ? `  ${styleText2("yellow", this.error)}` : "", s = t2 ? `${styleText2("yellow", S_BAR)}  ` : "", f2 = t2 ? styleText2("yellow", S_BAR_END) : "";
+          return `${i.trim()}
+${s}${d}
+${f2}${a2}
+`;
+        }
+        case "submit": {
+          const a2 = c2 ? `  ${styleText2("dim", c2)}` : "", s = t2 ? styleText2("gray", S_BAR) : "";
+          return `${i}${s}${a2}`;
+        }
+        case "cancel": {
+          const a2 = c2 ? `  ${styleText2(["strikethrough", "dim"], c2)}` : "", s = t2 ? styleText2("gray", S_BAR) : "";
+          return `${i}${s}${a2}${c2.trim() ? `
+${s}` : ""}`;
+        }
+        default: {
+          const a2 = t2 ? `${styleText2("cyan", S_BAR)}  ` : "", s = t2 ? styleText2("cyan", S_BAR_END) : "", f2 = t2 ? `${styleText2("cyan", S_BAR)}  ` : "", g2 = this.inlineError ? `
+${f2}${styleText2("yellow", this.inlineError)}` : "";
+          return `${i}${a2}${d}${g2}
+${s}
+`;
+        }
+      }
+    }
+  }).prompt();
+}, p2, group = async (o2, r2) => {
+  const t2 = {}, p3 = Object.keys(o2);
+  for (const e of p3) {
+    const i = o2[e], n3 = await i({ results: t2 })?.catch((a2) => {
+      throw a2;
+    });
+    if (typeof r2?.onCancel == "function" && isCancel(n3)) {
+      t2[e] = "canceled", r2.onCancel({ results: t2 });
+      continue;
+    }
+    t2[e] = n3;
+  }
+  return t2;
+}, MULTISELECT_INSTRUCTIONS, m2 = (i, u4) => i.split(`
+`).map((d) => u4(d)).join(`
+`), multiselect = (i) => {
+  const u4 = (t2, a2) => {
+    const r2 = t2.label ?? String(t2.value);
+    return a2 === "disabled" ? `${styleText2("gray", S_CHECKBOX_INACTIVE)} ${m2(r2, (o2) => styleText2(["strikethrough", "gray"], o2))}${t2.hint ? ` ${styleText2("dim", `(${t2.hint ?? "disabled"})`)}` : ""}` : a2 === "active" ? `${styleText2("cyan", S_CHECKBOX_ACTIVE)} ${r2}${t2.hint ? ` ${styleText2("dim", `(${t2.hint})`)}` : ""}` : a2 === "selected" ? `${styleText2("green", S_CHECKBOX_SELECTED)} ${m2(r2, (o2) => styleText2("dim", o2))}${t2.hint ? ` ${styleText2("dim", `(${t2.hint})`)}` : ""}` : a2 === "cancelled" ? `${m2(r2, (o2) => styleText2(["strikethrough", "dim"], o2))}` : a2 === "active-selected" ? `${styleText2("green", S_CHECKBOX_SELECTED)} ${r2}${t2.hint ? ` ${styleText2("dim", `(${t2.hint})`)}` : ""}` : a2 === "submitted" ? `${m2(r2, (o2) => styleText2("dim", o2))}` : `${styleText2("dim", S_CHECKBOX_INACTIVE)} ${m2(r2, (o2) => styleText2("dim", o2))}`;
+  }, d = i.required ?? true, v = i.showInstructions ?? true;
+  return new a({
+    options: i.options,
+    signal: i.signal,
+    input: i.input,
+    output: i.output,
+    initialValues: i.initialValues,
+    required: d,
+    cursorAt: i.cursorAt,
+    validate(t2) {
+      if (d && (t2 === undefined || t2.length === 0))
+        return `Please select at least one option.
+${styleText2("reset", styleText2("dim", `Press ${styleText2(["gray", "bgWhite", "inverse"], " space ")} to select, ${styleText2("gray", styleText2("bgWhite", styleText2("inverse", " enter ")))} to submit`))}`;
+    },
+    render() {
+      const t2 = i.withGuide ?? settings.withGuide, a2 = wrapTextWithPrefix(i.output, i.message, t2 ? `${symbolBar(this.state)}  ` : "", `${symbol(this.state)}  `), r2 = `${t2 ? `${styleText2("gray", S_BAR)}
+` : ""}${a2}
+`, o2 = this.value ?? [], p3 = (n3, l2) => {
+        if (n3.disabled)
+          return u4(n3, "disabled");
+        const s = o2.includes(n3.value);
+        return l2 && s ? u4(n3, "active-selected") : s ? u4(n3, "selected") : u4(n3, l2 ? "active" : "inactive");
+      };
+      switch (this.state) {
+        case "submit": {
+          const n3 = this.options.filter(({ value: s }) => o2.includes(s)).map((s) => u4(s, "submitted")).join(styleText2("dim", ", ")) || styleText2("dim", "none"), l2 = wrapTextWithPrefix(i.output, n3, t2 ? `${styleText2("gray", S_BAR)}  ` : "");
+          return `${r2}${l2}`;
+        }
+        case "cancel": {
+          const n3 = this.options.filter(({ value: s }) => o2.includes(s)).map((s) => u4(s, "cancelled")).join(styleText2("dim", ", "));
+          if (n3.trim() === "")
+            return `${r2}${styleText2("gray", S_BAR)}`;
+          const l2 = wrapTextWithPrefix(i.output, n3, t2 ? `${styleText2("gray", S_BAR)}  ` : "");
+          return `${r2}${l2}${t2 ? `
+${styleText2("gray", S_BAR)}` : ""}`;
+        }
+        case "error": {
+          const n3 = t2 ? `${styleText2("yellow", S_BAR)}  ` : "", l2 = this.error.split(`
+`).map(($, C2) => C2 === 0 ? `${t2 ? `${styleText2("yellow", S_BAR_END)}  ` : ""}${styleText2("yellow", $)}` : `   ${$}`).join(`
+`), s = r2.split(`
+`).length, h2 = l2.split(`
+`).length + 1;
+          return `${r2}${n3}${limitOptions({
+            output: i.output,
+            options: this.options,
+            cursor: this.cursor,
+            maxItems: i.maxItems,
+            columnPadding: n3.length,
+            rowPadding: s + h2,
+            style: p3
+          }).join(`
+${n3}`)}
+${l2}
+`;
+        }
+        default: {
+          const n3 = t2 ? `${styleText2("cyan", S_BAR)}  ` : "", l2 = r2.split(`
+`).length, s = v ? formatInstructionFooter(MULTISELECT_INSTRUCTIONS, t2) : t2 ? [styleText2("cyan", S_BAR_END)] : [], h2 = s.join(`
+`), $ = s.length + 1;
+          return `${r2}${n3}${limitOptions({
+            output: i.output,
+            options: this.options,
+            cursor: this.cursor,
+            maxItems: i.maxItems,
+            columnPadding: n3.length,
+            rowPadding: l2 + $,
+            style: p3
+          }).join(`
+${n3}`)}
+${h2}
+`;
+        }
+      }
+    }
+  }).prompt();
+}, groupMultiselect = (o2) => {
+  const { selectableGroups: h2 = true, groupSpacing: x2 = 0 } = o2, m3 = (n3, l2, g2 = []) => {
+    const a2 = n3.label ?? String(n3.value), t2 = typeof n3.group == "string", s = t2 && (g2[g2.indexOf(n3) + 1] ?? { group: true }), u4 = t2 && s && s.group === true;
+    let r2 = "", c2 = "";
+    t2 && (h2 ? (r2 = u4 ? `${S_BAR_END} ` : `${S_BAR} `, c2 = u4 ? "  " : `${S_BAR} `) : r2 = "  ");
+    let i = "";
+    if (x2 > 0 && !t2 && (i = `
+`.repeat(x2)), l2 === "active")
+      return wrapTextWithPrefix(o2.output, `${a2}${n3.hint ? ` ${styleText2("dim", `(${n3.hint})`)}` : ""}`, `${i}${styleText2("dim", r2)} `, `${i}${styleText2("dim", r2)}${styleText2("cyan", S_CHECKBOX_ACTIVE)} `, `${i}${styleText2("dim", c2)} `);
+    if (l2 === "group-active")
+      return wrapTextWithPrefix(o2.output, a2, `${i}${r2} `, `${i}${r2}${styleText2("cyan", S_CHECKBOX_ACTIVE)} `, `${i}${c2} `, (d) => styleText2("dim", d));
+    if (l2 === "group-active-selected")
+      return wrapTextWithPrefix(o2.output, a2, `${i}${r2} `, `${i}${r2}${styleText2("green", S_CHECKBOX_SELECTED)} `, `${i}${c2} `, (d) => styleText2("dim", d));
+    if (l2 === "selected") {
+      const d = t2 || h2 ? styleText2("green", S_CHECKBOX_SELECTED) : "";
+      return wrapTextWithPrefix(o2.output, `${a2}${n3.hint ? ` (${n3.hint})` : ""}`, `${i}${styleText2("dim", r2)} `, `${i}${styleText2("dim", r2)}${d} `, `${i}${styleText2("dim", c2)} `, (S) => styleText2("dim", S));
+    }
+    if (l2 === "cancelled")
+      return `${styleText2(["strikethrough", "dim"], a2)}`;
+    if (l2 === "active-selected")
+      return wrapTextWithPrefix(o2.output, `${a2}${n3.hint ? ` ${styleText2("dim", `(${n3.hint})`)}` : ""}`, `${i}${styleText2("dim", r2)} `, `${i}${styleText2("dim", r2)}${styleText2("green", S_CHECKBOX_SELECTED)} `, `${i}${styleText2("dim", c2)} `);
+    if (l2 === "submitted")
+      return `${styleText2("dim", a2)}`;
+    const f2 = t2 || h2 ? styleText2("dim", S_CHECKBOX_INACTIVE) : "";
+    return wrapTextWithPrefix(o2.output, a2, `${i}${styleText2("dim", r2)} `, `${i}${styleText2("dim", r2)}${f2} `, `${i}${styleText2("dim", c2)} `, (d) => styleText2("dim", d));
+  }, y = o2.required ?? true, I2 = o2.showInstructions ?? true;
+  return new u$2({
+    options: o2.options,
+    signal: o2.signal,
+    input: o2.input,
+    output: o2.output,
+    initialValues: o2.initialValues,
+    required: y,
+    cursorAt: o2.cursorAt,
+    selectableGroups: h2,
+    validate(n3) {
+      if (y && (n3 === undefined || n3.length === 0))
+        return `Please select at least one option.
+${styleText2("reset", styleText2("dim", `Press ${styleText2(["gray", "bgWhite", "inverse"], " space ")} to select, ${styleText2("gray", styleText2(["bgWhite", "inverse"], " enter "))} to submit`))}`;
+    },
+    render() {
+      const n3 = o2.withGuide ?? settings.withGuide, l2 = `${n3 ? `${styleText2("gray", S_BAR)}
+` : ""}${symbol(this.state)}  ${o2.message}
+`, g2 = this.value ?? [], a2 = (t2, s) => {
+        const u4 = this.options, r2 = g2.includes(t2.value) || t2.group === true && this.isGroupSelected(`${t2.value}`);
+        return !s && typeof t2.group == "string" && this.options[this.cursor]?.value === t2.group ? m3(t2, r2 ? "group-active-selected" : "group-active", u4) : s && r2 ? m3(t2, "active-selected", u4) : r2 ? m3(t2, "selected", u4) : m3(t2, s ? "active" : "inactive", u4);
+      };
+      switch (this.state) {
+        case "submit": {
+          const t2 = this.options.filter(({ value: u4 }) => g2.includes(u4)).map((u4) => m3(u4, "submitted")), s = t2.length === 0 ? "" : `  ${t2.join(styleText2("dim", ", "))}`;
+          return `${l2}${n3 ? styleText2("gray", S_BAR) : ""}${s}`;
+        }
+        case "cancel": {
+          const t2 = this.options.filter(({ value: s }) => g2.includes(s)).map((s) => m3(s, "cancelled")).join(styleText2("dim", ", "));
+          return `${l2}${n3 ? `${styleText2("gray", S_BAR)}  ` : ""}${t2.trim() ? `${t2}${n3 ? `
+${styleText2("gray", S_BAR)}` : ""}` : ""}`;
+        }
+        case "error": {
+          const t2 = n3 ? `${styleText2("yellow", S_BAR)}  ` : "", s = this.error.split(`
+`).map((i, f2) => f2 === 0 ? `${n3 ? `${styleText2("yellow", S_BAR_END)}  ` : ""}${styleText2("yellow", i)}` : `   ${i}`).join(`
+`), u4 = l2.split(`
+`).length, r2 = s.split(`
+`).length + 1, c2 = limitOptions({
+            output: o2.output,
+            options: this.options,
+            cursor: this.cursor,
+            maxItems: o2.maxItems,
+            columnPadding: t2.length,
+            rowPadding: u4 + r2,
+            style: a2
+          }).join(`
+${t2}`);
+          return `${l2}${t2}${c2}
+${s}
+`;
+        }
+        default: {
+          const t2 = n3 ? `${styleText2("cyan", S_BAR)}  ` : "", s = l2.split(`
+`).length, u4 = I2 ? formatInstructionFooter(MULTISELECT_INSTRUCTIONS, n3) : n3 ? [styleText2("cyan", S_BAR_END)] : [], r2 = u4.join(`
+`), c2 = u4.length + 1, i = limitOptions({
+            output: o2.output,
+            options: this.options,
+            cursor: this.cursor,
+            maxItems: o2.maxItems,
+            columnPadding: t2.length,
+            rowPadding: s + c2,
+            style: a2
+          }).join(`
+${t2}`);
+          return `${l2}${t2}${i}
+${r2}
+`;
+        }
+      }
+    }
+  }).prompt();
+}, log, cancel = (o2 = "", t2) => {
+  const i = t2?.output ?? process.stdout, e = t2?.withGuide ?? settings.withGuide ? `${styleText2("gray", S_BAR_END)}  ` : "";
+  i.write(`${e}${styleText2("red", o2)}
+
+`);
+}, intro = (o2 = "", t2) => {
+  const i = t2?.output ?? process.stdout, e = t2?.withGuide ?? settings.withGuide ? `${styleText2("gray", S_BAR_START)}  ` : "";
+  i.write(`${e}${o2}
+`);
+}, outro = (o2 = "", t2) => {
+  const i = t2?.output ?? process.stdout, e = t2?.withGuide ?? settings.withGuide ? `${styleText2("gray", S_BAR)}
+${styleText2("gray", S_BAR_END)}  ` : "";
+  i.write(`${e}${o2}
+
+`);
+}, multiline = (e) => new h({
+  validate: e.validate,
+  placeholder: e.placeholder,
+  defaultValue: e.defaultValue,
+  initialValue: e.initialValue,
+  showSubmit: e.showSubmit,
+  output: e.output,
+  signal: e.signal,
+  input: e.input,
+  render() {
+    const i = e?.withGuide ?? settings.withGuide, o2 = `${`${i ? `${styleText2("gray", S_BAR)}
+` : ""}${symbol(this.state)}  `}${e.message}
+`, m3 = e.placeholder && e.placeholder.length > 0 ? styleText2("inverse", e.placeholder[0]) + styleText2("dim", e.placeholder.slice(1)) : styleText2(["inverse", "hidden"], "_"), a2 = this.userInput ? this.userInputWithCursor : m3, l2 = this.value ?? "", c2 = e.showSubmit ? `
+  ${styleText2(this.focused === "submit" ? "cyan" : "dim", "[ submit ]")}` : "";
+    switch (this.state) {
+      case "error": {
+        const n3 = `${styleText2("yellow", S_BAR)}  `, r2 = i ? wrapTextWithPrefix(e.output, a2, n3, undefined) : a2, u4 = styleText2("yellow", S_BAR_END);
+        return `${o2}${r2}
+${u4}  ${styleText2("yellow", this.error)}${c2}
+`;
+      }
+      case "submit": {
+        const n3 = `${styleText2("gray", S_BAR)}  `, r2 = i ? wrapTextWithPrefix(e.output, l2, n3, undefined, undefined, (u4) => styleText2("dim", u4)) : l2 ? styleText2("dim", l2) : "";
+        return `${o2}${r2}`;
+      }
+      case "cancel": {
+        const n3 = `${styleText2("gray", S_BAR)}  `, r2 = i ? wrapTextWithPrefix(e.output, l2, n3, undefined, undefined, (u4) => styleText2(["strikethrough", "dim"], u4)) : l2 ? styleText2(["strikethrough", "dim"], l2) : "";
+        return `${o2}${r2}`;
+      }
+      default: {
+        const n3 = i ? `${styleText2("cyan", S_BAR)}  ` : "", r2 = i ? styleText2("cyan", S_BAR_END) : "", u4 = i ? wrapTextWithPrefix(e.output, a2, n3) : a2;
+        return `${o2}${u4}
+${r2}${c2}
+`;
+      }
+    }
+  }
+}).prompt(), W$1 = (o2) => o2, C2 = (o2, e, s) => {
+  const a2 = {
+    hard: true,
+    trim: false
+  }, i = wrapAnsi(o2, e, a2).split(`
+`), c2 = i.reduce((n3, t2) => Math.max(dist_default2(t2), n3), 0), u4 = i.map(s).reduce((n3, t2) => Math.max(dist_default2(t2), n3), 0), g2 = e - (u4 - c2);
+  return wrapAnsi(o2, g2, a2);
+}, note = (o2 = "", e = "", s) => {
+  const a2 = s?.output ?? process$1.stdout, i = s?.withGuide ?? settings.withGuide, c2 = s?.format ?? W$1, g2 = ["", ...C2(o2, getColumns(a2) - 6, c2).split(`
+`).map(c2), ""], n3 = dist_default2(e), t2 = Math.max(g2.reduce((m3, F) => {
+    const O = dist_default2(F);
+    return O > m3 ? O : m3;
+  }, 0), n3) + 2, h2 = g2.map((m3) => `${styleText2("gray", S_BAR)}  ${m3}${" ".repeat(t2 - dist_default2(m3))}${styleText2("gray", S_BAR)}`).join(`
+`), T3 = i ? `${styleText2("gray", S_BAR)}
+` : "", l$1 = i ? S_CONNECT_LEFT : S_CORNER_BOTTOM_LEFT;
+  a2.write(`${T3}${styleText2("green", S_STEP_SUBMIT)}  ${styleText2("reset", e)} ${styleText2("gray", S_BAR_H.repeat(Math.max(t2 - n3 - 1, 1)) + S_CORNER_TOP_RIGHT)}
+${h2}
+${styleText2("gray", l$1 + S_BAR_H.repeat(t2 + 2) + S_CORNER_BOTTOM_RIGHT)}
+`);
+}, password = (r2) => new u$1({
+  validate: r2.validate,
+  mask: r2.mask ?? S_PASSWORD_MASK,
+  signal: r2.signal,
+  input: r2.input,
+  output: r2.output,
+  render() {
+    const e = r2.withGuide ?? settings.withGuide, o2 = `${e ? `${styleText2("gray", S_BAR)}
+` : ""}${symbol(this.state)}  ${r2.message}
+`, c2 = this.userInputWithCursor, i = this.masked;
+    switch (this.state) {
+      case "error": {
+        const s = e ? `${styleText2("yellow", S_BAR)}  ` : "", n3 = e ? `${styleText2("yellow", S_BAR_END)}  ` : "", l2 = i ?? "";
+        return r2.clearOnError && this.clear(), `${o2.trim()}
+${s}${l2}
+${n3}${styleText2("yellow", this.error)}
+`;
+      }
+      case "submit": {
+        const s = e ? `${styleText2("gray", S_BAR)}  ` : "", n3 = i ? styleText2("dim", i) : "";
+        return `${o2}${s}${n3}`;
+      }
+      case "cancel": {
+        const s = e ? `${styleText2("gray", S_BAR)}  ` : "", n3 = i ? styleText2(["strikethrough", "dim"], i) : "";
+        return `${o2}${s}${n3}${i && e ? `
+${styleText2("gray", S_BAR)}` : ""}`;
+      }
+      default: {
+        const s = e ? `${styleText2("cyan", S_BAR)}  ` : "", n3 = e ? styleText2("cyan", S_BAR_END) : "";
+        return `${o2}${s}${c2}
+${n3}
+`;
+      }
+    }
+  }
+}).prompt(), path = (e) => {
+  const a2 = e.validate;
+  return autocomplete({
+    ...e,
+    initialUserInput: e.initialValue ?? e.root ?? process.cwd(),
+    maxItems: 5,
+    validate(t2) {
+      if (!Array.isArray(t2)) {
+        if (!t2)
+          return "Please select a path";
+        if (a2)
+          return runValidation(a2, t2);
+      }
+    },
+    options() {
+      const t2 = this.userInput;
+      if (t2 === "")
+        return [];
+      try {
+        let i;
+        existsSync17(t2) ? lstatSync(t2).isDirectory() && (!e.directory || t2.endsWith("/")) ? i = t2 : i = dirname8(t2) : i = dirname8(t2);
+        const c2 = t2.length > 1 && t2.endsWith("/") ? t2.slice(0, -1) : t2;
+        return readdirSync10(i).map((r2) => {
+          const n3 = join19(i, r2), m3 = lstatSync(n3);
+          return {
+            name: r2,
+            path: n3,
+            isDirectory: m3.isDirectory()
+          };
+        }).filter(({ path: r2, isDirectory: n3 }) => r2.startsWith(c2) && (n3 || !e.directory)).map((r2) => ({
+          value: r2.path
+        }));
+      } catch {
+        return [];
+      }
+    }
+  });
+}, W = (l2) => styleText2("magenta", l2), spinner = ({
+  indicator: l2 = "dots",
+  onCancel: h2,
+  output: n3 = process.stdout,
+  cancelMessage: G,
+  errorMessage: O,
+  frames: E2 = unicode ? ["◒", "◐", "◓", "◑"] : ["•", "o", "O", "0"],
+  delay: F = unicode ? 80 : 120,
+  signal: m3,
+  ...I2
+} = {}) => {
+  const u4 = isCI();
+  let M2, T3, d = false, S = false, s = "", p3, w = performance.now();
+  const x2 = getColumns(n3), k = I2?.styleFrame ?? W, g2 = (e) => {
+    const r2 = e > 1 ? O ?? settings.messages.error : G ?? settings.messages.cancel;
+    S = e === 1, d && (a2(r2, e), S && typeof h2 == "function" && h2());
+  }, f2 = () => g2(2), i = () => g2(1), A = () => {
+    process.on("uncaughtExceptionMonitor", f2), process.on("unhandledRejection", f2), process.on("SIGINT", i), process.on("SIGTERM", i), process.on("exit", g2), m3 && m3.addEventListener("abort", i);
+  }, H = () => {
+    process.removeListener("uncaughtExceptionMonitor", f2), process.removeListener("unhandledRejection", f2), process.removeListener("SIGINT", i), process.removeListener("SIGTERM", i), process.removeListener("exit", g2), m3 && m3.removeEventListener("abort", i);
+  }, y = () => {
+    if (p3 === undefined)
+      return;
+    u4 && n3.write(`
+`);
+    const r2 = wrapAnsi(p3, x2, {
+      hard: true,
+      trim: false
+    }).split(`
+`);
+    r2.length > 1 && n3.write(import_sisteransi2.cursor.up(r2.length - 1)), n3.write(import_sisteransi2.cursor.to(0)), n3.write(import_sisteransi2.erase.down());
+  }, C3 = (e) => e.replace(/\.+$/, ""), _2 = (e) => {
+    const r2 = (performance.now() - e) / 1000, t2 = Math.floor(r2 / 60), o2 = Math.floor(r2 % 60);
+    return t2 > 0 ? `[${t2}m ${o2}s]` : `[${o2}s]`;
+  }, N2 = I2.withGuide ?? settings.withGuide, P3 = (e = "") => {
+    d = true, M2 = block({ output: n3 }), s = C3(e), w = performance.now(), N2 && n3.write(`${styleText2("gray", S_BAR)}
+`);
+    let r2 = 0, t2 = 0;
+    A(), T3 = setInterval(() => {
+      if (u4 && s === p3)
+        return;
+      y(), p3 = s;
+      const o2 = k(E2[r2]);
+      let v;
+      if (u4)
+        v = `${o2}  ${s}...`;
+      else if (l2 === "timer")
+        v = `${o2}  ${s} ${_2(w)}`;
+      else {
+        const B = ".".repeat(Math.floor(t2)).slice(0, 3);
+        v = `${o2}  ${s}${B}`;
+      }
+      const j = wrapAnsi(v, x2, {
+        hard: true,
+        trim: false
+      });
+      n3.write(j), r2 = r2 + 1 < E2.length ? r2 + 1 : 0, t2 = t2 < 4 ? t2 + 0.125 : 0;
+    }, F);
+  }, a2 = (e = "", r2 = 0, t2 = false) => {
+    if (!d)
+      return;
+    d = false, clearInterval(T3), y();
+    const o2 = r2 === 0 ? styleText2("green", S_STEP_SUBMIT) : r2 === 1 ? styleText2("red", S_STEP_CANCEL) : styleText2("red", S_STEP_ERROR);
+    s = e ?? s, t2 || (l2 === "timer" ? n3.write(`${o2}  ${s} ${_2(w)}
+`) : n3.write(`${o2}  ${s}
+`)), H(), M2();
+  };
+  return {
+    start: P3,
+    stop: (e = "") => a2(e, 0),
+    message: (e = "") => {
+      s = C3(e ?? s);
+    },
+    cancel: (e = "") => a2(e, 1),
+    error: (e = "") => a2(e, 2),
+    clear: () => a2("", 0, true),
+    get isCancelled() {
+      return S;
+    }
+  };
+}, u4, SELECT_INSTRUCTIONS, c2 = (t2, o2) => t2.includes(`
+`) ? t2.split(`
+`).map((d) => o2(d)).join(`
+`) : o2(t2), select = (t2) => {
+  const o2 = (n3, m3) => {
+    if (n3 === undefined)
+      return "";
+    const s = n3.label ?? String(n3.value);
+    switch (m3) {
+      case "disabled":
+        return `${styleText2("gray", S_RADIO_INACTIVE)} ${c2(s, (i) => styleText2("gray", i))}${n3.hint ? ` ${styleText2("dim", `(${n3.hint ?? "disabled"})`)}` : ""}`;
+      case "selected":
+        return `${c2(s, (i) => styleText2("dim", i))}`;
+      case "active":
+        return `${styleText2("green", S_RADIO_ACTIVE)} ${s}${n3.hint ? ` ${styleText2("dim", `(${n3.hint})`)}` : ""}`;
+      case "cancelled":
+        return `${c2(s, (i) => styleText2(["strikethrough", "dim"], i))}`;
+      default:
+        return `${styleText2("dim", S_RADIO_INACTIVE)} ${c2(s, (i) => styleText2("dim", i))}`;
+    }
+  }, d = t2.showInstructions ?? true;
+  return new n$1({
+    options: t2.options,
+    signal: t2.signal,
+    input: t2.input,
+    output: t2.output,
+    initialValue: t2.initialValue,
+    render() {
+      const n3 = t2.withGuide ?? settings.withGuide, m3 = `${symbol(this.state)}  `, s = `${symbolBar(this.state)}  `, i = wrapTextWithPrefix(t2.output, t2.message, s, m3), u5 = `${n3 ? `${styleText2("gray", S_BAR)}
+` : ""}${i}
+`;
+      switch (this.state) {
+        case "submit": {
+          const r2 = n3 ? `${styleText2("gray", S_BAR)}  ` : "", a2 = wrapTextWithPrefix(t2.output, o2(this.options[this.cursor], "selected"), r2);
+          return `${u5}${a2}`;
+        }
+        case "cancel": {
+          const r2 = n3 ? `${styleText2("gray", S_BAR)}  ` : "", a2 = wrapTextWithPrefix(t2.output, o2(this.options[this.cursor], "cancelled"), r2);
+          return `${u5}${a2}${n3 ? `
+${styleText2("gray", S_BAR)}` : ""}`;
+        }
+        default: {
+          const r2 = n3 ? `${styleText2("cyan", S_BAR)}  ` : "", a2 = u5.split(`
+`).length, p3 = d ? formatInstructionFooter(SELECT_INSTRUCTIONS, n3) : n3 ? [styleText2("cyan", S_BAR_END)] : [], b3 = p3.join(`
+`), f2 = p3.length + 1;
+          return `${u5}${r2}${limitOptions({
+            output: t2.output,
+            cursor: this.cursor,
+            options: this.options,
+            maxItems: t2.maxItems,
+            columnPadding: r2.length,
+            rowPadding: a2 + f2,
+            style: (g2, x2) => o2(g2, g2.disabled ? "disabled" : x2 ? "active" : "inactive")
+          }).join(`
+${r2}`)}
+${b3}
+`;
+        }
+      }
+    }
+  }).prompt();
+}, selectKey = (t2) => {
+  const l2 = (e, a2 = "inactive") => {
+    if (e === undefined)
+      return "";
+    const n3 = e.label ?? String(e.value);
+    return a2 === "selected" ? `${styleText2("dim", n3)}` : a2 === "cancelled" ? `${styleText2(["strikethrough", "dim"], n3)}` : a2 === "active" ? `${styleText2(["bgCyan", "gray"], ` ${e.value} `)} ${n3}${e.hint ? ` ${styleText2("dim", `(${e.hint})`)}` : ""}` : `${styleText2(["gray", "bgWhite", "inverse"], ` ${e.value} `)} ${n3}${e.hint ? ` ${styleText2("dim", `(${e.hint})`)}` : ""}`;
+  };
+  return new u3({
+    options: t2.options,
+    signal: t2.signal,
+    input: t2.input,
+    output: t2.output,
+    initialValue: t2.initialValue,
+    caseSensitive: t2.caseSensitive,
+    render() {
+      const e = t2.withGuide ?? settings.withGuide, a2 = `${e ? `${styleText2("gray", S_BAR)}
+` : ""}${symbol(this.state)}  ${t2.message}
+`;
+      switch (this.state) {
+        case "submit": {
+          const n3 = e ? `${styleText2("gray", S_BAR)}  ` : "", s = this.options.find((u5) => u5.value === this.value) ?? t2.options[0], c3 = wrapTextWithPrefix(t2.output, l2(s, "selected"), n3);
+          return `${a2}${c3}`;
+        }
+        case "cancel": {
+          const n3 = e ? `${styleText2("gray", S_BAR)}  ` : "", s = wrapTextWithPrefix(t2.output, l2(this.options[0], "cancelled"), n3);
+          return `${a2}${s}${e ? `
+${styleText2("gray", S_BAR)}` : ""}`;
+        }
+        default: {
+          const n3 = e ? `${styleText2("cyan", S_BAR)}  ` : "", s = e ? styleText2("cyan", S_BAR_END) : "", c3 = this.options.map((u5, d) => wrapTextWithPrefix(t2.output, l2(u5, d === this.cursor ? "active" : "inactive"), n3)).join(`
+`);
+          return `${a2}${c3}
+${s}
+`;
+        }
+      }
+    }
+  }).prompt();
+}, i, stream, tasks = async (o2, e) => {
+  for (const t2 of o2) {
+    if (t2.enabled === false)
+      continue;
+    const s = spinner(e);
+    s.start(t2.title);
+    const n3 = await t2.task(s.message);
+    s.stop(n3 || t2.title);
+  }
+}, A = (l2) => l2.replace(/\x1b\[(?:\d+;)*\d*[ABCDEFGHfJKSTsu]|\x1b\[(s|u)/g, ""), taskLog = (l2) => {
+  const r2 = l2.output ?? process.stdout, O = getColumns(r2), i2 = styleText2("gray", S_BAR), p3 = l2.spacing ?? 1, k = 3, m3 = l2.retainLog === true, d = !isCI() && isTTY(r2);
+  r2.write(`${i2}
+`), r2.write(`${styleText2("green", S_STEP_SUBMIT)}  ${l2.title}
+`);
+  for (let e = 0;e < p3; e++)
+    r2.write(`${i2}
+`);
+  const n3 = [
+    {
+      value: "",
+      full: ""
+    }
+  ];
+  let v = false;
+  const f2 = (e) => {
+    if (n3.length === 0)
+      return;
+    let s = 0;
+    e && (s += p3 + 2);
+    for (const t2 of n3) {
+      const { value: o2, result: a2 } = t2;
+      let g2 = a2?.message ?? o2;
+      if (g2.length === 0)
+        continue;
+      a2 === undefined && t2.header !== undefined && t2.header !== "" && (g2 += `
+${t2.header}`);
+      const E2 = g2.split(`
+`).reduce((b3, w) => w === "" ? b3 + 1 : b3 + Math.ceil((w.length + k) / O), 0);
+      s += E2;
+    }
+    s > 0 && (s += 1, r2.write(import_sisteransi2.erase.lines(s)));
+  }, h2 = (e, s, t2) => {
+    const o2 = t2 ? `${e.full}
+${e.value}` : e.value;
+    e.header !== undefined && e.header !== "" && log.message(e.header.split(`
+`).map((a2) => styleText2("bold", a2)), {
+      output: r2,
+      secondarySymbol: i2,
+      symbol: i2,
+      spacing: 0
+    }), log.message(o2.split(`
+`).map((a2) => styleText2("dim", a2)), {
+      output: r2,
+      secondarySymbol: i2,
+      symbol: i2,
+      spacing: s ?? p3
+    });
+  }, T3 = () => {
+    for (const e of n3) {
+      const { header: s, value: t2, full: o2 } = e;
+      (s === undefined || s.length === 0) && t2.length === 0 || h2(e, undefined, m3 === true && o2.length > 0);
+    }
+  }, L = (e, s, t2) => {
+    if (f2(false), (t2?.raw !== true || !v) && e.value !== "" && (e.value += `
+`), e.value += A(s), v = t2?.raw === true, l2.limit !== undefined) {
+      const o2 = e.value.split(`
+`), a2 = o2.length - l2.limit;
+      if (a2 > 0) {
+        const g2 = o2.splice(0, a2);
+        m3 && (e.full += (e.full === "" ? "" : `
+`) + g2.join(`
+`));
+      }
+      e.value = o2.join(`
+`);
+    }
+    d && y();
+  }, y = () => {
+    for (const e of n3)
+      e.result ? e.result.status === "error" ? log.error(e.result.message, { output: r2, secondarySymbol: i2, spacing: 0 }) : log.success(e.result.message, { output: r2, secondarySymbol: i2, spacing: 0 }) : e.value !== "" && h2(e, 0);
+  }, B = (e, s) => {
+    f2(false), e.result = s, d && y();
+  };
+  return {
+    message(e, s) {
+      L(n3[0], e, s);
+    },
+    group(e) {
+      const s = {
+        header: e,
+        value: "",
+        full: ""
+      };
+      return n3.push(s), {
+        message(t2, o2) {
+          L(s, t2, o2);
+        },
+        error(t2) {
+          B(s, {
+            status: "error",
+            message: t2
+          });
+        },
+        success(t2) {
+          B(s, {
+            status: "success",
+            message: t2
+          });
+        }
+      };
+    },
+    error(e, s) {
+      f2(true), log.error(e, { output: r2, secondarySymbol: i2, spacing: 1 }), s?.showLog !== false && T3(), n3.splice(1, n3.length - 1), n3[0].value = "", n3[0].full = "";
+    },
+    success(e, s) {
+      f2(true), log.success(e, { output: r2, secondarySymbol: i2, spacing: 1 }), s?.showLog === true && T3(), n3.splice(1, n3.length - 1), n3[0].value = "", n3[0].full = "";
+    }
+  };
+}, text = (e) => new n2({
+  validate: e.validate,
+  placeholder: e.placeholder,
+  defaultValue: e.defaultValue,
+  initialValue: e.initialValue,
+  output: e.output,
+  signal: e.signal,
+  input: e.input,
+  render() {
+    const i2 = e?.withGuide ?? settings.withGuide, s = `${`${i2 ? `${styleText2("gray", S_BAR)}
+` : ""}${symbol(this.state)}  `}${e.message}
+`, c3 = e.placeholder && e.placeholder.length > 0 ? styleText2("inverse", e.placeholder[0]) + styleText2("dim", e.placeholder.slice(1)) : styleText2(["inverse", "hidden"], "_"), o2 = this.userInput ? this.userInputWithCursor : c3, l2 = this.value ?? "";
+    switch (this.state) {
+      case "error": {
+        const n3 = this.error ? `  ${styleText2("yellow", this.error)}` : "", r2 = i2 ? `${styleText2("yellow", S_BAR)}  ` : "", d = i2 ? styleText2("yellow", S_BAR_END) : "";
+        return `${s.trim()}
+${r2}${o2}
+${d}${n3}
+`;
+      }
+      case "submit": {
+        const n3 = l2 ? `  ${styleText2("dim", l2)}` : "", r2 = i2 ? styleText2("gray", S_BAR) : "";
+        return `${s}${r2}${n3}`;
+      }
+      case "cancel": {
+        const n3 = l2 ? `  ${styleText2(["strikethrough", "dim"], l2)}` : "", r2 = i2 ? styleText2("gray", S_BAR) : "";
+        return `${s}${r2}${n3}${l2.trim() ? `
+${r2}` : ""}`;
+      }
+      default: {
+        const n3 = i2 ? `${styleText2("cyan", S_BAR)}  ` : "", r2 = i2 ? styleText2("cyan", S_BAR_END) : "";
+        return `${s}${n3}${o2}
+${r2}
+`;
+      }
+    }
+  }
+}).prompt();
+var init_dist4 = __esm(() => {
+  init_dist3();
+  init_dist3();
+  init_main();
+  init_dist2();
+  import_sisteransi2 = __toESM(require_src(), 1);
+  unicode = isUnicodeSupported();
+  S_STEP_ACTIVE = unicodeOr("◆", "*");
+  S_STEP_CANCEL = unicodeOr("■", "x");
+  S_STEP_ERROR = unicodeOr("▲", "x");
+  S_STEP_SUBMIT = unicodeOr("◇", "o");
+  S_BAR_START = unicodeOr("┌", "T");
+  S_BAR = unicodeOr("│", "|");
+  S_BAR_END = unicodeOr("└", "—");
+  S_BAR_START_RIGHT = unicodeOr("┐", "T");
+  S_BAR_END_RIGHT = unicodeOr("┘", "—");
+  S_RADIO_ACTIVE = unicodeOr("●", ">");
+  S_RADIO_INACTIVE = unicodeOr("○", " ");
+  S_CHECKBOX_ACTIVE = unicodeOr("◻", "[•]");
+  S_CHECKBOX_SELECTED = unicodeOr("◼", "[+]");
+  S_CHECKBOX_INACTIVE = unicodeOr("◻", "[ ]");
+  S_PASSWORD_MASK = unicodeOr("▪", "•");
+  S_BAR_H = unicodeOr("─", "-");
+  S_CORNER_TOP_RIGHT = unicodeOr("╮", "+");
+  S_CONNECT_LEFT = unicodeOr("├", "+");
+  S_CORNER_BOTTOM_RIGHT = unicodeOr("╯", "+");
+  S_CORNER_BOTTOM_LEFT = unicodeOr("╰", "+");
+  S_CORNER_TOP_LEFT = unicodeOr("╭", "+");
+  S_INFO = unicodeOr("●", "•");
+  S_SUCCESS = unicodeOr("◆", "*");
+  S_WARN = unicodeOr("▲", "!");
+  S_ERROR = unicodeOr("■", "x");
+  J = [
+    S_CORNER_TOP_LEFT,
+    S_CORNER_TOP_RIGHT,
+    S_CORNER_BOTTOM_LEFT,
+    S_CORNER_BOTTOM_RIGHT
+  ];
+  K = [S_BAR_START, S_BAR_START_RIGHT, S_BAR_END, S_BAR_END_RIGHT];
+  p2 = {
+    year: "yyyy",
+    month: "mm",
+    day: "dd"
+  };
+  MULTISELECT_INSTRUCTIONS = [
+    `${styleText2("dim", "↑/↓")} to navigate`,
+    `${styleText2("dim", "Space:")} select`,
+    `${styleText2("dim", "Enter:")} confirm`
+  ];
+  log = {
+    message: (s = [], {
+      symbol: e = styleText2("gray", S_BAR),
+      secondarySymbol: r2 = styleText2("gray", S_BAR),
+      output: m3 = process.stdout,
+      spacing: l2 = 1,
+      withGuide: c2
+    } = {}) => {
+      const t2 = [], o2 = c2 ?? settings.withGuide, f2 = o2 ? r2 : "", O = o2 ? `${e}  ` : "", u4 = o2 ? `${r2}  ` : "";
+      for (let i = 0;i < l2; i++)
+        t2.push(f2);
+      const g2 = Array.isArray(s) ? s : s.split(`
+`);
+      if (g2.length > 0) {
+        const [i, ...y] = g2;
+        i.length > 0 ? t2.push(`${O}${i}`) : t2.push(o2 ? e : "");
+        for (const p3 of y)
+          p3.length > 0 ? t2.push(`${u4}${p3}`) : t2.push(o2 ? r2 : "");
+      }
+      m3.write(`${t2.join(`
+`)}
+`);
+    },
+    info: (s, e) => {
+      log.message(s, { ...e, symbol: styleText2("blue", S_INFO) });
+    },
+    success: (s, e) => {
+      log.message(s, { ...e, symbol: styleText2("green", S_SUCCESS) });
+    },
+    step: (s, e) => {
+      log.message(s, { ...e, symbol: styleText2("green", S_STEP_SUBMIT) });
+    },
+    warn: (s, e) => {
+      log.message(s, { ...e, symbol: styleText2("yellow", S_WARN) });
+    },
+    warning: (s, e) => {
+      log.warn(s, e);
+    },
+    error: (s, e) => {
+      log.message(s, { ...e, symbol: styleText2("red", S_ERROR) });
+    }
+  };
+  u4 = {
+    light: unicodeOr("─", "-"),
+    heavy: unicodeOr("━", "="),
+    block: unicodeOr("█", "#")
+  };
+  SELECT_INSTRUCTIONS = [
+    `${styleText2("dim", "↑/↓")} to navigate`,
+    `${styleText2("dim", "Enter:")} confirm`
+  ];
+  i = `${styleText2("gray", S_BAR)}  `;
+  stream = {
+    message: async (e, { symbol: l2 = styleText2("gray", S_BAR) } = {}) => {
+      process.stdout.write(`${styleText2("gray", S_BAR)}
+${l2}  `);
+      let s = 3;
+      for await (let r2 of e) {
+        r2 = r2.replace(/\n/g, `
+${i}`), r2.includes(`
+`) && (s = 3 + stripVTControlCharacters(r2.slice(r2.lastIndexOf(`
+`))).length);
+        const o2 = stripVTControlCharacters(r2).length;
+        s + o2 < process.stdout.columns ? (s += o2, process.stdout.write(r2)) : (process.stdout.write(`
+${i}${r2.trimStart()}`), s = 3 + stripVTControlCharacters(r2.trimStart()).length);
+      }
+      process.stdout.write(`
+`);
+    },
+    info: (e) => stream.message(e, { symbol: styleText2("blue", S_INFO) }),
+    success: (e) => stream.message(e, { symbol: styleText2("green", S_SUCCESS) }),
+    step: (e) => stream.message(e, { symbol: styleText2("green", S_STEP_SUBMIT) }),
+    warn: (e) => stream.message(e, { symbol: styleText2("yellow", S_WARN) }),
+    warning: (e) => stream.warn(e),
+    error: (e) => stream.message(e, { symbol: styleText2("red", S_ERROR) })
+  };
+});
+
 // src/cli.ts
-import { copyFileSync as copyFileSync2, existsSync as existsSync11, mkdirSync as mkdirSync8, readFileSync as readFileSync9, rmSync as rmSync3, writeFileSync as writeFileSync9 } from "node:fs";
-import { dirname as dirname3, isAbsolute as isAbsolute4, join as join12, relative as relative2, resolve as resolve2 } from "node:path";
+import { copyFileSync as copyFileSync2, existsSync as existsSync20, mkdirSync as mkdirSync11, readFileSync as readFileSync17, rmSync as rmSync5, writeFileSync as writeFileSync12 } from "node:fs";
+import { dirname as dirname9, isAbsolute as isAbsolute5, join as join22, relative as relative3, resolve as resolve4 } from "node:path";
 
 // src/audit.ts
 import { spawnSync as spawnSync5 } from "node:child_process";
@@ -7867,7 +10485,7 @@ function validateReceipt(raw) {
     const runs = r.runs;
     need("runs", Array.isArray(runs) && runs.length >= 1 && runs.every((run) => typeof run === "object" && run !== null && typeof run.exit_code === "number" && typeof run.duration_ms === "number" && run.duration_ms >= 0 && HEX64.test(String(run.stdout_sha256)) && HEX64.test(String(run.stderr_sha256))));
     const env = r.env;
-    need("env", !!env && typeof env === "object" && typeof env.os === "string" && env.os !== "" && typeof env.arch === "string" && env.arch !== "" && (env.runtime === "bun" || env.runtime === "node") && typeof env.runtime_version === "string" && env.runtime_version !== "" && typeof env.dirty_tree === "boolean");
+    need("env", !!env && typeof env === "object" && typeof env.os === "string" && env.os !== "" && typeof env.arch === "string" && env.arch !== "" && (env.runtime === "bun" || env.runtime === "unknown" || env.runtime === "node") && typeof env.runtime_version === "string" && env.runtime_version !== "" && typeof env.dirty_tree === "boolean");
     need("signature", r.signature === undefined && r.signer === undefined || typeof r.signature === "string" && r.signature !== "" && typeof r.signer === "string" && r.signer !== "");
   }
   need("task_id", typeof r.task_id === "string" && r.task_id !== "");
@@ -8086,7 +10704,7 @@ function mergeAssumptions(goalLevel, nodeLevel) {
 var renderBlocker = (b) => `${b.node ? `node "${b.node}": ` : ""}${b.decision} — ${b.impact} ${b.next_step}`;
 var SELF_MODIFYING_GLOBS = [
   "hooks/**",
-  ".claude-plugin/**",
+  "templates/**",
   ".github/workflows/**",
   "dist/**",
   "bin/**",
@@ -8388,6 +11006,9 @@ import { join as join9 } from "node:path";
 import { existsSync as existsSync6, readFileSync as readFileSync6 } from "node:fs";
 import { join as join7 } from "node:path";
 var INTERACTION_MODES2 = ["human", "auto"];
+var RUNTIME_SCOPES = ["global", "project"];
+var PACKAGE_MANAGERS = ["npm", "bun"];
+var CONFIG_SCHEMA_VERSION = "1.0";
 var DEFAULT_AUTO_MAX_TASKS = 6;
 function readConfig(root) {
   const path = join7(root, ".sddx", "config.json");
@@ -8478,6 +11099,8 @@ function parseAgentModel(raw) {
   return { models, warnings };
 }
 var bool = (v) => typeof v === "boolean" ? v : null;
+var asRuntimeScope = (v) => typeof v === "string" && RUNTIME_SCOPES.includes(v) ? v : null;
+var asPackageManager = (v) => typeof v === "string" && PACKAGE_MANAGERS.includes(v) ? v : null;
 function resolveConfig(root, env = process.env) {
   const cfg = readConfig(root);
   return {
@@ -8532,29 +11155,157 @@ function resolveConfig(root, env = process.env) {
     agent_model: parseAgentModel(cfg.agent_model).models,
     verbose: resolveValue({ configValue: cfg.verbose, configParse: bool, fallback: false }),
     interaction_mode: interactionMode(root),
-    auto_max_tasks: autoMaxTasks(root)
+    auto_max_tasks: autoMaxTasks(root),
+    runtime_scope: asRuntimeScope(cfg.runtime_scope) ?? "global",
+    package_manager: asPackageManager(cfg.package_manager) ?? "npm",
+    adapters: Array.isArray(cfg.adapters) ? cfg.adapters.filter((a) => typeof a === "string") : [],
+    schema_version: typeof cfg.schema_version === "string" ? cfg.schema_version : null
   };
 }
 var isString = (v) => typeof v === "string";
 var isBoolean = (v) => typeof v === "boolean";
 var isPositiveInt = (v) => positiveInt(v) !== null;
 var isOneOf = (values) => (v) => typeof v === "string" && values.includes(v);
-var CONFIG_SCHEMA = [
-  ["test_globs", isString, "a string"],
-  ["exempt_globs", isString, "a string"],
-  ["max_iterations_default", isPositiveInt, "a positive integer"],
-  ["board_enabled", isBoolean, "a boolean"],
-  ["oracle_runs_default", isPositiveInt, "a positive integer"],
-  ["red_bash_allow", isString, "a string"],
-  ["stuck_threshold", isPositiveInt, "a positive integer"],
-  ["pr_host", isOneOf(["gh", "glab"]), "one of gh|glab"],
-  ["agent_model", isString, "a string"],
-  ["verbose", isBoolean, "a boolean"],
-  ["interaction_mode", isOneOf(INTERACTION_MODES2), `one of ${INTERACTION_MODES2.join("|")}`],
-  ["execution_mode", isOneOf(INTERACTION_MODES2), `one of ${INTERACTION_MODES2.join("|")}`],
-  ["auto_max_tasks", isPositiveInt, "a positive integer"]
+var CONFIG_KEYS = [
+  {
+    key: "test_globs",
+    isValid: isString,
+    expectation: "a string",
+    default: "",
+    title: "Test globs",
+    description: "Space-separated extra globs classified as test files by the TDD gate"
+  },
+  {
+    key: "exempt_globs",
+    isValid: isString,
+    expectation: "a string",
+    default: "",
+    title: "Exempt globs",
+    description: "Space-separated extra globs exempt from the RED-phase write block"
+  },
+  {
+    key: "max_iterations_default",
+    isValid: isPositiveInt,
+    expectation: "a positive integer",
+    default: 5,
+    title: "Max iterations",
+    description: "Default stop rule: max loop iterations per task"
+  },
+  {
+    key: "board_enabled",
+    isValid: isBoolean,
+    expectation: "a boolean",
+    default: true,
+    title: "Board enabled",
+    description: "Regenerate .sddx/BOARD.md automatically"
+  },
+  {
+    key: "oracle_runs_default",
+    isValid: isPositiveInt,
+    expectation: "a positive integer",
+    default: 1,
+    title: "Oracle runs",
+    description: "How many times verify executes the oracle; every run must pass (flakiness detection)"
+  },
+  {
+    key: "red_bash_allow",
+    isValid: isString,
+    expectation: "a string",
+    default: "",
+    title: "RED Bash allow-list",
+    description: "Space-separated extra commands the RED-phase Bash gate allows (extends the built-in list, never replaces it)"
+  },
+  {
+    key: "stuck_threshold",
+    isValid: isPositiveInt,
+    expectation: "a positive integer",
+    default: 3,
+    title: "Stuck threshold",
+    description: "Consecutive identical test failures before a task is flagged stuck and escalation is requested"
+  },
+  {
+    key: "pr_host",
+    isValid: isOneOf(["gh", "glab"]),
+    expectation: "one of gh|glab",
+    default: "",
+    title: "PR host",
+    description: "PR-host CLI for `sddx pr create`: gh | glab. Empty auto-detects from the origin remote"
+  },
+  {
+    key: "agent_model",
+    isValid: isString,
+    expectation: "a string",
+    default: "",
+    title: "Agent model overrides",
+    description: "Comma-separated role=model pairs (roles: orchestrator, planner, tddExecutor, verifier) — advisory, read by /sddx:run when dispatching subagents"
+  },
+  {
+    key: "verbose",
+    isValid: isBoolean,
+    expectation: "a boolean",
+    default: false,
+    title: "Verbose CLI output",
+    description: "When true, sddx config show also prints which source (env var, .sddx/config.json, or built-in default) resolved each key"
+  },
+  {
+    key: "interaction_mode",
+    isValid: isOneOf(INTERACTION_MODES2),
+    expectation: `one of ${INTERACTION_MODES2.join("|")}`,
+    default: "human",
+    title: "Interaction mode",
+    description: "Whether a human is consulted before anything is created: human (one question round, then plan approval) | auto (unattended up to the run branch, refusing rather than prompting at any autonomy bound)"
+  },
+  {
+    key: "execution_mode",
+    isValid: isOneOf(INTERACTION_MODES2),
+    expectation: `one of ${INTERACTION_MODES2.join("|")}`,
+    default: "human",
+    title: "Interaction mode (deprecated spelling)",
+    description: "Renamed to interaction_mode. Still read; never written.",
+    deprecated: true
+  },
+  {
+    key: "auto_max_tasks",
+    isValid: isPositiveInt,
+    expectation: "a positive integer",
+    default: DEFAULT_AUTO_MAX_TASKS,
+    title: "Auto-mode task ceiling",
+    description: "In auto mode, a plan with more nodes than this is refused rather than run"
+  },
+  {
+    key: "runtime_scope",
+    isValid: isOneOf(RUNTIME_SCOPES),
+    expectation: `one of ${RUNTIME_SCOPES.join("|")}`,
+    default: "global",
+    title: "Runtime scope",
+    description: "How generated adapter content invokes sddx: global (an `sddx` on PATH) | project (a lockfile-backed project dependency run through the package manager)"
+  },
+  {
+    key: "package_manager",
+    isValid: isOneOf(PACKAGE_MANAGERS),
+    expectation: `one of ${PACKAGE_MANAGERS.join("|")}`,
+    default: "npm",
+    title: "Package manager",
+    description: "Which package manager runs the project-local binary when runtime_scope=project"
+  },
+  {
+    key: "adapters",
+    isValid: (v) => Array.isArray(v) && v.every((a) => typeof a === "string"),
+    expectation: "an array of strings",
+    default: "",
+    title: "Enabled adapters",
+    description: "Project adapters `sddx init`/`sync` maintain (currently: claude)"
+  },
+  {
+    key: "schema_version",
+    isValid: isString,
+    expectation: "a string",
+    default: CONFIG_SCHEMA_VERSION,
+    title: "Config schema version",
+    description: "The config schema this file was written against"
+  }
 ];
-var KNOWN_CONFIG_KEYS = new Set(CONFIG_SCHEMA.map(([key]) => key));
+var KNOWN_CONFIG_KEYS = new Set(CONFIG_KEYS.map((k) => k.key));
 var REMOVED_CONFIG_KEYS = new Map([
   [
     "workspace_mode",
@@ -8576,10 +11327,14 @@ function validateConfigObject(obj) {
     if (!KNOWN_CONFIG_KEYS.has(key))
       warnings.push(`unrecognized key "${key}"`);
   }
-  for (const [key, isValid, expectation] of CONFIG_SCHEMA) {
+  for (const { key, isValid, expectation } of CONFIG_KEYS) {
     if (key in obj && !isValid(obj[key])) {
       warnings.push(`"${key}" must be ${expectation} — got ${JSON.stringify(obj[key])}`);
     }
+  }
+  const version = obj.schema_version;
+  if (typeof version === "string" && version !== CONFIG_SCHEMA_VERSION) {
+    warnings.push(`"schema_version" is "${version}" but this sddx writes "${CONFIG_SCHEMA_VERSION}" — re-run \`sddx init\` to reconcile it`);
   }
   if (typeof obj.agent_model === "string") {
     warnings.push(...parseAgentModel(obj.agent_model).warnings);
@@ -9235,6 +11990,2046 @@ function computeBoard(cwd) {
   return { path, changed, data: boardDataFromRows(cwd, rows, flags) };
 }
 
+// src/lib/adapter.ts
+import { existsSync as existsSync9, mkdirSync as mkdirSync7, readFileSync as readFileSync9, rmSync as rmSync3, writeFileSync as writeFileSync8 } from "node:fs";
+import { dirname as dirname3, join as join10 } from "node:path";
+var ADAPTER_SCHEMA_VERSION = "1.0";
+var manifestPath = (adapter) => `.sddx/local/adapters/${adapter}-install.json`;
+var declarationPath = (adapter) => `.sddx/adapters/${adapter}.json`;
+function readIfPresent(abs) {
+  try {
+    return existsSync9(abs) ? readFileSync9(abs, "utf8") : null;
+  } catch {
+    return null;
+  }
+}
+function readManifest(root, adapter) {
+  const raw = readIfPresent(join10(root, manifestPath(adapter)));
+  if (raw === null)
+    return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
+      return null;
+    const m = parsed;
+    const record = (v) => typeof v === "object" && v !== null && !Array.isArray(v) ? v : {};
+    return {
+      schema_version: typeof m.schema_version === "string" ? m.schema_version : "",
+      adapter: typeof m.adapter === "string" ? m.adapter : adapter,
+      sddx_version: typeof m.sddx_version === "string" ? m.sddx_version : "",
+      invocation: typeof m.invocation === "string" ? m.invocation : "",
+      files: record(m.files),
+      merged: record(m.merged)
+    };
+  } catch {
+    return null;
+  }
+}
+var hash = (s) => sha256(s);
+var planHasConflicts = (plan) => plan.conflicts.length > 0;
+function disposeFile(root, file, manifest) {
+  const current = readIfPresent(join10(root, file.path));
+  if (current === null)
+    return { kind: "create", path: file.path, contents: file.contents };
+  if (current === file.contents)
+    return { kind: "unchanged", path: file.path };
+  const recorded = manifest?.files[file.path];
+  if (recorded !== undefined && recorded === hash(current)) {
+    return { kind: "update", path: file.path, contents: file.contents };
+  }
+  return {
+    kind: "conflict",
+    path: file.path,
+    reason: recorded === undefined ? "a file sddx does not own already exists here" : "this file was modified after sddx generated it"
+  };
+}
+function disposeMerge(root, target, manifest) {
+  const current = readIfPresent(join10(root, target.path));
+  let merged;
+  try {
+    merged = target.merge(current);
+  } catch (e) {
+    return { kind: "conflict", path: target.path, reason: e.message };
+  }
+  if (current === null)
+    return { kind: "create", path: target.path, contents: merged };
+  if (current === merged)
+    return { kind: "unchanged", path: target.path };
+  const present = target.fingerprint(current);
+  if (present === null) {
+    return { kind: "update", path: target.path, contents: merged };
+  }
+  const recorded = manifest?.merged[target.path];
+  if (recorded === undefined || recorded === present) {
+    return { kind: "update", path: target.path, contents: merged };
+  }
+  return {
+    kind: "conflict",
+    path: target.path,
+    reason: "sddx's entries in this file were modified after they were generated"
+  };
+}
+function disposeRetired(root, adapter, ctx, manifest) {
+  if (manifest === null)
+    return [];
+  const current = new Set(adapter.generate(ctx).map((f) => f.path));
+  const out = [];
+  for (const [path, recordedHash] of Object.entries(manifest.files)) {
+    if (current.has(path))
+      continue;
+    const onDisk = readIfPresent(join10(root, path));
+    if (onDisk === null)
+      continue;
+    if (hash(onDisk) !== recordedHash) {
+      out.push({
+        kind: "conflict",
+        path,
+        reason: "sddx no longer generates this file, and it was modified after sddx wrote it"
+      });
+      continue;
+    }
+    out.push({ kind: "remove", path });
+  }
+  return out;
+}
+function planAdapter(root, adapter, ctx) {
+  const manifest = readManifest(root, adapter.name);
+  const dispositions = [
+    ...adapter.generate(ctx).map((f) => disposeFile(root, f, manifest)),
+    ...adapter.mergeTargets(ctx).map((t) => disposeMerge(root, t, manifest)),
+    ...disposeRetired(root, adapter, ctx, manifest)
+  ];
+  const conflicts = dispositions.filter((d) => d.kind === "conflict").map(({ path, reason }) => ({ path, reason }));
+  return { adapter: adapter.name, dispositions, conflicts };
+}
+
+class AdapterConflictError extends Error {
+  conflicts;
+  constructor(conflicts) {
+    super([
+      `refusing to write ${conflicts.length} file(s) sddx cannot prove it owns:`,
+      ...conflicts.map((c) => `  ${c.path} — ${c.reason}`),
+      "",
+      "Nothing was written. Resolve each one and re-run:",
+      "  - keep your version: move it aside, then re-run to regenerate",
+      "  - discard your version: re-run with --force to overwrite (a .bak backup is kept)"
+    ].join(`
+`));
+    this.conflicts = conflicts;
+    this.name = "AdapterConflictError";
+  }
+}
+var json = (v) => `${JSON.stringify(v, null, 2)}
+`;
+function writeFile(root, rel, contents) {
+  const abs = join10(root, rel);
+  mkdirSync7(dirname3(abs), { recursive: true });
+  writeFileSync8(abs, contents);
+}
+function applyAdapter(root, adapter, ctx, opts = {}) {
+  const plan = planAdapter(root, adapter, ctx);
+  if (planHasConflicts(plan) && !opts.force)
+    throw new AdapterConflictError(plan.conflicts);
+  const written = [];
+  const backedUp = [];
+  const removed = [];
+  const files = adapter.generate(ctx);
+  const targets = adapter.mergeTargets(ctx);
+  const byPath = new Map(plan.dispositions.map((d) => [d.path, d]));
+  for (const file of files) {
+    const d = byPath.get(file.path);
+    if (d?.kind === "unchanged")
+      continue;
+    if (d?.kind === "conflict") {
+      const abs = join10(root, file.path);
+      writeFile(root, `${file.path}.bak`, readFileSync9(abs, "utf8"));
+      backedUp.push(`${file.path}.bak`);
+    }
+    writeFile(root, file.path, file.contents);
+    written.push(file.path);
+  }
+  for (const target of targets) {
+    const d = byPath.get(target.path);
+    if (d?.kind === "unchanged")
+      continue;
+    const abs = join10(root, target.path);
+    const current = readIfPresent(abs);
+    const conflicting = d?.kind === "conflict";
+    if (conflicting && current !== null) {
+      writeFile(root, `${target.path}.bak`, current);
+      backedUp.push(`${target.path}.bak`);
+    }
+    let contents;
+    try {
+      contents = target.merge(current);
+    } catch {
+      if (!conflicting)
+        throw new AdapterConflictError([{ path: target.path, reason: "unmergeable" }]);
+      contents = target.merge(null);
+    }
+    writeFile(root, target.path, contents);
+    written.push(target.path);
+  }
+  for (const d of plan.dispositions) {
+    if (d.kind !== "remove")
+      continue;
+    rmSync3(join10(root, d.path), { force: true });
+    removed.push(d.path);
+  }
+  writeManifest(root, adapter, ctx);
+  return { written, backedUp, removed };
+}
+function writeManifest(root, adapter, ctx) {
+  const files = {};
+  for (const f of adapter.generate(ctx))
+    files[f.path] = hash(f.contents);
+  const merged = {};
+  for (const t of adapter.mergeTargets(ctx)) {
+    const current = readIfPresent(join10(root, t.path));
+    const fp = current === null ? null : t.fingerprint(current);
+    if (fp !== null)
+      merged[t.path] = fp;
+  }
+  const manifest = {
+    schema_version: ADAPTER_SCHEMA_VERSION,
+    adapter: adapter.name,
+    sddx_version: ctx.sddxVersion,
+    invocation: ctx.invocation,
+    files,
+    merged
+  };
+  writeFile(root, manifestPath(adapter.name), json(manifest));
+}
+function writeDeclaration(root, adapter, policy) {
+  writeFile(root, declarationPath(adapter), json(policy));
+}
+function uninstallAdapter(root, adapter, ctx) {
+  const manifest = readManifest(root, adapter.name);
+  const removed = [];
+  const keptModified = [];
+  const expected = new Map(adapter.generate(ctx).map((f) => [f.path, hash(f.contents)]));
+  const owned = new Set([...expected.keys(), ...Object.keys(manifest?.files ?? {})]);
+  for (const path of owned) {
+    const abs = join10(root, path);
+    const current = readIfPresent(abs);
+    if (current === null)
+      continue;
+    const recorded = manifest?.files[path] ?? expected.get(path);
+    if (recorded !== hash(current)) {
+      keptModified.push(path);
+      continue;
+    }
+    rmSync3(abs, { force: true });
+    removed.push(path);
+  }
+  for (const target of adapter.mergeTargets(ctx)) {
+    const abs = join10(root, target.path);
+    const current = readIfPresent(abs);
+    if (current === null)
+      continue;
+    const present = target.fingerprint(current);
+    if (present === null)
+      continue;
+    const recorded = manifest?.merged[target.path];
+    if (recorded !== undefined && recorded !== present) {
+      keptModified.push(target.path);
+      continue;
+    }
+    writeFileSync8(abs, target.unmerge(current));
+    removed.push(`${target.path} (sddx entries)`);
+  }
+  const manifestAbs = join10(root, manifestPath(adapter.name));
+  if (existsSync9(manifestAbs)) {
+    rmSync3(manifestAbs, { force: true });
+    removed.push(manifestPath(adapter.name));
+  }
+  const declAbs = join10(root, declarationPath(adapter.name));
+  if (existsSync9(declAbs)) {
+    rmSync3(declAbs, { force: true });
+    removed.push(declarationPath(adapter.name));
+  }
+  return { removed, keptModified };
+}
+
+// src/lib/adapters/claude.ts
+import { readdirSync as readdirSync7, readFileSync as readFileSync10, statSync as statSync2 } from "node:fs";
+import { join as join11 } from "node:path";
+import { fileURLToPath } from "node:url";
+var INVOCATION_PLACEHOLDER = "{{SDDX}}";
+function templateRoot() {
+  const candidates = ["../../../templates/claude", "../templates/claude"];
+  for (const rel of candidates) {
+    const dir = fileURLToPath(new URL(`${rel}/`, import.meta.url));
+    try {
+      if (statSync2(dir).isDirectory())
+        return dir;
+    } catch {}
+  }
+  throw new Error("sddx: adapter templates not found. This build is incomplete — reinstall @glapsfun/sddx.");
+}
+function readTemplateTree(dir, prefix = "") {
+  const out = [];
+  for (const entry of readdirSync7(dir).sort()) {
+    const abs = join11(dir, entry);
+    const rel = prefix === "" ? entry : `${prefix}/${entry}`;
+    if (statSync2(abs).isDirectory())
+      out.push(...readTemplateTree(abs, rel));
+    else
+      out.push({ rel, contents: readFileSync10(abs, "utf8") });
+  }
+  return out;
+}
+var substitute = (contents, ctx) => contents.split(INVOCATION_PLACEHOLDER).join(ctx.invocation);
+var CLAUDE_DIR = ".claude";
+function generatedPath(kind, name) {
+  return kind === "skills" ? `${CLAUDE_DIR}/skills/sddx-${name}/SKILL.md` : `${CLAUDE_DIR}/agents/sddx-${name}.md`;
+}
+function generate(ctx) {
+  const root = templateRoot();
+  const files = [];
+  for (const { rel, contents } of readTemplateTree(join11(root, "skills"))) {
+    const name = rel.split("/")[0];
+    files.push({ path: generatedPath("skills", name), contents: substitute(contents, ctx) });
+  }
+  for (const { rel, contents } of readTemplateTree(join11(root, "agents"))) {
+    const name = rel.replace(/\.md$/, "");
+    files.push({ path: generatedPath("agents", name), contents: substitute(contents, ctx) });
+  }
+  return files.sort((a, b) => a.path.localeCompare(b.path));
+}
+var HOOK_EVENTS = [
+  "session-start",
+  "tdd-gate",
+  "bash-gate",
+  "approval-gate",
+  "record-test",
+  "stop-gate"
+];
+var SDDX_HOOK_COMMAND = new RegExp(`(?:^|[\\s"'/])(?:sddx|hooks\\.mjs)["']?\\s+(?:hook\\s+)?(?:${HOOK_EVENTS.join("|")})\\s*$`);
+var isSddxCommand = (command) => typeof command === "string" && SDDX_HOOK_COMMAND.test(command.trim());
+var isSddxEntry = (entry) => Array.isArray(entry.hooks) && entry.hooks.length > 0 && entry.hooks.every((h) => isSddxCommand(h?.command));
+function templateHooks(ctx) {
+  const raw = readFileSync10(join11(templateRoot(), "hooks", "hooks.json"), "utf8");
+  const parsed = JSON.parse(substitute(raw, ctx));
+  return parsed.hooks;
+}
+
+class SettingsUnreadableError extends Error {
+  constructor(reason) {
+    super(`${CLAUDE_DIR}/settings.json ${reason} — refusing to overwrite it`);
+    this.name = "SettingsUnreadableError";
+  }
+}
+function detectIndent(source) {
+  const m = /\n(\x20+)"/.exec(source);
+  return m ? m[1].length : 2;
+}
+function mergeSettings(existing, ctx) {
+  let doc = {};
+  const source = existing ?? "";
+  if (source.trim() !== "") {
+    let parsed;
+    try {
+      parsed = JSON.parse(source);
+    } catch (e) {
+      throw new SettingsUnreadableError(`is not valid JSON (${e.message})`);
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      throw new SettingsUnreadableError("is not a JSON object");
+    }
+    doc = parsed;
+  }
+  const hooks = { ...doc.hooks ?? {} };
+  const ours = templateHooks(ctx);
+  for (const [event, ourEntries] of Object.entries(ours)) {
+    const theirs = (hooks[event] ?? []).filter((e) => !isSddxEntry(e));
+    hooks[event] = [...theirs, ...ourEntries];
+  }
+  for (const [event, entries] of Object.entries(hooks)) {
+    if (event in ours)
+      continue;
+    const theirs = (entries ?? []).filter((e) => !isSddxEntry(e));
+    if (theirs.length === 0)
+      delete hooks[event];
+    else
+      hooks[event] = theirs;
+  }
+  return `${JSON.stringify({ ...doc, hooks }, null, detectIndent(source))}
+`;
+}
+function unmergeSettings(existing) {
+  let doc;
+  try {
+    const parsed = JSON.parse(existing);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return existing;
+    }
+    doc = parsed;
+  } catch {
+    return existing;
+  }
+  const hooks = { ...doc.hooks ?? {} };
+  for (const [event, entries] of Object.entries(hooks)) {
+    const theirs = (entries ?? []).filter((e) => !isSddxEntry(e));
+    if (theirs.length === 0)
+      delete hooks[event];
+    else
+      hooks[event] = theirs;
+  }
+  const next = { ...doc };
+  if (Object.keys(hooks).length === 0)
+    delete next.hooks;
+  else
+    next.hooks = hooks;
+  return `${JSON.stringify(next, null, detectIndent(existing))}
+`;
+}
+function settingsFingerprint(existing) {
+  let doc;
+  try {
+    doc = JSON.parse(existing);
+  } catch {
+    return null;
+  }
+  const hooks = doc.hooks ?? {};
+  const ourEntries = {};
+  for (const [event, entries] of Object.entries(hooks)) {
+    const mine = (entries ?? []).filter((e) => isSddxEntry(e));
+    if (mine.length > 0)
+      ourEntries[event] = mine;
+  }
+  if (Object.keys(ourEntries).length === 0)
+    return null;
+  return sha256(JSON.stringify(sortKeys(ourEntries)));
+}
+function sortKeys(value) {
+  if (Array.isArray(value))
+    return value.map(sortKeys);
+  if (typeof value === "object" && value !== null) {
+    const out = {};
+    for (const key of Object.keys(value).sort()) {
+      out[key] = sortKeys(value[key]);
+    }
+    return out;
+  }
+  return value;
+}
+function mergeTargets(ctx) {
+  return [
+    {
+      path: `${CLAUDE_DIR}/settings.json`,
+      merge: (existing) => mergeSettings(existing, ctx),
+      unmerge: unmergeSettings,
+      fingerprint: settingsFingerprint
+    }
+  ];
+}
+var claudeAdapter = { name: "claude", generate, mergeTargets };
+
+// src/lib/doctor.ts
+import { spawnSync as spawnSync8 } from "node:child_process";
+import { existsSync as existsSync10, readFileSync as readFileSync11 } from "node:fs";
+import { join as join12 } from "node:path";
+
+// src/lib/runtime.ts
+var LOCAL_EXEC = {
+  npm: ["npm", "exec", "--offline", "--no", "--", "sddx"],
+  bun: ["bunx", "--no-install", "sddx"]
+};
+function sddxInvocation(scope, pm) {
+  return scope === "global" ? ["sddx"] : [...LOCAL_EXEC[pm]];
+}
+function sddxCommand(scope, pm) {
+  return sddxInvocation(scope, pm).join(" ");
+}
+var ALL_INVOCATION_PREFIXES = [
+  ["sddx"],
+  ...Object.values(LOCAL_EXEC)
+];
+function isSddxInvocation(words) {
+  return ALL_INVOCATION_PREFIXES.some((prefix) => words.length >= prefix.length && prefix.every((word, i) => words[i] === word));
+}
+
+// src/lib/doctor.ts
+var pass = (id, detail) => ({ id, status: "pass", detail });
+var warn = (id, detail, fix) => ({
+  id,
+  status: "warn",
+  detail,
+  fix
+});
+var fail = (id, detail, fix) => ({
+  id,
+  status: "fail",
+  detail,
+  fix
+});
+var BUN_INSTALL = "curl -fsSL https://bun.sh/install | bash";
+function which(bin) {
+  const r = spawnSync8("command", ["-v", bin], { encoding: "utf8", shell: true });
+  const out = (r.stdout ?? "").trim();
+  return r.status === 0 && out !== "" ? out : null;
+}
+function checkBun() {
+  const bun = globalThis.Bun;
+  if (bun)
+    return pass("bun", `bun ${bun.version} (running this process)`);
+  const found = which("bun");
+  if (found)
+    return pass("bun", `bun found at ${found}`);
+  return fail("bun", "bun is not on PATH, and it is the only supported runtime", BUN_INSTALL);
+}
+function checkGit(root, cwd) {
+  if (root === null) {
+    return fail("git-repository", `${cwd} is not inside a git repository`, "git init   # or run sddx from inside an existing repository");
+  }
+  return pass("git-repository", root);
+}
+function checkConfig(root) {
+  const path = join12(root, ".sddx", "config.json");
+  if (!existsSync10(path)) {
+    return fail("project-config", ".sddx/config.json is missing", "sddx init");
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(readFileSync11(path, "utf8"));
+  } catch (e) {
+    return fail("project-config", `.sddx/config.json is not valid JSON: ${e.message}`, "sddx init");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return fail("project-config", ".sddx/config.json is not a JSON object", "sddx init");
+  }
+  const warnings = validateConfigObject(parsed);
+  if (warnings.length > 0) {
+    return warn("project-config", warnings.join("; "), "sddx config validate");
+  }
+  return pass("project-config", `schema_version ${CONFIG_SCHEMA_VERSION}`);
+}
+function projectDependency(root) {
+  let declared = false;
+  try {
+    const pkg = JSON.parse(readFileSync11(join12(root, "package.json"), "utf8"));
+    declared = pkg.dependencies?.["@glapsfun/sddx"] !== undefined || pkg.devDependencies?.["@glapsfun/sddx"] !== undefined;
+  } catch {
+    declared = false;
+  }
+  let installedVersion = null;
+  try {
+    const manifest = join12(root, "node_modules", "@glapsfun", "sddx", "package.json");
+    installedVersion = JSON.parse(readFileSync11(manifest, "utf8")).version;
+  } catch {
+    installedVersion = null;
+  }
+  return { declared, installedVersion };
+}
+function checkRuntimeScope(root, cfg, runningVersion) {
+  const invocation = sddxCommand(cfg.runtime_scope, cfg.package_manager);
+  const checks = [pass("runtime-scope", `${cfg.runtime_scope} → \`${invocation}\``)];
+  if (cfg.runtime_scope === "global") {
+    const found = which("sddx");
+    checks.push(found ? pass("runtime-resolution", `sddx resolves to ${found}`) : fail("runtime-resolution", "runtime_scope is global but no `sddx` is on PATH", "npm install -g @glapsfun/sddx"));
+    return checks;
+  }
+  const { declared, installedVersion } = projectDependency(root);
+  const install = cfg.package_manager === "bun" ? "bun add --dev @glapsfun/sddx" : "npm install --save-dev @glapsfun/sddx";
+  if (!declared) {
+    checks.push(fail("runtime-resolution", "runtime_scope is project but @glapsfun/sddx is not a project dependency", install));
+  } else if (installedVersion === null) {
+    checks.push(fail("runtime-resolution", "@glapsfun/sddx is declared but not installed (no node_modules entry)", cfg.package_manager === "bun" ? "bun install" : "npm install"));
+  } else if (installedVersion !== runningVersion) {
+    checks.push(warn("runtime-resolution", `project-local @glapsfun/sddx is ${installedVersion}, this process is ${runningVersion}`, install));
+  } else {
+    checks.push(pass("runtime-resolution", `project-local @glapsfun/sddx ${installedVersion}`));
+  }
+  const globalBin = which("sddx");
+  if (globalBin !== null) {
+    checks.push(warn("runtime-mismatch", `this repository pins its runtime, but a global sddx exists at ${globalBin}`, `${invocation} doctor`));
+  }
+  return checks;
+}
+function checkAdapters(root, cfg, adapters, ctx) {
+  if (cfg.adapters.length === 0) {
+    return [pass("adapters", "no adapters enabled")];
+  }
+  const checks = [];
+  for (const name of cfg.adapters) {
+    const adapter = adapters[name];
+    if (!adapter) {
+      checks.push(fail(`adapter:${name}`, `config enables adapter "${name}", which this sddx does not implement`, "sddx config validate"));
+      continue;
+    }
+    const manifest = readManifest(root, name);
+    const plan = planAdapter(root, adapter, ctx);
+    if (plan.conflicts.length > 0) {
+      checks.push(fail(`adapter:${name}`, plan.conflicts.map((c) => `${c.path} — ${c.reason}`).join("; "), `sddx sync --adapter ${name}   # or --force to overwrite (keeps a .bak)`));
+      continue;
+    }
+    const stale = plan.dispositions.filter((d) => d.kind === "create" || d.kind === "update");
+    if (stale.length > 0) {
+      checks.push(warn(`adapter:${name}`, `${stale.length} generated file(s) are out of date: ${stale.map((d) => d.path).join(", ")}`, `sddx sync --adapter ${name} --yes`));
+      continue;
+    }
+    if (manifest !== null && manifest.invocation !== ctx.invocation) {
+      checks.push(warn(`adapter:${name}`, `generated content invokes \`${manifest.invocation}\` but policy says \`${ctx.invocation}\``, `sddx sync --adapter ${name} --yes`));
+      continue;
+    }
+    checks.push(pass(`adapter:${name}`, `up to date (${Object.keys(manifest?.files ?? {}).length} files)`));
+    checks.push(...checkGeneratedTracked(root, adapter, ctx));
+  }
+  return checks;
+}
+function checkGeneratedTracked(root, adapter, ctx) {
+  const paths = [
+    ...adapter.generate(ctx).map((f) => f.path),
+    ...adapter.mergeTargets(ctx).map((t) => t.path)
+  ];
+  const ignored = paths.filter((p) => {
+    const r = spawnSync8("git", ["check-ignore", "-q", p], { cwd: root });
+    return r.status === 0;
+  });
+  if (ignored.length === 0)
+    return [];
+  return [
+    warn(`adapter:${adapter.name}:tracked`, `${ignored.length} generated file(s) are gitignored (${ignored.slice(0, 3).join(", ")}${ignored.length > 3 ? ", …" : ""}) — teammates will not get the TDD gate`, `git check-ignore -v ${ignored[0]}   # then un-ignore the sddx-owned paths, or accept a local-only setup`)
+  ];
+}
+function checkLegacyPlugin(root) {
+  const findings = [];
+  if (existsSync10(join12(root, ".claude-plugin", "marketplace.json"))) {
+    findings.push(".claude-plugin/marketplace.json is still present");
+  }
+  const settings = join12(root, ".claude", "settings.json");
+  if (existsSync10(settings)) {
+    try {
+      if (readFileSync11(settings, "utf8").includes("CLAUDE_PLUGIN_ROOT")) {
+        findings.push(".claude/settings.json still registers plugin-root hooks");
+      }
+    } catch {}
+  }
+  if (findings.length === 0)
+    return [pass("legacy-plugin", "no legacy plugin state")];
+  return [
+    warn("legacy-plugin", `${findings.join("; ")}. Running both is safe while you verify, but the duplicate hook registrations will both fire.`, "sddx init --adapter claude && sddx doctor   # then remove the plugin from Claude Code")
+  ];
+}
+function runDoctor(opts) {
+  const checks = [checkBun(), checkGit(opts.root, opts.cwd)];
+  checks.push(pass("sddx-version", opts.runningVersion));
+  if (opts.root !== null) {
+    const configCheck = checkConfig(opts.root);
+    checks.push(configCheck);
+    if (opts.config !== null && opts.adapterContext !== null && configCheck.status !== "fail") {
+      checks.push(...checkRuntimeScope(opts.root, opts.config, opts.runningVersion));
+      checks.push(...checkAdapters(opts.root, opts.config, opts.adapters, opts.adapterContext));
+    }
+    checks.push(...checkLegacyPlugin(opts.root));
+  }
+  return { checks, failed: checks.some((c) => c.status === "fail") };
+}
+
+// src/lib/globalstate.ts
+import { chmodSync as chmodSync2, existsSync as existsSync11, mkdirSync as mkdirSync8, readFileSync as readFileSync12, writeFileSync as writeFileSync9 } from "node:fs";
+import { homedir as homedir2 } from "node:os";
+import { dirname as dirname4, join as join13 } from "node:path";
+function globalRoot(env = process.env) {
+  return env.SDDX_HOME ?? join13(homedir2(), ".sddx");
+}
+function normalizeRemote(url) {
+  let s = url.trim().replace(/\.git$/, "");
+  s = s.replace(/^ssh:\/\//, "").replace(/^https?:\/\//, "").replace(/^git:\/\//, "");
+  s = s.replace(/^[^@/]+@/, "");
+  s = s.replace(":", "/");
+  return s.toLowerCase();
+}
+function slug(source) {
+  const name = source.split("/").filter(Boolean).pop() ?? "repo";
+  const cleaned = name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  return cleaned === "" ? "repo" : cleaned.slice(0, 32);
+}
+function projectKey(root) {
+  const attempt = (fn) => {
+    try {
+      const v = fn().trim();
+      return v === "" ? null : v;
+    } catch {
+      return null;
+    }
+  };
+  const remote = attempt(() => git(root, "config", "--get", "remote.origin.url"));
+  if (remote !== null) {
+    const normalized = normalizeRemote(remote);
+    return { key: `${slug(normalized)}-${sha256(normalized).slice(0, 12)}`, source: "remote" };
+  }
+  const firstCommit = attempt(() => {
+    const shas = git(root, "rev-list", "--max-parents=0", "HEAD").split(`
+`);
+    return (shas[shas.length - 1] ?? "").trim();
+  });
+  if (firstCommit !== null) {
+    return {
+      key: `${slug(root)}-${sha256(firstCommit).slice(0, 12)}`,
+      source: "first-commit"
+    };
+  }
+  return { key: `${slug(root)}-${sha256(root).slice(0, 12)}`, source: "path" };
+}
+var projectDir = (root, env) => join13(globalRoot(env), "projects", projectKey(root).key);
+function mkdirPrivate(dir) {
+  mkdirSync8(dir, { recursive: true, mode: 448 });
+  try {
+    chmodSync2(dir, 448);
+  } catch {}
+}
+function writePrivate(path, contents) {
+  mkdirPrivate(dirname4(path));
+  writeFileSync9(path, contents, { mode: 384 });
+  try {
+    chmodSync2(path, 384);
+  } catch {}
+}
+var GLOBAL_SCHEMA_VERSION = "1.0";
+function rememberProject(root, env) {
+  try {
+    const { key, source } = projectKey(root);
+    const metadata = {
+      schema_version: GLOBAL_SCHEMA_VERSION,
+      project_key: key,
+      key_source: source,
+      last_known_path: root
+    };
+    writePrivate(join13(projectDir(root, env), "metadata.json"), `${JSON.stringify(metadata, null, 2)}
+`);
+    return metadata;
+  } catch {
+    return null;
+  }
+}
+
+// src/lib/hookdispatch.ts
+import { existsSync as existsSync15, readdirSync as readdirSync9, readFileSync as readFileSync15 } from "node:fs";
+import { join as join17 } from "node:path";
+
+// src/tdd-gate.ts
+import { relative as relative2, resolve as resolve2 } from "node:path";
+
+// src/lib/resolve.ts
+import { existsSync as existsSync12, readdirSync as readdirSync8, readFileSync as readFileSync13, statSync as statSync3 } from "node:fs";
+import { basename, dirname as dirname5, join as join14, resolve as resolvePath } from "node:path";
+function workspaceRoot(startPath) {
+  let dir = resolvePath(startPath);
+  try {
+    if (statSync3(dir).isFile())
+      dir = dirname5(dir);
+  } catch {
+    dir = dirname5(dir);
+  }
+  while (true) {
+    if (existsSync12(join14(dir, ".git")))
+      return dir;
+    const parent = dirname5(dir);
+    if (parent === dir)
+      return null;
+    dir = parent;
+  }
+}
+function headBranch(root) {
+  try {
+    const dotGit = join14(root, ".git");
+    let gitDir = dotGit;
+    if (statSync3(dotGit).isFile()) {
+      const m = /^gitdir:\s*(.+)\s*$/m.exec(readFileSync13(dotGit, "utf8"));
+      if (!m)
+        return null;
+      gitDir = resolvePath(root, m[1].trim());
+    }
+    const head = readFileSync13(join14(gitDir, "HEAD"), "utf8").trim();
+    const ref = /^ref:\s*refs\/heads\/(.+)$/.exec(head);
+    return ref ? ref[1] : null;
+  } catch {
+    return null;
+  }
+}
+function readTaskFile(root, id) {
+  const path = join14(root, ".sddx", "tasks", `${id}.json`);
+  if (!existsSync12(path))
+    return null;
+  try {
+    return { kind: "task", root, task: JSON.parse(readFileSync13(path, "utf8")) };
+  } catch (e) {
+    return { kind: "corrupt", root, path, error: e.message };
+  }
+}
+function resolutionFailureReason(res, action) {
+  if (res.kind === "ambiguous") {
+    return `sddx TDD gate: ambiguous governing task — ${res.ids.join(" and ")} are both active in this workspace. ` + "The gate refuses to guess. Abandon or finish one, or work in each task's own worktree.";
+  }
+  if (res.kind === "corrupt") {
+    return `sddx TDD gate: task state at ${res.path} is unreadable (${res.error}). Fix or remove it before ${action} — a broken state file must not silently disable the gate.`;
+  }
+  return null;
+}
+function resolveTask(startPath) {
+  const root = workspaceRoot(startPath);
+  if (!root || !existsSync12(join14(root, ".sddx")))
+    return { kind: "none" };
+  if (basename(dirname5(root)) === ".sddx-worktrees") {
+    const byName = readTaskFile(root, basename(root));
+    if (byName)
+      return byName;
+  }
+  const branch = headBranch(root);
+  if (branch?.startsWith("sddx/")) {
+    const byBranch = readTaskFile(root, branch.slice("sddx/".length));
+    if (byBranch)
+      return byBranch;
+  }
+  const tasksDir = join14(root, ".sddx", "tasks");
+  if (!existsSync12(tasksDir))
+    return { kind: "none" };
+  const candidates = [];
+  for (const file of readdirSync8(tasksDir).filter((f) => f.endsWith(".json"))) {
+    const path = join14(tasksDir, file);
+    let task;
+    try {
+      task = JSON.parse(readFileSync13(path, "utf8"));
+    } catch (e) {
+      return { kind: "corrupt", root, path, error: e.message };
+    }
+    if (!isTerminal(task.phase) && !isDeferred(task))
+      candidates.push(task);
+  }
+  if (candidates.length === 0)
+    return { kind: "none" };
+  if (candidates.length === 1)
+    return { kind: "task", root, task: candidates[0] };
+  return { kind: "ambiguous", root, ids: candidates.map((t) => t.id).sort() };
+}
+
+// src/tdd-gate.ts
+function loadGateConfig(root, env = process.env) {
+  const fileConfig = readConfig(root);
+  return {
+    testGlobs: env.SDDX_TEST_GLOBS ?? fileConfig.test_globs,
+    exemptGlobs: env.SDDX_EXEMPT_GLOBS ?? fileConfig.exempt_globs
+  };
+}
+function blockMessage(task, relPath, config) {
+  const testGlobs = [
+    ...BUILTIN_TEST_GLOBS,
+    ...(config.testGlobs ?? "").split(/\s+/).filter((g) => g !== "")
+  ];
+  return [
+    `sddx TDD gate: blocked write to ${relPath} — task ${task.id} is in ${task.phase} (rule: implementation path).`,
+    `Before GREEN, only test files may change. Do this instead:`,
+    `  1. Write a failing test for "${task.task}" under a test path (${testGlobs.slice(0, 4).join(", ")}, …).`,
+    "  2. Run the test runner so the failure is recorded (the gate lifts in GREEN).",
+    `  3. Only for files that genuinely cannot be test-driven: sddx task allow ${task.id} ${relPath} — the exemption is audited in the receipt.`
+  ].join(`
+`);
+}
+function inScope(relPath, scope) {
+  const path = normalizeRelPath(relPath);
+  return scope.some((glob) => globMatch(normalizeRelPath(glob), path));
+}
+function scopeBlockMessage(task, relPath, scope) {
+  return [
+    `sddx TDD gate: blocked write to ${relPath} — outside task ${task.id}'s declared scope.`,
+    `This task may only write: ${scope.join(", ")}.`,
+    "Do one of:",
+    "  1. Write inside the declared scope.",
+    `  2. If this file genuinely belongs to the task, widen its spec's scope and re-create the task.`,
+    `  3. For a one-off exception: sddx task allow ${task.id} ${relPath} — audited in the receipt.`
+  ].join(`
+`);
+}
+var APPROVALS_PATH = /(^|\/)\.sddx\/approvals\//;
+var CONFIG_PATH = /(^|\/)\.sddx\/config\.json$/;
+function approvalWriteBlock(relOrAbs) {
+  const path = normalizeRelPath(relOrAbs);
+  if (APPROVALS_PATH.test(path)) {
+    return [
+      `sddx approval gate: blocked write to ${relOrAbs} — approval tokens are not editable.`,
+      "A token records that a human approved a plan, so writing one directly would forge that.",
+      "Approve a plan the only way that counts (it raises your own permission dialog):",
+      "  sddx graph create --graph <path> --dry-run   # review it first",
+      "  sddx graph approve --graph <path>"
+    ].join(`
+`);
+  }
+  if (CONFIG_PATH.test(path)) {
+    return [
+      `sddx approval gate: blocked write to ${relOrAbs} — sddx configuration is not tool-editable.`,
+      "It carries interaction_mode, which decides whether a plan needs your approval at all,",
+      "so a tool that could rewrite it could switch off the gate that constrains it.",
+      "Edit it yourself, or inspect the effective values with: sddx config show"
+    ].join(`
+`);
+  }
+  return null;
+}
+function tddGate(input, env = process.env) {
+  const anchor = input.filePath ? resolve2(input.cwd ?? process.cwd(), input.filePath) : input.cwd ?? process.cwd();
+  if (input.filePath) {
+    const forged = approvalWriteBlock(input.filePath) ?? approvalWriteBlock(anchor);
+    if (forged)
+      return { allow: false, reason: forged };
+  }
+  const res = resolveTask(anchor);
+  if (res.kind === "none")
+    return { allow: true };
+  const failure = resolutionFailureReason(res, "writing");
+  if (failure)
+    return { allow: false, reason: failure };
+  if (res.kind !== "task")
+    return { allow: true };
+  if (!input.filePath)
+    return { allow: true };
+  const relPath = relative2(res.root, anchor);
+  const config = input.config ?? loadGateConfig(res.root, env);
+  const cls = classify(relPath, res.task.allow, config);
+  if ((res.task.phase === "PLAN" || res.task.phase === "RED") && cls.rule === "implementation") {
+    return { allow: false, reason: blockMessage(res.task, relPath, config) };
+  }
+  const scope = res.task.scope ?? [];
+  if (cls.rule === "implementation" && scope.length > 0 && !inScope(relPath, scope)) {
+    return { allow: false, reason: scopeBlockMessage(res.task, relPath, scope) };
+  }
+  return { allow: true };
+}
+
+// src/lib/approvalgate.ts
+import { existsSync as existsSync13, readFileSync as readFileSync14 } from "node:fs";
+import { dirname as dirname6, isAbsolute as isAbsolute3, join as join15, resolve as resolve3 } from "node:path";
+
+// src/lib/spec.ts
+var ORACLE_TYPES = new Set(["command", "test-suite", "browser", "manual"]);
+function toList(v) {
+  if (Array.isArray(v))
+    return v.map(String);
+  if (typeof v === "string" && v.trim() !== "")
+    return [v];
+  return [];
+}
+function parseSpec(yamlText) {
+  let raw;
+  try {
+    raw = $parse(yamlText);
+  } catch (e) {
+    return { errors: [`invalid YAML: ${e.message}`] };
+  }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { errors: ["spec must be a YAML mapping"] };
+  }
+  const r = raw;
+  const errors2 = [];
+  if (typeof r.task !== "string" || r.task.trim() === "") {
+    errors2.push("task: one-sentence description required");
+  }
+  const sc = r.success_criteria;
+  if (!Array.isArray(sc) || sc.length === 0 || !sc.every((s) => typeof s === "string" && s.trim() !== "")) {
+    errors2.push("success_criteria: non-empty list of binary criteria required");
+  }
+  const o = r.oracle;
+  if (typeof o !== "object" || o === null || Array.isArray(o)) {
+    errors2.push("oracle: required — no oracle, no goal");
+  } else {
+    const or2 = o;
+    if (typeof or2.type !== "string" || !ORACLE_TYPES.has(or2.type)) {
+      errors2.push("oracle.type: must be one of command | test-suite | browser | manual");
+    }
+    if (or2.type !== "manual" && (typeof or2.run !== "string" || or2.run.trim() === "")) {
+      errors2.push("oracle.run: command required for non-manual oracles");
+    }
+    if (or2.runs !== undefined && (typeof or2.runs !== "number" || !Number.isInteger(or2.runs) || or2.runs < 1)) {
+      errors2.push("oracle.runs: must be an integer >= 1");
+    }
+  }
+  if (r.scope !== undefined) {
+    if (!Array.isArray(r.scope) || r.scope.length === 0 || !r.scope.every((s) => typeof s === "string" && s.trim() !== "")) {
+      errors2.push("scope: when present, must be a non-empty list of non-empty globs");
+    }
+  }
+  if (r.on_dependency_failure !== undefined && r.on_dependency_failure !== "skip" && r.on_dependency_failure !== "block") {
+    errors2.push("on_dependency_failure: must be one of skip | block");
+  }
+  if (r.assumptions !== undefined) {
+    if (!Array.isArray(r.assumptions) || r.assumptions.length === 0 || !r.assumptions.every((s) => typeof s === "string" && s.trim() !== "")) {
+      errors2.push("assumptions: when present, must be a non-empty list of non-empty strings");
+    }
+  }
+  const retryRaw = r.retry;
+  if (retryRaw !== undefined) {
+    if (typeof retryRaw !== "object" || retryRaw === null || Array.isArray(retryRaw)) {
+      errors2.push("retry: must be a mapping with optional max_attempts/workspace");
+    } else {
+      const rr = retryRaw;
+      if (rr.max_attempts !== undefined && (typeof rr.max_attempts !== "number" || !Number.isInteger(rr.max_attempts) || rr.max_attempts < 1)) {
+        errors2.push("retry.max_attempts: must be an integer >= 1");
+      }
+      if (rr.workspace !== undefined && rr.workspace !== "fresh" && rr.workspace !== "reuse") {
+        errors2.push("retry.workspace: must be one of fresh | reuse");
+      }
+    }
+  }
+  if (errors2.length > 0)
+    return { errors: errors2 };
+  const or = o;
+  return {
+    errors: [],
+    spec: {
+      task: r.task.trim(),
+      context: toList(r.context),
+      success_criteria: sc.map((s) => s.trim()),
+      scope: Array.isArray(r.scope) ? r.scope.map((s) => s.trim()) : [],
+      oracle: {
+        type: or.type,
+        run: typeof or.run === "string" ? or.run.trim() : "",
+        expect: typeof or.expect === "string" ? or.expect.trim() : "exit 0",
+        ...typeof or.runs === "number" ? { runs: or.runs } : {}
+      },
+      stop_rules: Array.isArray(r.stop_rules) ? r.stop_rules : [],
+      out_of_scope: toList(r.out_of_scope),
+      assumptions: Array.isArray(r.assumptions) ? r.assumptions.map((s) => s.trim()) : [],
+      ...r.on_dependency_failure !== undefined ? { on_dependency_failure: r.on_dependency_failure } : {},
+      ...retryRaw !== undefined && typeof retryRaw === "object" && retryRaw !== null ? {
+        retry: {
+          ...typeof retryRaw.max_attempts === "number" ? { max_attempts: retryRaw.max_attempts } : {},
+          ...typeof retryRaw.workspace === "string" ? {
+            workspace: retryRaw.workspace
+          } : {}
+        }
+      } : {}
+    }
+  };
+}
+
+// src/lib/approvalgate.ts
+var pass2 = { decision: "pass" };
+var ask = (reason) => ({ decision: "ask", reason });
+function lex(command) {
+  const segments2 = [];
+  let tokens = [];
+  let cur = "";
+  let started = false;
+  let quote = null;
+  let opaque = false;
+  const endToken = () => {
+    if (started)
+      tokens.push(cur);
+    cur = "";
+    started = false;
+  };
+  const endSegment = () => {
+    endToken();
+    if (tokens.length > 0)
+      segments2.push(tokens);
+    tokens = [];
+  };
+  for (let i = 0;i < command.length; i++) {
+    const c = command[i];
+    if (quote === "'") {
+      if (c === "'")
+        quote = null;
+      else
+        cur += c;
+      started = true;
+      continue;
+    }
+    if (quote === '"') {
+      if (c === '"') {
+        quote = null;
+      } else if (c === "\\" && i + 1 < command.length) {
+        i += 1;
+        cur += command[i];
+      } else {
+        if (c === "$" || c === "`")
+          opaque = true;
+        cur += c;
+      }
+      started = true;
+      continue;
+    }
+    if (c === "\\") {
+      if (command[i + 1] === `
+`) {
+        i += 1;
+        continue;
+      }
+      if (i + 1 < command.length) {
+        i += 1;
+        cur += command[i];
+        started = true;
+      }
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      quote = c;
+      started = true;
+      continue;
+    }
+    if (c === "#" && !started) {
+      while (i < command.length && command[i] !== `
+`)
+        i += 1;
+      continue;
+    }
+    if (c === "$" || c === "`") {
+      opaque = true;
+      cur += c;
+      started = true;
+      continue;
+    }
+    if (c === "&" && command[i + 1] === "&" || c === "|" && command[i + 1] === "|") {
+      endSegment();
+      i += 1;
+      continue;
+    }
+    if (c === ";" || c === "|" || c === "&" || c === `
+`) {
+      endSegment();
+      continue;
+    }
+    if (/\s/.test(c)) {
+      endToken();
+      continue;
+    }
+    cur += c;
+    started = true;
+  }
+  if (quote !== null)
+    opaque = true;
+  endSegment();
+  return { segments: segments2, opaque };
+}
+var segments2 = (command) => lex(command).segments;
+var hasFlag = (tokens, name) => tokens.includes(name);
+function tokenValue(tokens, name) {
+  for (let i = 0;i < tokens.length; i++) {
+    if (tokens[i] === name)
+      return tokens[i + 1];
+    if (tokens[i].startsWith(`${name}=`))
+      return tokens[i].slice(name.length + 1);
+  }
+  return;
+}
+var isSubcommand = (tokens, a, b) => {
+  const i = tokens.indexOf(a);
+  if (i === -1)
+    return false;
+  for (let j = i + 1;j < tokens.length; j++) {
+    const t = tokens[j];
+    if (t === b)
+      return true;
+    if (!t.startsWith("-"))
+      return false;
+    if (t === "--output")
+      j += 1;
+  }
+  return false;
+};
+var WRAPPERS = new Set([
+  "sh",
+  "bash",
+  "zsh",
+  "dash",
+  "ksh",
+  "eval",
+  "xargs",
+  "env",
+  "nohup",
+  "timeout",
+  "nice",
+  "command",
+  "exec"
+]);
+var basename2 = (word) => word.slice(word.lastIndexOf("/") + 1);
+function allSegments(command, depth = 0) {
+  const segs = segments2(command);
+  if (depth >= 3)
+    return segs;
+  const out = [...segs];
+  for (const tokens of segs) {
+    const head = tokens[0];
+    if (!head || !WRAPPERS.has(basename2(head)))
+      continue;
+    for (const token of tokens.slice(1)) {
+      if (/\s/.test(token))
+        out.push(...allSegments(token, depth + 1));
+    }
+  }
+  return out;
+}
+function gatedAction(command) {
+  const segs = allSegments(command);
+  if (segs.some((t) => isSubcommand(t, "graph", "approve")))
+    return "approve";
+  if (segs.some((t) => isSubcommand(t, "graph", "create") && !hasFlag(t, "--dry-run"))) {
+    return "create";
+  }
+  return null;
+}
+function readNodes(graphPath) {
+  if (!existsSync13(graphPath))
+    return null;
+  const { graph } = parseGraph(readFileSync14(graphPath, "utf8"));
+  if (!graph)
+    return null;
+  const graphDir = dirname6(graphPath);
+  const nodes = [];
+  for (const node of graph.tasks) {
+    const { spec } = parseSpec(readFileSync14(resolve3(graphDir, node.spec), "utf8"));
+    if (!spec)
+      return null;
+    nodes.push({
+      alias: node.alias,
+      scope: spec.scope ?? [],
+      oracleType: spec.oracle.type
+    });
+  }
+  return nodes;
+}
+function approvalGate(event) {
+  const { command, cwd } = event;
+  if (!command || !cwd)
+    return pass2;
+  try {
+    const parsed = lex(command);
+    const action = gatedAction(command);
+    if (!action) {
+      if (parsed.opaque && /\bsddx\b/.test(command) && /\bgraph\b/.test(command)) {
+        return ask([
+          "sddx: this command names sddx and uses an expansion the approval gate cannot read.",
+          "What it expands to cannot be verified, so it cannot be vouched for."
+        ].join(`
+`));
+      }
+      return pass2;
+    }
+    const owns = (t) => action === "approve" ? isSubcommand(t, "graph", "approve") : isSubcommand(t, "graph", "create") && !hasFlag(t, "--dry-run");
+    const tokens = allSegments(command).find(owns) ?? [];
+    const graphArg = tokenValue(tokens, "--graph");
+    if (action === "approve") {
+      const plan = graphArg ? planHash(isAbsolute3(graphArg) ? graphArg : join15(cwd, graphArg)) : null;
+      return ask([
+        `sddx: this records YOUR approval of plan ${plan?.hash ? plan.hash.slice(0, 12) : "(unreadable)"}.`,
+        "Approve only if you have reviewed it:",
+        `  sddx graph create --graph ${graphArg ?? "<path>"} --dry-run`
+      ].join(`
+`));
+    }
+    if (!graphArg) {
+      return ask("sddx: plan creation without a --graph argument — cannot verify what would run");
+    }
+    const graphPath = isAbsolute3(graphArg) ? graphArg : join15(cwd, graphArg);
+    const nodes = readNodes(graphPath);
+    if (!nodes) {
+      return ask(`sddx: plan at ${graphArg} could not be read — approval cannot be verified`);
+    }
+    const gate = decideGate(cwd, graphPath, nodes, gateInteractionMode(cwd), autoMaxTasks(cwd), scopesOverlap);
+    if (gate.ok)
+      return pass2;
+    if (gate.refusal)
+      return pass2;
+    const scale = `${gate.nodeCount} node${gate.nodeCount === 1 ? "" : "s"}`;
+    return ask([
+      `sddx: this creates ${scale} of work from plan ${gate.hash.slice(0, 12)}.`,
+      gate.reason ?? "approval required",
+      `Review it first: sddx graph create --graph ${graphArg} --dry-run`
+    ].join(`
+`));
+  } catch (e) {
+    return ask(`sddx: approval could not be verified (${e.message}) — asking instead`);
+  }
+}
+
+// src/lib/bashgate.ts
+var BASH_ALLOW_BASE = [
+  "bun",
+  "npm",
+  "npx",
+  "pnpm",
+  "yarn",
+  "pytest",
+  "go",
+  "cargo",
+  "make",
+  "node",
+  "python",
+  "python3",
+  "ls",
+  "cat",
+  "grep",
+  "rg",
+  "find",
+  "head",
+  "tail",
+  "wc"
+];
+var GIT_READ_SUBCOMMANDS = ["status", "diff", "log", "show"];
+var EVAL_CAPABLE = new Set(["bun", "node", "npx", "python", "python3"]);
+var EVAL_FLAGS = new Set(["-e", "--eval", "-p", "--print", "-c", "--exec"]);
+function protectedPathRef(command) {
+  if (!/\.sddx\b/.test(command))
+    return null;
+  if (/\bapprovals\b/.test(command))
+    return ".sddx/approvals/";
+  if (/(^|[^\w.-])config\.json\b/.test(command))
+    return ".sddx/config.json";
+  return null;
+}
+var READ_ONLY = new Set([
+  "cat",
+  "grep",
+  "rg",
+  "ls",
+  "head",
+  "tail",
+  "wc",
+  "stat",
+  "file",
+  "diff",
+  "echo"
+]);
+function isReadOnly(command) {
+  if (/\$\(|`|<\(/.test(command))
+    return false;
+  if (command.replace(/\d*>&\d+/g, "").includes(">"))
+    return false;
+  for (const segment of command.split(/\|\||&&|;|\||\r?\n/)) {
+    const words = commandWords(segment);
+    if (words.length === 0)
+      continue;
+    const cmd = commandBasename(words[0]);
+    if (cmd === "git") {
+      const sub = words.slice(1).find((w) => !w.startsWith("-"));
+      if (sub === undefined || !GIT_READ_SUBCOMMANDS.includes(sub))
+        return false;
+      continue;
+    }
+    if (!READ_ONLY.has(cmd))
+      return false;
+  }
+  return true;
+}
+function protectedPathBlock(path) {
+  const why = path === ".sddx/config.json" ? "It carries interaction_mode, which decides whether a plan needs your approval at all." : "A token records that a human approved a plan, so writing one would forge that.";
+  return [
+    `sddx approval gate: blocked Bash command referencing ${path}.`,
+    why,
+    "This path is not reachable from a shell in any phase — the gate does not parse",
+    "redirection targets, so it refuses the command rather than guess at intent.",
+    path === ".sddx/config.json" ? "Inspect the effective configuration with: sddx config show" : "Approve a plan the only way that counts: sddx graph approve --graph <path>"
+  ].join(`
+`);
+}
+var splitList = (value) => (value ?? "").split(/\s+/).filter((s) => s !== "");
+function commandWords(segment) {
+  const words = segment.trim().split(/\s+/).filter((w) => w !== "");
+  let i = 0;
+  while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i]))
+    i += 1;
+  return words.slice(i);
+}
+var commandBasename = (word) => {
+  const bare = word.replace(/^["']+|["']+$/g, "");
+  return bare.slice(bare.lastIndexOf("/") + 1);
+};
+function checkBashCommand(command, extraAllow) {
+  if (/\$\(|`|<\(/.test(command)) {
+    return {
+      allow: false,
+      reason: "command/process substitution executes arbitrary commands; the gate does not parse it"
+    };
+  }
+  if (command.replace(/\d*>&\d+/g, "").includes(">")) {
+    return {
+      allow: false,
+      reason: "redirection (>) writes files; the gate does not parse targets"
+    };
+  }
+  const allowed = new Set([...BASH_ALLOW_BASE, ...extraAllow]);
+  for (const segment of command.split(/\|\||&&|;|\||\r?\n/)) {
+    const words = commandWords(segment);
+    if (words.length === 0)
+      continue;
+    const cmd = commandBasename(words[0]);
+    if (cmd === "sddx-run" || cmd === "sddx")
+      continue;
+    if (isSddxInvocation(words.map((w) => commandBasename(w))))
+      continue;
+    if (cmd === "git") {
+      const sub = words.slice(1).find((w) => !w.startsWith("-"));
+      if (sub === undefined || !GIT_READ_SUBCOMMANDS.includes(sub)) {
+        return {
+          allow: false,
+          reason: `git ${sub ?? "(none)"}: only git ${GIT_READ_SUBCOMMANDS.join("|")} are allowed pre-GREEN`
+        };
+      }
+      continue;
+    }
+    if (!allowed.has(cmd)) {
+      return { allow: false, reason: `"${cmd}" is not on the RED-phase Bash allow-list` };
+    }
+    if (EVAL_CAPABLE.has(cmd) && words.some((w) => EVAL_FLAGS.has(w))) {
+      return {
+        allow: false,
+        reason: `${cmd} with an eval/print flag can write files from inline code`
+      };
+    }
+  }
+  return { allow: true };
+}
+function blockMessage2(task, why) {
+  return [
+    `sddx TDD gate: blocked Bash command — task ${task.id} is in ${task.phase} (${why}).`,
+    `Pre-GREEN, Bash may only run tests or read state: ${BASH_ALLOW_BASE.join(", ")}, git ${GIT_READ_SUBCOMMANDS.join("|")}, and the sddx CLI itself.`,
+    "Write the failing test with Edit/Write under a test path and run the test runner so the failure is recorded (the gate lifts in GREEN).",
+    "A legitimately needed read-only tool can be added via userConfig red_bash_allow."
+  ].join(`
+`);
+}
+function bashGate(input, env = process.env) {
+  if (typeof input.command !== "string" || input.command.trim() === "")
+    return { allow: true };
+  const protectedPath = protectedPathRef(input.command);
+  if (protectedPath && !isReadOnly(input.command)) {
+    return { allow: false, reason: protectedPathBlock(protectedPath) };
+  }
+  if (checkBashCommand(input.command, []).allow)
+    return { allow: true };
+  const res = resolveTask(input.cwd ?? process.cwd());
+  if (res.kind === "none")
+    return { allow: true };
+  const failure = resolutionFailureReason(res, "running commands");
+  if (failure)
+    return { allow: false, reason: failure };
+  if (res.kind !== "task")
+    return { allow: true };
+  if (res.task.phase !== "PLAN" && res.task.phase !== "RED")
+    return { allow: true };
+  const extra = splitList(env.SDDX_RED_BASH_ALLOW ?? readConfig(res.root).red_bash_allow);
+  const decision = checkBashCommand(input.command, extra);
+  if (decision.allow)
+    return decision;
+  return { allow: false, reason: blockMessage2(res.task, decision.reason) };
+}
+
+// src/lib/recorder.ts
+var TEST_RUNNER_PREFIXES = [
+  "bun test",
+  "npm test",
+  "pnpm test",
+  "yarn test",
+  "npx vitest",
+  "npx jest",
+  "pytest",
+  "go test",
+  "cargo test"
+];
+function matchTestRunner(command) {
+  const trimmed = command.trim();
+  for (const prefix of TEST_RUNNER_PREFIXES) {
+    if (trimmed === prefix || trimmed.startsWith(`${prefix} `))
+      return prefix;
+  }
+  return null;
+}
+function failureFingerprint(exitCode, output, command = "") {
+  const tail = output.split(`
+`).slice(-20).join(`
+`).replace(/\d+(\.\d+)?/g, "#").replace(/\s+/g, " ").trim();
+  return sha256(`${exitCode}
+${command.trim()}
+${tail}`);
+}
+function recordTestRun(cwd, command, exitCode, output = "") {
+  if (matchTestRunner(command) === null || exitCode === undefined) {
+    return { matched: false, transitioned: null };
+  }
+  const res = resolveTask(cwd);
+  if (res.kind !== "task")
+    return { matched: true, transitioned: null };
+  const task = res.task;
+  if (legacyWorkspaceOf(task) !== null && !isTerminal(task.phase)) {
+    return { matched: true, transitioned: null };
+  }
+  const at = new Date().toISOString();
+  if (exitCode !== 0) {
+    const fp = failureFingerprint(exitCode, output, command);
+    task.stuck = task.stuck?.fingerprint === fp ? { fingerprint: fp, count: task.stuck.count + 1, since: task.stuck.since } : { fingerprint: fp, count: 1, since: at };
+  } else if (task.stuck) {
+    task.stuck = undefined;
+  }
+  let to = null;
+  if (task.phase === "PLAN" && exitCode !== 0)
+    to = "RED";
+  if ((task.phase === "RED" || task.phase === "REFACTOR") && exitCode === 0)
+    to = "GREEN";
+  if (to) {
+    transition(task, to, { testExit: exitCode, source: "hook" });
+  } else {
+    task.evidence.last_test = { test_exit: exitCode, at, source: "hook" };
+  }
+  let stuck;
+  if (task.stuck) {
+    const threshold = stuckThreshold(res.root);
+    if (task.stuck.count >= threshold)
+      stuck = { count: task.stuck.count, threshold };
+  }
+  writeTask(res.root, task);
+  return { matched: true, transitioned: to, taskId: task.id, stuck };
+}
+
+// src/lib/stopgate.ts
+import { existsSync as existsSync14 } from "node:fs";
+import { join as join16 } from "node:path";
+var NEXT_STEP = {
+  PLAN: "write a failing test and run it to enter RED",
+  RED: "run sddx red-check <id>, then make the failing test pass (run the test runner to enter GREEN)",
+  GREEN: "refactor if needed, then: sddx task phase <id> VERIFY && sddx verify <id>",
+  REFACTOR: "re-run tests to return to GREEN, then verify",
+  VERIFY: "run: sddx verify <id>",
+  DONE: "",
+  ABANDONED: ""
+};
+function stopGate(event) {
+  if (event.stop_hook_active)
+    return { block: false };
+  const res = resolveTask(event.cwd ?? process.cwd());
+  if (res.kind === "none")
+    return { block: false };
+  if (res.kind === "ambiguous") {
+    return {
+      block: true,
+      reason: `sddx: tasks ${res.ids.join(" and ")} are both unfinished in this workspace — finish or abandon them before stopping.`
+    };
+  }
+  if (res.kind === "corrupt") {
+    return {
+      block: true,
+      reason: `sddx: task state at ${res.path} is unreadable — completion cannot be proven. Fix the state file before stopping.`
+    };
+  }
+  const { task } = res;
+  if (isTerminal(task.phase)) {
+    const receipt = join16(res.root, ".sddx", "receipts", `${task.id}.json`);
+    if (task.phase === "DONE" && !existsSync14(receipt)) {
+      return {
+        block: true,
+        reason: `sddx: task ${task.id} is DONE but .sddx/receipts/${task.id}.json is missing — completion is unproven. Restore the receipt or abandon the task.`
+      };
+    }
+    return { block: false };
+  }
+  if (task.stuck && task.stuck.count >= stuckThreshold(res.root)) {
+    return {
+      block: false,
+      note: `sddx: task ${task.id} is stuck — ${task.stuck.count} identical failures; escalating to the human is the correct next step.`
+    };
+  }
+  const step = NEXT_STEP[task.phase].replaceAll("<id>", task.id);
+  return {
+    block: true,
+    reason: `sddx: task ${task.id} is in ${task.phase} without a verified receipt — ${step}.`
+  };
+}
+
+// src/lib/hookdispatch.ts
+function readEvent() {
+  try {
+    const raw = readFileSync15(0, "utf8");
+    const parsed = raw.trim() === "" ? {} : JSON.parse(raw);
+    return typeof parsed === "object" && parsed !== null ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+var emit = (output) => {
+  console.log(JSON.stringify(output));
+};
+function cmdTddGate(event) {
+  const decision = tddGate({
+    filePath: event.tool_input?.file_path ?? event.tool_input?.notebook_path,
+    cwd: event.cwd
+  });
+  if (decision.allow) {
+    emit(decision.diagnostic ? { systemMessage: decision.diagnostic } : {});
+    return;
+  }
+  emit({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: decision.reason
+    }
+  });
+}
+function cmdApprovalGate(event) {
+  const decision = approvalGate({ command: event.tool_input?.command, cwd: event.cwd });
+  if (decision.decision === "pass") {
+    emit({});
+    return;
+  }
+  emit({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "ask",
+      permissionDecisionReason: decision.reason
+    }
+  });
+}
+function cmdBashGate(event) {
+  const decision = bashGate({ command: event.tool_input?.command, cwd: event.cwd });
+  if (decision.allow) {
+    emit({});
+    return;
+  }
+  emit({
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: decision.reason
+    }
+  });
+}
+function exitCodeOf(response) {
+  for (const key of ["exit_code", "exitCode", "code"]) {
+    const v = response?.[key];
+    if (typeof v === "number")
+      return v;
+  }
+  return;
+}
+function outputOf(response) {
+  let out = "";
+  for (const key of ["stdout", "stderr", "output"]) {
+    const v = response?.[key];
+    if (typeof v === "string")
+      out += v;
+  }
+  return out;
+}
+function cmdRecordTest(event) {
+  const command = event.tool_input?.command;
+  if (typeof command !== "string") {
+    emit({});
+    return;
+  }
+  const res = recordTestRun(event.cwd ?? process.cwd(), command, exitCodeOf(event.tool_response), outputOf(event.tool_response));
+  const parts = [];
+  if (res.transitioned)
+    parts.push(`sddx: task ${res.taskId} → ${res.transitioned} (observed test run)`);
+  if (res.stuck)
+    parts.push(`sddx: task ${res.taskId} has failed identically ${res.stuck.count}× (threshold ${res.stuck.threshold}) — stuck; stop and escalate to the human instead of iterating.`);
+  emit(parts.length > 0 ? { systemMessage: parts.join(`
+`) } : {});
+}
+function cmdStopGate(event) {
+  const decision = stopGate({ cwd: event.cwd, stop_hook_active: event.stop_hook_active });
+  emit(decision.block ? { decision: "block", reason: decision.reason } : decision.note ? { systemMessage: decision.note } : {});
+}
+function cmdSessionStart(event) {
+  const cwd = event.cwd ?? process.cwd();
+  const lines = [];
+  if (existsSync15(join17(cwd, ".sddx"))) {
+    try {
+      const res = sweep(cwd);
+      if (res.removed.length > 0)
+        lines.push(`sddx: swept ${res.removed.length} orphan worktree(s)`);
+    } catch {}
+    if (boardEnabled(cwd)) {
+      try {
+        writeBoard(cwd);
+      } catch (e) {
+        lines.push(`sddx: board refresh failed: ${e.message}`);
+      }
+    }
+    const tasksDir = join17(cwd, ".sddx", "tasks");
+    if (existsSync15(tasksDir)) {
+      for (const file of readdirSync9(tasksDir).filter((f) => f.endsWith(".json"))) {
+        try {
+          const t = JSON.parse(readFileSync15(join17(tasksDir, file), "utf8"));
+          if (!isTerminal(t.phase))
+            lines.push(`sddx task ${t.id}: phase ${t.phase} — ${t.task}`);
+        } catch {
+          lines.push(`sddx: task file ${file} is unreadable`);
+        }
+      }
+    }
+  }
+  if (lines.length === 0) {
+    emit({});
+    return;
+  }
+  emit({
+    hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: lines.join(`
+`) }
+  });
+}
+function dispatchHook(sub, event) {
+  try {
+    if (sub === "tdd-gate")
+      cmdTddGate(event);
+    else if (sub === "bash-gate")
+      cmdBashGate(event);
+    else if (sub === "approval-gate")
+      cmdApprovalGate(event);
+    else if (sub === "record-test")
+      cmdRecordTest(event);
+    else if (sub === "stop-gate")
+      cmdStopGate(event);
+    else if (sub === "session-start")
+      cmdSessionStart(event);
+    else
+      emit({ systemMessage: `sddx hooks: unknown subcommand ${sub ?? "(none)"}` });
+  } catch (e) {
+    emit({ systemMessage: `sddx hook error (${sub}): ${e.message}` });
+  }
+}
+function runHook(sub) {
+  dispatchHook(sub, readEvent());
+  process.exit(0);
+}
+
+// src/lib/init.ts
+import { spawnSync as spawnSync9 } from "node:child_process";
+import { existsSync as existsSync16, mkdirSync as mkdirSync9, readFileSync as readFileSync16, rmSync as rmSync4, writeFileSync as writeFileSync10 } from "node:fs";
+import { dirname as dirname7, join as join18 } from "node:path";
+function planIsNoop(plan) {
+  return plan.files.every((f) => f.kind === "unchanged") && plan.packageOps.length === 0;
+}
+
+class NotAGitRepositoryError extends Error {
+  cwd;
+  constructor(cwd) {
+    super(`not a git repository: ${cwd}
+` + `sddx init operates on a repository — its state lives in git, and a worktree per task is the isolation model.
+` + "Run `git init` first, or run sddx init from inside an existing repository.");
+    this.cwd = cwd;
+    this.name = "NotAGitRepositoryError";
+  }
+}
+function repositoryRoot(cwd) {
+  const r = spawnSync9("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8" });
+  if (r.status !== 0)
+    throw new NotAGitRepositoryError(cwd);
+  const root = (r.stdout ?? "").trim();
+  if (root === "")
+    throw new NotAGitRepositoryError(cwd);
+  return root;
+}
+var TRACKED_SDDX_DIRS = [
+  "specs",
+  "drafts",
+  "context",
+  "tasks",
+  "goals",
+  "receipts",
+  "adapters"
+];
+var EPHEMERAL_PATHS = [
+  ".sddx/local/",
+  ".sddx/cache/",
+  ".sddx/sessions/",
+  ".sddx-worktrees/"
+];
+var GITIGNORE_BEGIN = "# sddx (generated) — do not edit between markers";
+var GITIGNORE_END = "# end sddx";
+function gitignoreBlock() {
+  return [GITIGNORE_BEGIN, ...EPHEMERAL_PATHS, GITIGNORE_END].join(`
+`);
+}
+function withGitignoreBlock(existing) {
+  const block = gitignoreBlock();
+  const stripped = stripGitignoreBlocks(existing).replace(/\s*$/, "");
+  return stripped === "" ? `${block}
+` : `${stripped}
+
+${block}
+`;
+}
+function stripGitignoreBlocks(existing) {
+  let out = "";
+  let rest = existing;
+  while (true) {
+    const begin = rest.indexOf(GITIGNORE_BEGIN);
+    if (begin === -1)
+      break;
+    const afterBegin = begin + GITIGNORE_BEGIN.length;
+    const endMarker = rest.indexOf(GITIGNORE_END, afterBegin);
+    const nextBegin = rest.indexOf(GITIGNORE_BEGIN, afterBegin);
+    const wellFormed = endMarker !== -1 && (nextBegin === -1 || nextBegin > endMarker);
+    if (!wellFormed) {
+      out += rest.slice(0, afterBegin);
+      rest = rest.slice(afterBegin);
+      continue;
+    }
+    let end = endMarker + GITIGNORE_END.length;
+    if (rest[end] === `
+`)
+      end += 1;
+    out += rest.slice(0, begin);
+    rest = rest.slice(end);
+  }
+  return out + rest;
+}
+function configContents(opts) {
+  return {
+    schema_version: CONFIG_SCHEMA_VERSION,
+    interaction_mode: opts.interactionMode,
+    runtime_scope: opts.runtimeScope,
+    package_manager: opts.packageManager,
+    adapters: [...opts.adapters].sort()
+  };
+}
+var json2 = (value) => `${JSON.stringify(value, null, 2)}
+`;
+function readIfPresent2(path) {
+  try {
+    return existsSync16(path) ? readFileSync16(path, "utf8") : null;
+  } catch {
+    return null;
+  }
+}
+function fileOp(root, relPath, contents, reason) {
+  const current = readIfPresent2(join18(root, relPath));
+  if (current === contents)
+    return { path: relPath, kind: "unchanged", reason };
+  return { path: relPath, kind: current === null ? "create" : "modify", contents, reason };
+}
+function pinInstallCommand(pm) {
+  return pm === "bun" ? ["bun", "add", "--dev", "@glapsfun/sddx"] : ["npm", "install", "--save-dev", "@glapsfun/sddx"];
+}
+function alreadyPinned(root) {
+  const pkg = readIfPresent2(join18(root, "package.json"));
+  if (pkg === null)
+    return false;
+  try {
+    const parsed = JSON.parse(pkg);
+    return parsed.dependencies?.["@glapsfun/sddx"] !== undefined || parsed.devDependencies?.["@glapsfun/sddx"] !== undefined;
+  } catch {
+    return false;
+  }
+}
+function planInit(cwd, opts, adapterFiles) {
+  const root = repositoryRoot(cwd);
+  const files = [];
+  for (const dir of TRACKED_SDDX_DIRS) {
+    files.push(fileOp(root, `.sddx/${dir}/.gitkeep`, "", `scaffold the tracked .sddx/${dir}/ directory`));
+  }
+  const config = configContents(opts);
+  files.push(fileOp(root, ".sddx/config.json", json2(config), "project policy"));
+  const gitignore = readIfPresent2(join18(root, ".gitignore")) ?? "";
+  files.push(fileOp(root, ".gitignore", withGitignoreBlock(gitignore), "ignore only the ephemeral sddx paths"));
+  if (adapterFiles)
+    files.push(...adapterFiles(root, opts));
+  const packageOps = [];
+  if (opts.runtimeScope === "project" && !alreadyPinned(root)) {
+    packageOps.push({
+      command: pinInstallCommand(opts.packageManager),
+      reason: "pin @glapsfun/sddx as a project dependency (project-pinned runtime scope)"
+    });
+  }
+  return { root, files, packageOps, config };
+}
+
+class InitRollback {
+  steps = [];
+  createdFile(absPath, rel) {
+    this.steps.push({
+      describe: `remove ${rel}`,
+      undo: () => {
+        if (existsSync16(absPath))
+          rmSync4(absPath, { force: true });
+      }
+    });
+  }
+  modifiedFile(absPath, rel, previous) {
+    this.steps.push({
+      describe: `restore ${rel}`,
+      undo: () => writeFileSync10(absPath, previous)
+    });
+  }
+  capture(absPath, rel) {
+    if (existsSync16(absPath)) {
+      let previous;
+      try {
+        previous = readFileSync16(absPath, "utf8");
+      } catch {
+        return;
+      }
+      this.modifiedFile(absPath, rel, previous);
+    } else {
+      this.createdFile(absPath, rel);
+    }
+  }
+  createdDir(absPath, rel) {
+    this.steps.push({
+      describe: `remove ${rel}/`,
+      undo: () => {
+        if (existsSync16(absPath))
+          rmSync4(absPath, { recursive: true, force: true });
+      }
+    });
+  }
+  replay() {
+    const undone = [];
+    for (const step of [...this.steps].reverse()) {
+      try {
+        step.undo();
+        undone.push(step.describe);
+      } catch (e) {
+        undone.push(`${step.describe} — FAILED: ${e.message}`);
+      }
+    }
+    return undone;
+  }
+}
+
+class InitApplyError extends Error {
+  rolledBack;
+  constructor(message, rolledBack) {
+    super(message);
+    this.rolledBack = rolledBack;
+    this.name = "InitApplyError";
+  }
+}
+function applyInit(plan, opts = {}) {
+  const rollback = new InitRollback;
+  const written = [];
+  const packageOps = [];
+  const fail2 = (message) => {
+    throw new InitApplyError(message, rollback.replay());
+  };
+  try {
+    for (const op of plan.files) {
+      if (op.kind === "unchanged" || op.contents === undefined)
+        continue;
+      const abs = join18(plan.root, op.path);
+      const dir = dirname7(abs);
+      if (!existsSync16(dir)) {
+        mkdirSync9(dir, { recursive: true });
+        rollback.createdDir(dir, op.path.split("/").slice(0, -1).join("/"));
+      }
+      if (op.kind === "modify") {
+        rollback.modifiedFile(abs, op.path, readFileSync16(abs, "utf8"));
+      } else {
+        rollback.createdFile(abs, op.path);
+      }
+      writeFileSync10(abs, op.contents);
+      written.push(op.path);
+    }
+  } catch (e) {
+    return fail2(`writing project files failed: ${e.message}`);
+  }
+  if (opts.runAdapters) {
+    try {
+      written.push(...opts.runAdapters(plan, (rel) => rollback.capture(join18(plan.root, rel), rel)));
+    } catch (e) {
+      return fail2(`adapter installation failed: ${e.message}`);
+    }
+  }
+  for (const op of plan.packageOps) {
+    const printable = op.command.join(" ");
+    try {
+      if (opts.runCommand) {
+        opts.runCommand(op.command);
+      } else {
+        const [bin, ...args] = op.command;
+        const r = spawnSync9(bin, args, { cwd: plan.root, encoding: "utf8" });
+        if (r.status !== 0) {
+          throw new Error((r.stderr ?? "").trim() || `exited ${r.status}`);
+        }
+      }
+      packageOps.push(printable);
+    } catch (e) {
+      return fail2(`\`${printable}\` failed: ${e.message}`);
+    }
+  }
+  return { written, packageOps };
+}
+
+// src/lib/initprompt.ts
+var isInteractive = () => Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY);
+
+class InitCancelled extends Error {
+  constructor() {
+    super("cancelled");
+    this.name = "InitCancelled";
+  }
+}
+var describe = (key) => CONFIG_KEYS.find((k) => k.key === key)?.description ?? "";
+async function promptInitOptions(defaults, knownAdapters) {
+  const p3 = await Promise.resolve().then(() => (init_dist4(), exports_dist));
+  const cancelled = (v) => p3.isCancel(v);
+  const guard = (v) => {
+    if (cancelled(v))
+      throw new InitCancelled;
+    return v;
+  };
+  p3.intro("sddx init");
+  const runtimeScope = guard(await p3.select({
+    message: "How should this project invoke sddx?",
+    initialValue: defaults.runtimeScope ?? "global",
+    options: [
+      {
+        value: "global",
+        label: "Global",
+        hint: "an `sddx` on PATH — simplest"
+      },
+      {
+        value: "project",
+        label: "Project-pinned",
+        hint: "a lockfile-backed dependency — reproducible across the team"
+      }
+    ]
+  }));
+  const packageManager = runtimeScope === "project" ? guard(await p3.select({
+    message: "Which package manager runs the project-local binary?",
+    initialValue: defaults.packageManager ?? "npm",
+    options: [
+      { value: "npm", label: "npm" },
+      { value: "bun", label: "bun" }
+    ]
+  })) : defaults.packageManager ?? "npm";
+  const adapters = guard(await p3.multiselect({
+    message: "Which project adapters should sddx install?",
+    required: false,
+    initialValues: defaults.adapters ?? [],
+    options: knownAdapters.map((name) => ({
+      value: name,
+      label: name,
+      hint: name === "claude" ? "skills, agents, and the TDD-gate hooks" : ""
+    }))
+  }));
+  const interactionMode2 = guard(await p3.select({
+    message: "Interaction mode",
+    initialValue: defaults.interactionMode ?? "human",
+    options: [
+      {
+        value: "human",
+        label: "human",
+        hint: "one question round, then plan approval"
+      },
+      {
+        value: "auto",
+        label: "auto",
+        hint: "unattended up to the run branch; refuses at any autonomy bound"
+      }
+    ]
+  }));
+  p3.note(describe("interaction_mode"), "interaction_mode");
+  return { runtimeScope, packageManager, adapters, interactionMode: interactionMode2 };
+}
+async function confirmPlan(rendered) {
+  const p3 = await Promise.resolve().then(() => (init_dist4(), exports_dist));
+  p3.note(rendered, "planned changes");
+  const answer = await p3.confirm({ message: "Apply these changes?", initialValue: true });
+  if (p3.isCancel(answer))
+    return false;
+  return answer === true;
+}
+
 // src/lib/intake.ts
 var QUESTION_CAP = 3;
 function parseQuestionBatch(yamlText) {
@@ -9249,39 +14044,39 @@ function parseQuestionBatch(yamlText) {
   if (typeof raw !== "object" || Array.isArray(raw)) {
     return { errors: ["question batch must be a YAML mapping with a `questions` list"] };
   }
-  const r = raw;
-  if (!("questions" in r)) {
-    if (Object.keys(r).length > 0) {
+  const r2 = raw;
+  if (!("questions" in r2)) {
+    if (Object.keys(r2).length > 0) {
       return { errors: ["question batch must be a YAML mapping with a `questions` list"] };
     }
     return { questions: [], errors: [] };
   }
-  if (r.questions === undefined || r.questions === null)
+  if (r2.questions === undefined || r2.questions === null)
     return { questions: [], errors: [] };
-  if (!Array.isArray(r.questions)) {
+  if (!Array.isArray(r2.questions)) {
     return { errors: ["questions: must be a list"] };
   }
-  if (r.questions.length > QUESTION_CAP) {
+  if (r2.questions.length > QUESTION_CAP) {
     return {
       errors: [
-        `questions: ${r.questions.length} returned, over the cap of ${QUESTION_CAP} per dispatch — ask the ${QUESTION_CAP} that can change scope, behavior, safety, an oracle, or the plan, and resolve the rest as assumptions`
+        `questions: ${r2.questions.length} returned, over the cap of ${QUESTION_CAP} per dispatch — ask the ${QUESTION_CAP} that can change scope, behavior, safety, an oracle, or the plan, and resolve the rest as assumptions`
       ]
     };
   }
   const errors2 = [];
   const out = [];
   const seen = new Set;
-  for (let i = 0;i < r.questions.length; i++) {
-    const e = r.questions[i];
+  for (let i2 = 0;i2 < r2.questions.length; i2++) {
+    const e = r2.questions[i2];
     if (typeof e !== "object" || e === null || Array.isArray(e)) {
-      errors2.push(`questions[${i}]: must be a mapping with id, question and why`);
+      errors2.push(`questions[${i2}]: must be a mapping with id, question and why`);
       continue;
     }
     const q = e;
     const field = (name) => {
       const v = q[name];
       if (typeof v !== "string" || v.trim() === "") {
-        errors2.push(`questions[${i}]: missing "${name}"`);
+        errors2.push(`questions[${i2}]: missing "${name}"`);
         return "";
       }
       return v.trim();
@@ -9291,7 +14086,7 @@ function parseQuestionBatch(yamlText) {
     const why = field("why");
     if (id !== "") {
       if (seen.has(id))
-        errors2.push(`questions[${i}]: duplicate question id "${id}"`);
+        errors2.push(`questions[${i2}]: duplicate question id "${id}"`);
       else
         seen.add(id);
     }
@@ -9304,84 +14099,84 @@ function parseQuestionBatch(yamlText) {
 }
 
 // src/lib/prhost.ts
-import { spawnSync as spawnSync8 } from "node:child_process";
+import { spawnSync as spawnSync10 } from "node:child_process";
 function run(cli, args, cwd) {
-  return spawnSync8(cli, args, { cwd, encoding: "utf8", env: process.env });
+  return spawnSync10(cli, args, { cwd, encoding: "utf8", env: process.env });
 }
 var ghBackend = {
   name: "gh",
   identity(cwd) {
-    const r = run("gh", ["api", "user", "--jq", ".login"], cwd);
-    return r.status === 0 ? r.stdout.trim() : null;
+    const r2 = run("gh", ["api", "user", "--jq", ".login"], cwd);
+    return r2.status === 0 ? r2.stdout.trim() : null;
   },
   authStatus(cwd) {
-    const r = run("gh", ["auth", "status"], cwd);
-    if (r.error) {
+    const r2 = run("gh", ["auth", "status"], cwd);
+    if (r2.error) {
       return { ok: false, message: "gh CLI not found — install it from https://cli.github.com" };
     }
-    return { ok: r.status === 0, message: ((r.stderr ?? "") + (r.stdout ?? "")).trim() };
+    return { ok: r2.status === 0, message: ((r2.stderr ?? "") + (r2.stdout ?? "")).trim() };
   },
   openPr(cwd, { branch, title, body }) {
-    const r = run("gh", ["pr", "create", "--head", branch, "--title", title, "--body", body], cwd);
-    if (r.status !== 0) {
-      throw new Error(`gh pr create failed: ${(r.stderr ?? "").trim()}`);
+    const r2 = run("gh", ["pr", "create", "--head", branch, "--title", title, "--body", body], cwd);
+    if (r2.status !== 0) {
+      throw new Error(`gh pr create failed: ${(r2.stderr ?? "").trim()}`);
     }
-    return r.stdout.trim();
+    return r2.stdout.trim();
   },
   findPr(cwd, branch) {
-    const r = run("gh", ["pr", "view", branch, "--json", "url"], cwd);
-    if (r.status !== 0)
+    const r2 = run("gh", ["pr", "view", branch, "--json", "url"], cwd);
+    if (r2.status !== 0)
       return null;
     try {
-      return { url: JSON.parse(r.stdout).url };
+      return { url: JSON.parse(r2.stdout).url };
     } catch {
       return null;
     }
   },
   mergePr(cwd, branch) {
-    const r = run("gh", ["pr", "merge", branch, "--merge"], cwd);
-    if (r.status !== 0) {
-      throw new Error(`gh pr merge failed: ${(r.stderr ?? "").trim()}`);
+    const r2 = run("gh", ["pr", "merge", branch, "--merge"], cwd);
+    if (r2.status !== 0) {
+      throw new Error(`gh pr merge failed: ${(r2.stderr ?? "").trim()}`);
     }
-    return ((r.stdout ?? "") + (r.stderr ?? "")).trim();
+    return ((r2.stdout ?? "") + (r2.stderr ?? "")).trim();
   }
 };
 var glabBackend = {
   name: "glab",
   identity(cwd) {
-    const r = run("glab", ["api", "user", "--jq", ".username"], cwd);
-    return r.status === 0 ? r.stdout.trim() : null;
+    const r2 = run("glab", ["api", "user", "--jq", ".username"], cwd);
+    return r2.status === 0 ? r2.stdout.trim() : null;
   },
   authStatus(cwd) {
-    const r = run("glab", ["auth", "status"], cwd);
-    if (r.error) {
+    const r2 = run("glab", ["auth", "status"], cwd);
+    if (r2.error) {
       return {
         ok: false,
         message: "glab CLI not found — install it from https://gitlab.com/gitlab-org/cli"
       };
     }
-    return { ok: r.status === 0, message: ((r.stderr ?? "") + (r.stdout ?? "")).trim() };
+    return { ok: r2.status === 0, message: ((r2.stderr ?? "") + (r2.stdout ?? "")).trim() };
   },
   openPr(cwd, { branch, title, body }) {
-    const r = run("glab", ["mr", "create", "--source-branch", branch, "--title", title, "--description", body, "--yes"], cwd);
-    if (r.status !== 0) {
-      throw new Error(`glab mr create failed: ${(r.stderr ?? "").trim()}`);
+    const r2 = run("glab", ["mr", "create", "--source-branch", branch, "--title", title, "--description", body, "--yes"], cwd);
+    if (r2.status !== 0) {
+      throw new Error(`glab mr create failed: ${(r2.stderr ?? "").trim()}`);
     }
-    return r.stdout.trim();
+    return r2.stdout.trim();
   },
   findPr(cwd, branch) {
-    const r = run("glab", ["mr", "view", branch], cwd);
-    if (r.status !== 0)
+    const r2 = run("glab", ["mr", "view", branch], cwd);
+    if (r2.status !== 0)
       return null;
-    const m = /(https?:\/\/\S+)/.exec(r.stdout);
-    return { url: m ? m[1] : r.stdout.trim() };
+    const m3 = /(https?:\/\/\S+)/.exec(r2.stdout);
+    return { url: m3 ? m3[1] : r2.stdout.trim() };
   },
   mergePr(cwd, branch) {
-    const r = run("glab", ["mr", "merge", branch, "--yes"], cwd);
-    if (r.status !== 0) {
-      throw new Error(`glab mr merge failed: ${(r.stderr ?? "").trim()}`);
+    const r2 = run("glab", ["mr", "merge", branch, "--yes"], cwd);
+    if (r2.status !== 0) {
+      throw new Error(`glab mr merge failed: ${(r2.stderr ?? "").trim()}`);
     }
-    return ((r.stdout ?? "") + (r.stderr ?? "")).trim();
+    return ((r2.stdout ?? "") + (r2.stderr ?? "")).trim();
   }
 };
 var BACKENDS = { gh: ghBackend, glab: glabBackend };
@@ -9458,33 +14253,33 @@ function createGoalPr(cwd, id, opts = {}) {
 }
 
 // src/lib/runbranch.ts
-import { spawnSync as spawnSync9 } from "node:child_process";
-import { existsSync as existsSync9, mkdirSync as mkdirSync7, rmdirSync as rmdirSync2, statSync as statSync2 } from "node:fs";
-import { isAbsolute as isAbsolute3, join as join10 } from "node:path";
+import { spawnSync as spawnSync11 } from "node:child_process";
+import { existsSync as existsSync18, mkdirSync as mkdirSync10, rmdirSync as rmdirSync2, statSync as statSync4 } from "node:fs";
+import { isAbsolute as isAbsolute4, join as join20 } from "node:path";
 var LOCK_STALE_MS2 = 5 * 60000;
 var LOCK_TIMEOUT_MS = 30000;
 function gitCommonDir2(cwd) {
   const dir = git(cwd, "rev-parse", "--git-common-dir");
-  return isAbsolute3(dir) ? dir : join10(cwd, dir);
+  return isAbsolute4(dir) ? dir : join20(cwd, dir);
 }
 function withGoalLock(root, goalId2, fn) {
-  const lockPath = join10(gitCommonDir2(root), `sddx-runbranch-${goalId2}.lock`);
+  const lockPath = join20(gitCommonDir2(root), `sddx-runbranch-${goalId2}.lock`);
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   for (;; ) {
     try {
-      mkdirSync7(lockPath);
+      mkdirSync10(lockPath);
       break;
     } catch {
-      if (existsSync9(lockPath)) {
+      if (existsSync18(lockPath)) {
         try {
-          if (Date.now() - statSync2(lockPath).mtimeMs > LOCK_STALE_MS2)
+          if (Date.now() - statSync4(lockPath).mtimeMs > LOCK_STALE_MS2)
             rmdirSync2(lockPath);
         } catch {}
       }
       if (Date.now() > deadline) {
         throw new Error(`timed out waiting for run-branch integration lock on goal ${goalId2}`);
       }
-      spawnSync9("sleep", ["0.1"]);
+      spawnSync11("sleep", ["0.1"]);
     }
   }
   try {
@@ -9505,13 +14300,13 @@ function integrateTaskIntoRunBranch(taskCwd, id) {
   if (!branch)
     return { result: "none", reason: "no-branch", runBranch: goal.run_branch };
   const outcome = withGoalLock(root, goal.id, () => {
-    const tmpPath = join10(worktreesDir(root), `integrate-${id}`);
+    const tmpPath = join20(worktreesDir(root), `integrate-${id}`);
     git(root, "worktree", "add", "-q", tmpPath, goal.run_branch);
     let result;
     try {
-      const r = spawnSync9("git", ["merge", "--no-ff", "-m", `sddx: merge ${id} into ${goal.run_branch}`, branch], { cwd: tmpPath, encoding: "utf8" });
-      if (r.status !== 0) {
-        spawnSync9("git", ["merge", "--abort"], { cwd: tmpPath });
+      const r2 = spawnSync11("git", ["merge", "--no-ff", "-m", `sddx: merge ${id} into ${goal.run_branch}`, branch], { cwd: tmpPath, encoding: "utf8" });
+      if (r2.status !== 0) {
+        spawnSync11("git", ["merge", "--abort"], { cwd: tmpPath });
         result = { result: "conflict", runBranch: goal.run_branch };
       } else {
         const mergeSha = git(tmpPath, "rev-parse", "HEAD");
@@ -9537,7 +14332,7 @@ function integrateTaskIntoRunBranch(taskCwd, id) {
     result: outcome.result === "merged" ? "merged" : "conflict"
   };
   writeTask(taskCwd, task);
-  stagePath(taskCwd, join10(".sddx", "tasks", `${id}.json`));
+  stagePath(taskCwd, join20(".sddx", "tasks", `${id}.json`));
   commit(taskCwd, `sddx(${id}): record integration (${outcome.result})`);
   return outcome;
 }
@@ -9548,7 +14343,7 @@ function revertTaskMerge(cwd, goalId2, id) {
     if (latest?.result !== "merged" || !latest.commit_sha) {
       throw new Error(`task ${id} has no current merge in goal ${goalId2} to revert`);
     }
-    const tmpPath = join10(worktreesDir(cwd), `revert-${id}`);
+    const tmpPath = join20(worktreesDir(cwd), `revert-${id}`);
     git(cwd, "worktree", "add", "-q", tmpPath, goal.run_branch);
     let revertSha;
     try {
@@ -9579,15 +14374,15 @@ var CATEGORY_LABEL = {
 };
 function renderMenu(visible) {
   const lines = ["Next Actions", ""];
-  let n = 0;
+  let n3 = 0;
   for (const cat of CATEGORY_ORDER) {
-    const inCat = visible.filter((a) => a.category === cat);
+    const inCat = visible.filter((a2) => a2.category === cat);
     if (inCat.length === 0)
       continue;
     lines.push(CATEGORY_LABEL[cat]);
-    for (const a of inCat) {
-      n++;
-      lines.push(`${n}. ${a.label}`);
+    for (const a2 of inCat) {
+      n3++;
+      lines.push(`${n3}. ${a2.label}`);
     }
     lines.push("");
   }
@@ -9595,8 +14390,8 @@ function renderMenu(visible) {
   return lines.join(`
 `).trimEnd();
 }
-function normalize(text) {
-  return text.toLowerCase().replace(/[^\w\s]/g, "").replace(/\s+/g, " ").trim();
+function normalize(text2) {
+  return text2.toLowerCase().replace(/[^\w\s]/g, "").replace(/\s+/g, " ").trim();
 }
 function resolveSelection(input, visible) {
   const trimmed = input.trim();
@@ -9605,7 +14400,7 @@ function resolveSelection(input, visible) {
     return visible[asIndex - 1];
   }
   const normalized = normalize(trimmed);
-  const matches = visible.filter((a) => normalize(a.label) === normalized || (a.aliases ?? []).some((alias) => normalize(alias) === normalized));
+  const matches = visible.filter((a2) => normalize(a2.label) === normalized || (a2.aliases ?? []).some((alias) => normalize(alias) === normalized));
   if (matches.length === 1)
     return matches[0];
   if (matches.length > 1)
@@ -9746,8 +14541,8 @@ function runActions(cwd, state) {
 }
 
 // src/lib/output.ts
-import { existsSync as existsSync10, writeFileSync as writeFileSync8 } from "node:fs";
-import { join as join11 } from "node:path";
+import { existsSync as existsSync19, writeFileSync as writeFileSync11 } from "node:fs";
+import { join as join21 } from "node:path";
 
 // src/lib/ansi.ts
 var CODES = {
@@ -9764,13 +14559,13 @@ function colorEnabled(opts = {}) {
     return false;
   if (process.env.NO_COLOR !== undefined)
     return false;
-  const stream = opts.stream ?? process.stdout;
-  return Boolean(stream.isTTY);
+  const stream2 = opts.stream ?? process.stdout;
+  return Boolean(stream2.isTTY);
 }
-function paint(text, color, enabled) {
+function paint(text2, color, enabled) {
   if (!enabled)
-    return text;
-  return `${CODES[color]}${text}${CODES.reset}`;
+    return text2;
+  return `${CODES[color]}${text2}${CODES.reset}`;
 }
 
 // src/lib/output.ts
@@ -9798,33 +14593,33 @@ function formatLine(msg, colorOn) {
     return msg.text;
   return paint(`${MARKERS[msg.kind]} ${msg.text}`, COLORS[msg.kind], true);
 }
-function printLine(text) {
-  console.log(text);
+function printLine(text2) {
+  console.log(text2);
 }
-function printError(text) {
-  console.error(text);
+function printError(text2) {
+  console.error(text2);
 }
 function parseOutputFlag(args) {
   const rest = [];
   let format = "terminal";
   let noColor = false;
-  for (let i = 0;i < args.length; i++) {
-    const a = args[i];
-    if (a === "--output") {
-      const v = args[i + 1];
+  for (let i2 = 0;i2 < args.length; i2++) {
+    const a2 = args[i2];
+    if (a2 === "--output") {
+      const v = args[i2 + 1];
       if (v === undefined || !OUTPUT_FORMATS.includes(v)) {
         printError(`invalid --output value: ${v ?? "(missing)"} — expected one of ${OUTPUT_FORMATS.join("|")}`);
         process.exit(2);
       }
       format = v;
-      i++;
+      i2++;
       continue;
     }
-    if (a === "--no-color") {
+    if (a2 === "--no-color") {
       noColor = true;
       continue;
     }
-    rest.push(a);
+    rest.push(a2);
   }
   return { format, noColor, rest };
 }
@@ -9848,20 +14643,20 @@ function renderMarkdown(result) {
   lines.push("");
   lines.push("## Execution Summary");
   lines.push("");
-  const summary = result.messages.filter((m) => m.kind === "start" || m.kind === "success").map((m) => `- ${m.text}`);
+  const summary = result.messages.filter((m3) => m3.kind === "start" || m3.kind === "success").map((m3) => `- ${m3.text}`);
   lines.push(summary.length > 0 ? summary.join(`
 `) : "_no summary available_");
   lines.push("");
   const data = result.data;
-  const tasks = data && Array.isArray(data.tasks) ? data.tasks : null;
-  if (tasks) {
+  const tasks2 = data && Array.isArray(data.tasks) ? data.tasks : null;
+  if (tasks2) {
     lines.push("## Task Results");
     lines.push("");
     lines.push("| Task | Branch | Phase | Receipt |");
     lines.push("| --- | --- | --- | --- |");
-    for (const raw of tasks) {
-      const t = raw;
-      lines.push(`| ${t.id ?? ""} | ${t.branch ?? ""} | ${t.phase ?? ""} | ${t.receipt ?? "—"} |`);
+    for (const raw of tasks2) {
+      const t2 = raw;
+      lines.push(`| ${t2.id ?? ""} | ${t2.branch ?? ""} | ${t2.phase ?? ""} | ${t2.receipt ?? "—"} |`);
     }
     lines.push("");
   }
@@ -9878,8 +14673,8 @@ function renderMarkdown(result) {
   if (nextActions) {
     lines.push("## Next Actions");
     lines.push("");
-    for (const a of nextActions)
-      lines.push(`- ${a}`);
+    for (const a2 of nextActions)
+      lines.push(`- ${a2}`);
     lines.push("");
   }
   lines.push("<details><summary>Raw data (JSON)</summary>");
@@ -9893,11 +14688,11 @@ function renderMarkdown(result) {
 `);
 }
 function writeTerminalFinal(result, colorFor) {
-  for (const m of result.messages) {
-    if (m.kind === "start" || m.kind === "progress")
+  for (const m3 of result.messages) {
+    if (m3.kind === "start" || m3.kind === "progress")
       continue;
-    const line = formatLine(m, colorFor(m.stream));
-    if (m.stream === "stderr")
+    const line = formatLine(m3, colorFor(m3.stream));
+    if (m3.stream === "stderr")
       process.stderr.write(`${line}
 `);
     else
@@ -9906,11 +14701,11 @@ function writeTerminalFinal(result, colorFor) {
   }
 }
 function uniquePath(dir, baseName, ext) {
-  let candidate = join11(dir, `${baseName}.${ext}`);
-  let n = 2;
-  while (existsSync10(candidate)) {
-    candidate = join11(dir, `${baseName}-${n}.${ext}`);
-    n++;
+  let candidate = join21(dir, `${baseName}.${ext}`);
+  let n3 = 2;
+  while (existsSync19(candidate)) {
+    candidate = join21(dir, `${baseName}-${n3}.${ext}`);
+    n3++;
   }
   return candidate;
 }
@@ -9933,33 +14728,33 @@ class Reporter {
     this.pluginVersion = opts.pluginVersion ?? "unknown";
     this.harness = opts.harness ?? "claude-code";
   }
-  colorFor(stream) {
-    return stream === "stdout" ? this.stdoutColorOn : this.stderrColorOn;
+  colorFor(stream2) {
+    return stream2 === "stdout" ? this.stdoutColorOn : this.stderrColorOn;
   }
-  record(kind, text, data, stream) {
-    const msg = { kind, text, data, stream: stream ?? defaultStreamFor(kind) };
+  record(kind, text2, data, stream2) {
+    const msg = { kind, text: text2, data, stream: stream2 ?? defaultStreamFor(kind) };
     this.messages.push(msg);
     if (this.format === "terminal" && (kind === "start" || kind === "progress")) {
       process.stderr.write(`${formatLine(msg, this.colorFor(msg.stream))}
 `);
     }
   }
-  start(text) {
-    this.record("start", text);
+  start(text2) {
+    this.record("start", text2);
   }
-  progress(text, data) {
-    this.record("progress", text, data);
+  progress(text2, data) {
+    this.record("progress", text2, data);
   }
-  success(text, data) {
-    this.record("success", text, data);
+  success(text2, data) {
+    this.record("success", text2, data);
   }
-  warn(text) {
-    this.warnings.push(text);
-    this.record("warning", text);
+  warn(text2) {
+    this.warnings.push(text2);
+    this.record("warning", text2);
   }
-  error(text, opts = {}) {
-    this.errors.push(text);
-    this.record("error", text, undefined, opts.stream);
+  error(text2, opts = {}) {
+    this.errors.push(text2);
+    this.record("error", text2, undefined, opts.stream);
   }
   finish(data, opts = {}) {
     const status = opts.status ?? (this.errors.length > 0 ? "error" : this.warnings.length > 0 ? "warning" : "success");
@@ -9976,7 +14771,7 @@ class Reporter {
   }
   write(result) {
     if (this.format === "terminal") {
-      writeTerminalFinal(result, (stream) => this.colorFor(stream));
+      writeTerminalFinal(result, (stream2) => this.colorFor(stream2));
       return;
     }
     if (this.format === "json") {
@@ -9989,13 +14784,13 @@ class Reporter {
 `);
       return;
     }
-    writeTerminalFinal(result, (stream) => this.colorFor(stream));
+    writeTerminalFinal(result, (stream2) => this.colorFor(stream2));
     const baseName = `sddx-${result.command.replace(/\s+/g, "-")}`;
     const jsonPath = uniquePath(process.cwd(), baseName, "json");
     const mdPath = uniquePath(process.cwd(), baseName, "md");
-    writeFileSync8(jsonPath, `${renderJson(result, this.pluginVersion, this.harness)}
+    writeFileSync11(jsonPath, `${renderJson(result, this.pluginVersion, this.harness)}
 `);
-    writeFileSync8(mdPath, `${renderMarkdown(result)}
+    writeFileSync11(mdPath, `${renderMarkdown(result)}
 `);
     process.stdout.write(`wrote ${jsonPath}
 `);
@@ -10005,18 +14800,18 @@ class Reporter {
 }
 
 // src/lib/oracle.ts
-import { spawnSync as spawnSync10 } from "node:child_process";
+import { spawnSync as spawnSync12 } from "node:child_process";
 var ORACLE_TIMEOUT_MS = 10 * 60000;
 function runOracle(cwd, run2) {
   const started = Date.now();
-  const r = spawnSync10("sh", ["-c", run2], { cwd, timeout: ORACLE_TIMEOUT_MS });
-  if (r.error)
-    throw new Error(`oracle could not run: ${r.error.message}`);
+  const r2 = spawnSync12("sh", ["-c", run2], { cwd, timeout: ORACLE_TIMEOUT_MS });
+  if (r2.error)
+    throw new Error(`oracle could not run: ${r2.error.message}`);
   return {
-    exitCode: r.status ?? -1,
+    exitCode: r2.status ?? -1,
     durationMs: Date.now() - started,
-    stdout: r.stdout ?? Buffer.alloc(0),
-    stderr: r.stderr ?? Buffer.alloc(0)
+    stdout: r2.stdout ?? Buffer.alloc(0),
+    stderr: r2.stderr ?? Buffer.alloc(0)
   };
 }
 
@@ -10052,16 +14847,16 @@ function generateRunReport(cwd, goalId2, targetBranch) {
   const outstanding = goal.task_ids.filter((id) => !merged.includes(id) && !failed.includes(id));
   const diffStat = git(resolveMainRepoRoot(cwd), "diff", "--stat", `${goal.base_sha}...${goal.run_branch}`);
   const oracles = [];
-  const tasks = [];
+  const tasks2 = [];
   const assumptions = [];
   const latestMerge = new Map;
   for (const e of goal.merges)
     latestMerge.set(e.task_id, e);
   for (const id of goal.task_ids) {
     const task = resolveTaskState(cwd, id);
-    for (const a of task?.assumptions ?? [])
-      if (!assumptions.includes(a))
-        assumptions.push(a);
+    for (const a2 of task?.assumptions ?? [])
+      if (!assumptions.includes(a2))
+        assumptions.push(a2);
     const receiptPath2 = resolveReceiptPath(cwd, id);
     const oracle = {
       taskId: id,
@@ -10074,7 +14869,7 @@ function generateRunReport(cwd, goalId2, targetBranch) {
     const skipper = task ? skippedOn(cwd, task) : null;
     const blocker = task ? blockedOn(cwd, task) : null;
     const status = merged.includes(id) ? "merged" : failed.includes(id) ? "failed" : entry?.result === "conflict" ? "conflicted" : skipper ? "skipped" : blocker ? "blocked" : "outstanding";
-    tasks.push({
+    tasks2.push({
       taskId: id,
       status,
       oracle,
@@ -10083,7 +14878,7 @@ function generateRunReport(cwd, goalId2, targetBranch) {
       because: skipper ?? blocker ?? null
     });
   }
-  const count = (s) => tasks.filter((t) => t.status === s).length;
+  const count = (s) => tasks2.filter((t2) => t2.status === s).length;
   return {
     goalId: goal.id,
     goal: goal.goal,
@@ -10098,7 +14893,7 @@ function generateRunReport(cwd, goalId2, targetBranch) {
     outstanding: count("outstanding"),
     total: goalCounts(goal).total,
     diffStat,
-    tasks,
+    tasks: tasks2,
     oracles,
     assumptions,
     interactionMode: goal.approval?.mode ?? null,
@@ -10111,183 +14906,81 @@ function generateRunReport(cwd, goalId2, targetBranch) {
     ]
   };
 }
-function approvalLines(a) {
+function approvalLines(a2) {
   const lines = [
     "Approval",
-    `- interaction mode: ${a.mode}`,
-    ...a.authorization ? [`- authorization: ${a.authorization}`] : [],
-    `- plan: ${a.plan_sha256.slice(0, 12)}`
+    `- interaction mode: ${a2.mode}`,
+    ...a2.authorization ? [`- authorization: ${a2.authorization}`] : [],
+    `- plan: ${a2.plan_sha256.slice(0, 12)}`
   ];
-  if (a.requested_mode && a.requested_mode !== a.mode) {
-    lines.push(`- requested ${a.requested_mode}, ran as ${a.mode}`);
-    if (a.degraded_reason)
-      lines.push(`- reason: ${a.degraded_reason}`);
+  if (a2.requested_mode && a2.requested_mode !== a2.mode) {
+    lines.push(`- requested ${a2.requested_mode}, ran as ${a2.mode}`);
+    if (a2.degraded_reason)
+      lines.push(`- reason: ${a2.degraded_reason}`);
   }
   return [...lines, ""];
 }
-function renderRunReport(r) {
-  const done = r.merged === r.total;
-  const stalled = r.outstanding === 0 && !done;
+function renderRunReport(r2) {
+  const done = r2.merged === r2.total;
+  const stalled = r2.outstanding === 0 && !done;
   const lines = [
     done ? "Run completed" : stalled ? "Run finished with unresolved tasks" : "Run in progress",
     "",
-    `Goal: ${r.goal}`,
-    `Review branch: ${r.runBranch}`,
-    `Target branch remains unchanged: ${r.targetBranch}`,
+    `Goal: ${r2.goal}`,
+    `Review branch: ${r2.runBranch}`,
+    `Target branch remains unchanged: ${r2.targetBranch}`,
     "",
-    ...r.approval ? approvalLines(r.approval) : [],
+    ...r2.approval ? approvalLines(r2.approval) : [],
     "Summary",
-    `- ${r.merged} of ${r.total} task(s) merged`,
-    ...r.failed > 0 ? [`- ${r.failed} task(s) failed`] : [],
-    ...r.conflicted > 0 ? [`- ${r.conflicted} task(s) verified but not integrated`] : [],
-    ...r.skipped > 0 ? [`- ${r.skipped} task(s) skipped`] : [],
-    ...r.blocked > 0 ? [`- ${r.blocked} task(s) blocked`] : [],
-    ...r.outstanding > 0 ? [`- ${r.outstanding} task(s) outstanding`] : [],
-    ...r.diffStat ? r.diffStat.split(`
-`).map((l) => `- ${l.trim()}`) : [],
+    `- ${r2.merged} of ${r2.total} task(s) merged`,
+    ...r2.failed > 0 ? [`- ${r2.failed} task(s) failed`] : [],
+    ...r2.conflicted > 0 ? [`- ${r2.conflicted} task(s) verified but not integrated`] : [],
+    ...r2.skipped > 0 ? [`- ${r2.skipped} task(s) skipped`] : [],
+    ...r2.blocked > 0 ? [`- ${r2.blocked} task(s) blocked`] : [],
+    ...r2.outstanding > 0 ? [`- ${r2.outstanding} task(s) outstanding`] : [],
+    ...r2.diffStat ? r2.diffStat.split(`
+`).map((l2) => `- ${l2.trim()}`) : [],
     "",
     "Tasks",
-    ...r.tasks.map((t) => {
-      const why = t.because ? ` (${t.because})` : "";
-      const receipt = t.receiptPath ? ` — receipt ${t.receiptPath}` : "";
-      return `- ${t.taskId}: ${t.status}${why}${receipt}`;
+    ...r2.tasks.map((t2) => {
+      const why = t2.because ? ` (${t2.because})` : "";
+      const receipt = t2.receiptPath ? ` — receipt ${t2.receiptPath}` : "";
+      return `- ${t2.taskId}: ${t2.status}${why}${receipt}`;
     }),
     "",
     "Oracle results",
-    ...r.oracles.map((o) => `- ${o.taskId}: ${o.verdict} — ${o.run} (expect ${o.expect})`),
+    ...r2.oracles.map((o2) => `- ${o2.taskId}: ${o2.verdict} — ${o2.run} (expect ${o2.expect})`),
     "",
-    ...r.assumptions.length > 0 ? ["Assumptions", ...r.assumptions.map((a) => `- ${a}`), ""] : [],
+    ...r2.assumptions.length > 0 ? ["Assumptions", ...r2.assumptions.map((a2) => `- ${a2}`), ""] : [],
     "Review commands",
-    ...r.reviewCommands
+    ...r2.reviewCommands
   ];
   return lines.join(`
 `);
 }
 
-// src/lib/spec.ts
-var ORACLE_TYPES = new Set(["command", "test-suite", "browser", "manual"]);
-function toList(v) {
-  if (Array.isArray(v))
-    return v.map(String);
-  if (typeof v === "string" && v.trim() !== "")
-    return [v];
-  return [];
-}
-function parseSpec(yamlText) {
-  let raw;
-  try {
-    raw = $parse(yamlText);
-  } catch (e) {
-    return { errors: [`invalid YAML: ${e.message}`] };
-  }
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    return { errors: ["spec must be a YAML mapping"] };
-  }
-  const r = raw;
-  const errors2 = [];
-  if (typeof r.task !== "string" || r.task.trim() === "") {
-    errors2.push("task: one-sentence description required");
-  }
-  const sc = r.success_criteria;
-  if (!Array.isArray(sc) || sc.length === 0 || !sc.every((s) => typeof s === "string" && s.trim() !== "")) {
-    errors2.push("success_criteria: non-empty list of binary criteria required");
-  }
-  const o = r.oracle;
-  if (typeof o !== "object" || o === null || Array.isArray(o)) {
-    errors2.push("oracle: required — no oracle, no goal");
-  } else {
-    const or2 = o;
-    if (typeof or2.type !== "string" || !ORACLE_TYPES.has(or2.type)) {
-      errors2.push("oracle.type: must be one of command | test-suite | browser | manual");
-    }
-    if (or2.type !== "manual" && (typeof or2.run !== "string" || or2.run.trim() === "")) {
-      errors2.push("oracle.run: command required for non-manual oracles");
-    }
-    if (or2.runs !== undefined && (typeof or2.runs !== "number" || !Number.isInteger(or2.runs) || or2.runs < 1)) {
-      errors2.push("oracle.runs: must be an integer >= 1");
-    }
-  }
-  if (r.scope !== undefined) {
-    if (!Array.isArray(r.scope) || r.scope.length === 0 || !r.scope.every((s) => typeof s === "string" && s.trim() !== "")) {
-      errors2.push("scope: when present, must be a non-empty list of non-empty globs");
-    }
-  }
-  if (r.on_dependency_failure !== undefined && r.on_dependency_failure !== "skip" && r.on_dependency_failure !== "block") {
-    errors2.push("on_dependency_failure: must be one of skip | block");
-  }
-  if (r.assumptions !== undefined) {
-    if (!Array.isArray(r.assumptions) || r.assumptions.length === 0 || !r.assumptions.every((s) => typeof s === "string" && s.trim() !== "")) {
-      errors2.push("assumptions: when present, must be a non-empty list of non-empty strings");
-    }
-  }
-  const retryRaw = r.retry;
-  if (retryRaw !== undefined) {
-    if (typeof retryRaw !== "object" || retryRaw === null || Array.isArray(retryRaw)) {
-      errors2.push("retry: must be a mapping with optional max_attempts/workspace");
-    } else {
-      const rr = retryRaw;
-      if (rr.max_attempts !== undefined && (typeof rr.max_attempts !== "number" || !Number.isInteger(rr.max_attempts) || rr.max_attempts < 1)) {
-        errors2.push("retry.max_attempts: must be an integer >= 1");
-      }
-      if (rr.workspace !== undefined && rr.workspace !== "fresh" && rr.workspace !== "reuse") {
-        errors2.push("retry.workspace: must be one of fresh | reuse");
-      }
-    }
-  }
-  if (errors2.length > 0)
-    return { errors: errors2 };
-  const or = o;
-  return {
-    errors: [],
-    spec: {
-      task: r.task.trim(),
-      context: toList(r.context),
-      success_criteria: sc.map((s) => s.trim()),
-      scope: Array.isArray(r.scope) ? r.scope.map((s) => s.trim()) : [],
-      oracle: {
-        type: or.type,
-        run: typeof or.run === "string" ? or.run.trim() : "",
-        expect: typeof or.expect === "string" ? or.expect.trim() : "exit 0",
-        ...typeof or.runs === "number" ? { runs: or.runs } : {}
-      },
-      stop_rules: Array.isArray(r.stop_rules) ? r.stop_rules : [],
-      out_of_scope: toList(r.out_of_scope),
-      assumptions: Array.isArray(r.assumptions) ? r.assumptions.map((s) => s.trim()) : [],
-      ...r.on_dependency_failure !== undefined ? { on_dependency_failure: r.on_dependency_failure } : {},
-      ...retryRaw !== undefined && typeof retryRaw === "object" && retryRaw !== null ? {
-        retry: {
-          ...typeof retryRaw.max_attempts === "number" ? { max_attempts: retryRaw.max_attempts } : {},
-          ...typeof retryRaw.workspace === "string" ? {
-            workspace: retryRaw.workspace
-          } : {}
-        }
-      } : {}
-    }
-  };
-}
-
 // src/lib/envinfo.ts
-import { spawnSync as spawnSync11 } from "node:child_process";
+import { spawnSync as spawnSync13 } from "node:child_process";
 import { arch, platform } from "node:os";
 function captureEnv(cwd) {
   const bun = globalThis.Bun;
-  const status = spawnSync11("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
+  const status = spawnSync13("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
   return {
     os: platform(),
     arch: arch(),
-    runtime: bun ? "bun" : "node",
-    runtime_version: bun ? bun.version : process.versions.node,
+    runtime: bun ? "bun" : "unknown",
+    runtime_version: bun ? bun.version : "unknown",
     dirty_tree: status.status === 0 && (status.stdout ?? "").trim() !== ""
   };
 }
 
 // src/lib/verify.ts
 function expectedExit(expect) {
-  const m = /^exit\s+(\d+)$/.exec(expect.trim());
-  if (!m) {
+  const m3 = /^exit\s+(\d+)$/.exec(expect.trim());
+  if (!m3) {
     throw new Error(`unsupported oracle.expect: "${expect}" (M1 supports "exit <code>")`);
   }
-  return Number(m[1]);
+  return Number(m3[1]);
 }
 function verifyTask(cwd, id, opts) {
   const task = readTask(cwd, id);
@@ -10302,7 +14995,7 @@ function verifyTask(cwd, id, opts) {
   if (!redEvidence || redEvidence.exit_code === undefined || redEvidence.exit_code === 0) {
     throw new Error(`task ${id} has no failing-oracle evidence — an oracle that never failed proves nothing. ` + `In RED, run \`sddx red-check ${id}\`. A task already past RED (e.g. created before sddx 0.2) ` + `cannot be red-checked retroactively: abandon it (sddx task phase ${id} ABANDONED) and recreate`);
   }
-  const firstGreen = task.history.find((h) => h.phase === "GREEN");
+  const firstGreen = task.history.find((h2) => h2.phase === "GREEN");
   if (firstGreen && Date.parse(redEvidence.at) > Date.parse(firstGreen.at)) {
     throw new Error(`oracle_red (${redEvidence.at}) was recorded after the first GREEN (${firstGreen.at}) — the red-check must precede implementation; abandon and restart the task`);
   }
@@ -10311,7 +15004,7 @@ function verifyTask(cwd, id, opts) {
   const runs = [];
   const started = Date.now();
   let exitCode = 0;
-  for (let i = 0;i < wanted; i += 1) {
+  for (let i2 = 0;i2 < wanted; i2 += 1) {
     const run2 = runOracle(cwd, task.oracle.run);
     exitCode = run2.exitCode;
     runs.push({
@@ -10382,6 +15075,12 @@ function verifyTask(cwd, id, opts) {
 
 // src/cli.ts
 var USAGE = `usage:
+  sddx init [--runtime <global|project>] [--package-manager <npm|bun>]
+            [--adapter <name>]... [--interaction-mode <human|auto>]
+            [--yes] [--dry-run] [--force]
+  sddx doctor
+  sddx sync --adapter <name> [--yes] [--force]
+  sddx uninstall --adapter <name>
   sddx task phase <id> <PHASE> [--test-exit <n>]
   sddx task allow <id> <path>
   sddx task show <id>
@@ -10412,17 +15111,17 @@ var currentNoColor = false;
 var currentCommand = "sddx";
 function failWith(messages, code = 1, data = null) {
   if (currentFormat === "terminal") {
-    for (const m of messages)
-      printError(m);
+    for (const m3 of messages)
+      printError(m3);
   } else {
     const reporter = makeReporter(currentCommand, currentFormat, currentNoColor);
-    for (const m of messages)
-      reporter.error(m);
+    for (const m3 of messages)
+      reporter.error(m3);
     reporter.finish(data, { status: "error" });
   }
   process.exit(code);
 }
-function fail(message, code = 1) {
+function fail2(message, code = 1) {
   failWith([message], code);
 }
 function makeReporter(command, format, noColor) {
@@ -10431,17 +15130,17 @@ function makeReporter(command, format, noColor) {
   currentCommand = command;
   return new Reporter(command, format, {
     noColor,
-    pluginVersion: pluginVersion(),
+    pluginVersion: sddxVersion(),
     harness: "claude-code"
   });
 }
 function flag(args, name) {
-  const i = args.indexOf(name);
-  if (i === -1)
+  const i2 = args.indexOf(name);
+  if (i2 === -1)
     return;
-  const v = args[i + 1];
+  const v = args[i2 + 1];
   if (v === undefined)
-    fail(`${name} requires a value`, 2);
+    fail2(`${name} requires a value`, 2);
   return v;
 }
 var REMOVED_FLAGS = new Map([
@@ -10461,19 +15160,13 @@ function rejectRemovedFlags(args) {
     }
   }
 }
-function readVersionField(relativePath) {
+function sddxVersion() {
   try {
-    const manifest = new URL(relativePath, import.meta.url);
-    return JSON.parse(readFileSync9(manifest, "utf8")).version;
+    const manifest = new URL("../package.json", import.meta.url);
+    return JSON.parse(readFileSync17(manifest, "utf8")).version;
   } catch {
     return "unknown";
   }
-}
-function pluginVersion() {
-  return readVersionField("../.claude-plugin/plugin.json");
-}
-function packageVersion() {
-  return readVersionField("../package.json");
 }
 
 class Rollback {
@@ -10491,7 +15184,7 @@ class Rollback {
     this.steps.push({
       describe: `worktree ${absPath}`,
       undo: (cwd) => {
-        if (existsSync11(absPath))
+        if (existsSync20(absPath))
           removeWorktreeForced(cwd, absPath);
       }
     });
@@ -10500,12 +15193,12 @@ class Rollback {
     this.steps.push({
       describe: `task state ${id}`,
       undo: (cwd) => {
-        for (const p of [
-          join12(sddxDir(cwd), "tasks", `${id}.json`),
-          join12(sddxDir(cwd), "specs", `${id}.yaml`)
+        for (const p3 of [
+          join22(sddxDir(cwd), "tasks", `${id}.json`),
+          join22(sddxDir(cwd), "specs", `${id}.yaml`)
         ]) {
-          if (existsSync11(p))
-            rmSync3(p, { force: true });
+          if (existsSync20(p3))
+            rmSync5(p3, { force: true });
         }
       }
     });
@@ -10534,10 +15227,10 @@ function createRootTask(cwd, spec, specSrc, reporter, forkSha) {
     baseSha = base.sha;
   }
   const wtPath = createWorktree(cwd, id, baseSha);
-  const relPath = join12(".sddx-worktrees", id);
-  mkdirSync8(join12(sddxDir(wtPath), "specs"), { recursive: true });
-  const specPath = join12(".sddx", "specs", `${id}.yaml`);
-  copyFileSync2(specSrc, join12(wtPath, specPath));
+  const relPath = join22(".sddx-worktrees", id);
+  mkdirSync11(join22(sddxDir(wtPath), "specs"), { recursive: true });
+  const specPath = join22(".sddx", "specs", `${id}.yaml`);
+  copyFileSync2(specSrc, join22(wtPath, specPath));
   createTask(wtPath, spec, specPath, {
     mode: "worktree",
     branch: `sddx/${id}`,
@@ -10551,9 +15244,9 @@ function createRootTask(cwd, spec, specSrc, reporter, forkSha) {
 }
 function createDeferredTask(cwd, spec, specSrc, dependsOn) {
   const id = taskId(spec.task);
-  mkdirSync8(join12(sddxDir(cwd), "specs"), { recursive: true });
-  const specPath = join12(".sddx", "specs", `${id}.yaml`);
-  copyFileSync2(specSrc, join12(cwd, specPath));
+  mkdirSync11(join22(sddxDir(cwd), "specs"), { recursive: true });
+  const specPath = join22(".sddx", "specs", `${id}.yaml`);
+  copyFileSync2(specSrc, join22(cwd, specPath));
   createTask(cwd, spec, specPath, {
     mode: "deferred",
     materialize_as: "worktree",
@@ -10567,42 +15260,42 @@ function topoOrder(nodes) {
   const emitted = new Set;
   let remaining = [...nodes];
   while (remaining.length > 0) {
-    const ready = remaining.filter((n) => n.depends_on.every((d) => emitted.has(d)));
+    const ready = remaining.filter((n3) => n3.depends_on.every((d) => emitted.has(d)));
     if (ready.length === 0)
       break;
-    for (const n of ready) {
-      out.push(n);
-      emitted.add(n.alias);
+    for (const n3 of ready) {
+      out.push(n3);
+      emitted.add(n3.alias);
     }
-    remaining = remaining.filter((n) => !emitted.has(n.alias));
+    remaining = remaining.filter((n3) => !emitted.has(n3.alias));
   }
   return out;
 }
 function resolvePlan(cwd, graphArg) {
   let graphText;
   try {
-    graphText = readFileSync9(join12(cwd, graphArg), "utf8");
+    graphText = readFileSync17(join22(cwd, graphArg), "utf8");
   } catch {
-    fail(`cannot read graph file: ${graphArg}`);
+    fail2(`cannot read graph file: ${graphArg}`);
   }
   const { graph, errors: graphErrors } = parseGraph(graphText);
   if (!graph) {
     failWith(graphErrors.map((e) => `graph error: ${e}`));
   }
-  const graphDir = dirname3(join12(cwd, graphArg));
+  const graphDir = dirname9(join22(cwd, graphArg));
   const errs = [];
   const loaded = new Map;
   const idByAlias = new Map;
   for (const node of graph.tasks) {
-    const src = resolve2(graphDir, node.spec);
-    let text;
+    const src = resolve4(graphDir, node.spec);
+    let text2;
     try {
-      text = readFileSync9(src, "utf8");
+      text2 = readFileSync17(src, "utf8");
     } catch {
       errs.push(`${node.alias}: cannot read spec ${node.spec}`);
       continue;
     }
-    const { spec, errors: errors2 } = parseSpec(text);
+    const { spec, errors: errors2 } = parseSpec(text2);
     if (!spec) {
       for (const e of errors2)
         errs.push(`${node.alias}: spec error: ${e}`);
@@ -10621,13 +15314,13 @@ function resolvePlan(cwd, graphArg) {
       src
     });
   }
-  errs.push(...validateSchedule(graph.tasks.map((n) => ({
-    id: n.alias,
-    dependsOn: n.depends_on,
-    scope: loaded.get(n.alias)?.spec.scope ?? []
+  errs.push(...validateSchedule(graph.tasks.map((n3) => ({
+    id: n3.alias,
+    dependsOn: n3.depends_on,
+    scope: loaded.get(n3.alias)?.spec.scope ?? []
   }))));
   const gid = goalId(graph.goal);
-  if (existsSync11(goalPath(cwd, gid)))
+  if (existsSync20(goalPath(cwd, gid)))
     errs.push(`goal error: goal ${gid} already exists`);
   const notices = [];
   const base = resolveBaseRef(cwd);
@@ -10636,8 +15329,8 @@ function resolvePlan(cwd, graphArg) {
   if (!worktreeAvailable(cwd)) {
     errs.push("worktree unavailable: git cannot create worktrees for this repository. No run was started. Use a checkout where `git worktree list` succeeds.");
   }
-  for (const c of submoduleScopeConflicts(cwd, base.sha, graph.tasks.map((n) => ({ alias: n.alias, scope: loaded.get(n.alias)?.spec.scope ?? [] })))) {
-    errs.push(c.scope ? `unsupported layout: task "${c.alias}" declares scope ${c.scope}, which reaches the submodule ${c.submodule}. A worktree crossing a submodule boundary is unsafe, and no run was started.` : `unsupported layout: task "${c.alias}" declares no scope, so it cannot be proven disjoint from the submodule ${c.submodule}. Declare a scope, or use a checkout without submodules. No run was started.`);
+  for (const c3 of submoduleScopeConflicts(cwd, base.sha, graph.tasks.map((n3) => ({ alias: n3.alias, scope: loaded.get(n3.alias)?.spec.scope ?? [] })))) {
+    errs.push(c3.scope ? `unsupported layout: task "${c3.alias}" declares scope ${c3.scope}, which reaches the submodule ${c3.submodule}. A worktree crossing a submodule boundary is unsafe, and no run was started.` : `unsupported layout: task "${c3.alias}" declares no scope, so it cannot be proven disjoint from the submodule ${c3.submodule}. Declare a scope, or use a checkout without submodules. No run was started.`);
   }
   const runBranch = runBranchName(gid);
   if (branchExists(cwd, runBranch)) {
@@ -10647,14 +15340,14 @@ function resolvePlan(cwd, graphArg) {
     if (branchExists(cwd, `sddx/${id}`)) {
       errs.push(`${alias}: task branch sddx/${id} already exists`);
     }
-    if (existsSync11(join12(worktreesDir(resolveMainRepoRoot(cwd)), id))) {
+    if (existsSync20(join22(worktreesDir(resolveMainRepoRoot(cwd)), id))) {
       errs.push(`${alias}: worktree destination .sddx-worktrees/${id} already exists`);
     }
   }
   return { graph, loaded, idByAlias, goalId: gid, base, notices, errors: errs };
 }
 function planNodeSummary(plan, alias) {
-  const node = plan.graph.tasks.find((n) => n.alias === alias);
+  const node = plan.graph.tasks.find((n3) => n3.alias === alias);
   const spec = plan.loaded.get(alias)?.spec;
   const shown = {
     task: spec?.task ?? "(unreadable)",
@@ -10684,7 +15377,7 @@ function planBriefSummary(graph) {
   const list = (xs) => xs.join(" | ") || "(none)";
   return {
     goal: graph.goal,
-    answers: list(graph.answers.map((a) => `${a.question} → ${a.answer}`)),
+    answers: list(graph.answers.map((a2) => `${a2.question} → ${a2.answer}`)),
     assumptions: list(graph.assumptions),
     constraints: list(graph.constraints),
     acceptance_criteria: list(graph.acceptance_criteria),
@@ -10693,30 +15386,30 @@ function planBriefSummary(graph) {
   };
 }
 var PLAN_ACTIONS = ["Approve", "Edit", "Regenerate", "Cancel"];
-var draftsDir = (cwd) => join12(sddxDir(cwd), "drafts");
-function within(dir, path) {
-  const rel = relative2(dir, path);
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute4(rel);
+var draftsDir = (cwd) => join22(sddxDir(cwd), "drafts");
+function within(dir, path2) {
+  const rel = relative3(dir, path2);
+  return rel !== "" && !rel.startsWith("..") && !isAbsolute5(rel);
 }
-var renderCachePath = (cwd, gid) => join12(draftsDir(cwd), `.render-${gid}.json`);
+var renderCachePath = (cwd, gid) => join22(draftsDir(cwd), `.render-${gid}.json`);
 function dropRenderCache(cwd, gid) {
   if (gid !== null)
-    rmSync3(renderCachePath(cwd, gid), { force: true });
+    rmSync5(renderCachePath(cwd, gid), { force: true });
 }
 function renderPlan(cwd, graphArg, plan, reporter) {
   const mode = gateInteractionMode(cwd);
-  const order = topoOrder(plan.graph.tasks).map((n) => n.alias);
+  const order = topoOrder(plan.graph.tasks).map((n3) => n3.alias);
   const current = {};
   for (const alias of order)
     current[alias] = planNodeSummary(plan, alias);
   const currentBrief = planBriefSummary(plan.graph);
-  const { hash } = planHash(join12(cwd, graphArg));
+  const { hash: hash2 } = planHash(join22(cwd, graphArg));
   const targetBranch = defaultBranch(cwd);
   const runBranch = runBranchName(plan.goalId);
-  const worktreeCount = plan.graph.tasks.filter((n) => n.depends_on.length === 0).length;
+  const worktreeCount = plan.graph.tasks.filter((n3) => n3.depends_on.length === 0).length;
   const lines = [
     `goal: ${plan.graph.goal}`,
-    `plan: ${hash.slice(0, 12)} (${order.length} node${order.length === 1 ? "" : "s"})`,
+    `plan: ${hash2.slice(0, 12)} (${order.length} node${order.length === 1 ? "" : "s"})`,
     `target branch: ${targetBranch}`,
     `run branch: ${runBranch} (not created yet)`,
     `worktrees: ${worktreeCount} at creation, ${order.length} once every dependent materializes`,
@@ -10731,44 +15424,44 @@ function renderPlan(cwd, graphArg, plan, reporter) {
   }
   if (brief.answers.length > 0) {
     lines.push("answered:");
-    for (const a of brief.answers)
-      lines.push(`  ${a.question} → ${a.answer}`);
+    for (const a2 of brief.answers)
+      lines.push(`  ${a2.question} → ${a2.answer}`);
     lines.push("");
   }
   if (brief.assumptions.length > 0) {
     lines.push("assumptions:");
-    for (const a of brief.assumptions)
-      lines.push(`  ${a}`);
+    for (const a2 of brief.assumptions)
+      lines.push(`  ${a2}`);
     lines.push("");
   }
   if (brief.constraints.length > 0) {
     lines.push("constraints:");
-    for (const c of brief.constraints)
-      lines.push(`  ${c}`);
+    for (const c3 of brief.constraints)
+      lines.push(`  ${c3}`);
     lines.push("");
   }
   if (brief.acceptance_criteria.length > 0) {
     lines.push("acceptance criteria:");
-    for (const a of brief.acceptance_criteria)
-      lines.push(`  ${a}`);
+    for (const a2 of brief.acceptance_criteria)
+      lines.push(`  ${a2}`);
     lines.push("");
   }
   if (brief.out_of_scope.length > 0) {
     lines.push("out of scope:");
-    for (const o of brief.out_of_scope)
-      lines.push(`  ${o}`);
+    for (const o2 of brief.out_of_scope)
+      lines.push(`  ${o2}`);
     lines.push("");
   }
   if (brief.unresolved.length > 0) {
     lines.push("unresolved:");
-    for (const u of brief.unresolved)
-      lines.push(`  ${u}`);
+    for (const u5 of brief.unresolved)
+      lines.push(`  ${u5}`);
     lines.push("");
   }
   let previous = null;
   let previousBrief = null;
   try {
-    const parsed = JSON.parse(readFileSync9(renderCachePath(cwd, plan.goalId), "utf8"));
+    const parsed = JSON.parse(readFileSync17(renderCachePath(cwd, plan.goalId), "utf8"));
     const versioned = "nodes" in parsed && "brief" in parsed;
     previous = versioned ? parsed.nodes : parsed;
     previousBrief = versioned ? parsed.brief : null;
@@ -10788,11 +15481,11 @@ function renderPlan(cwd, graphArg, plan, reporter) {
     const changed = [];
     const beforeBrief = previousBrief;
     if (beforeBrief) {
-      const fields = Object.keys(currentBrief).filter((f) => beforeBrief[f] !== currentBrief[f]);
+      const fields = Object.keys(currentBrief).filter((f2) => beforeBrief[f2] !== currentBrief[f2]);
       if (fields.length > 0) {
         changed.push("  ~ goal brief");
-        for (const f of fields)
-          changed.push(`      ${f}: ${beforeBrief[f]} → ${currentBrief[f]}`);
+        for (const f2 of fields)
+          changed.push(`      ${f2}: ${beforeBrief[f2]} → ${currentBrief[f2]}`);
       }
     }
     for (const alias of order) {
@@ -10805,8 +15498,8 @@ function renderPlan(cwd, graphArg, plan, reporter) {
       const fields = Object.keys(after).filter((k) => before[k] !== after[k]);
       if (fields.length > 0) {
         changed.push(`  ~ ${alias}`);
-        for (const f of fields)
-          changed.push(`      ${f}: ${before[f]} → ${after[f]}`);
+        for (const f2 of fields)
+          changed.push(`      ${f2}: ${before[f2]} → ${after[f2]}`);
       }
     }
     for (const alias of Object.keys(previous)) {
@@ -10827,14 +15520,14 @@ function renderPlan(cwd, graphArg, plan, reporter) {
   reporter.success(lines.join(`
 `));
   try {
-    mkdirSync8(dirname3(renderCachePath(cwd, plan.goalId)), { recursive: true });
-    writeFileSync9(renderCachePath(cwd, plan.goalId), JSON.stringify({ nodes: current, brief: currentBrief }));
+    mkdirSync11(dirname9(renderCachePath(cwd, plan.goalId)), { recursive: true });
+    writeFileSync12(renderCachePath(cwd, plan.goalId), JSON.stringify({ nodes: current, brief: currentBrief }));
   } catch {}
   reporter.finish({
     dryRun: true,
     goal: plan.graph.goal,
     goalId: plan.goalId,
-    planSha256: hash,
+    planSha256: hash2,
     workspaceMode: "worktree",
     baseSha: plan.base.sha,
     runBranch,
@@ -10860,44 +15553,44 @@ function renderPlan(cwd, graphArg, plan, reporter) {
   });
 }
 function gateNodes(plan) {
-  return plan.graph.tasks.map((n) => ({
-    alias: n.alias,
-    scope: plan.loaded.get(n.alias)?.spec.scope ?? [],
-    oracleType: plan.loaded.get(n.alias)?.spec.oracle.type ?? "command"
+  return plan.graph.tasks.map((n3) => ({
+    alias: n3.alias,
+    scope: plan.loaded.get(n3.alias)?.spec.scope ?? [],
+    oracleType: plan.loaded.get(n3.alias)?.spec.oracle.type ?? "command"
   }));
 }
 function resolveApproval(cwd, graphArg, plan) {
-  return decideGate(cwd, join12(cwd, graphArg), gateNodes(plan), gateInteractionMode(cwd), autoMaxTasks(cwd), scopesOverlap);
+  return decideGate(cwd, join22(cwd, graphArg), gateNodes(plan), gateInteractionMode(cwd), autoMaxTasks(cwd), scopesOverlap);
 }
 function cmdGraphApprove(cwd, args, format, noColor) {
   const reporter = makeReporter("graph approve", format, noColor);
   const graphArg = flag(args, "--graph");
   if (!graphArg)
-    fail(USAGE, 2);
+    fail2(USAGE, 2);
   const plan = resolvePlan(cwd, graphArg);
   if (plan.errors.length > 0) {
     failWith(plan.errors.map((e) => `graph approve: ${e}`));
   }
-  const { hash, errors: errors2 } = planHash(join12(cwd, graphArg));
-  if (hash === "")
+  const { hash: hash2, errors: errors2 } = planHash(join22(cwd, graphArg));
+  if (hash2 === "")
     failWith(errors2.map((e) => `graph approve: ${e}`));
-  const decision = decideGate(cwd, join12(cwd, graphArg), gateNodes(plan), gateInteractionMode(cwd), autoMaxTasks(cwd), scopesOverlap);
+  const decision = decideGate(cwd, join22(cwd, graphArg), gateNodes(plan), gateInteractionMode(cwd), autoMaxTasks(cwd), scopesOverlap);
   if (decision.refusal) {
     failWith([`graph approve: ${decision.refusal}`], 1, { blocker: decision.blocker });
   }
   const approval = writeApproval(cwd, {
-    plan_sha256: hash,
+    plan_sha256: hash2,
     mode: "human",
     workspace_mode: "worktree"
   });
-  reporter.success(`approved plan ${hash} (mode ${approval.mode})`);
-  reporter.success(`token: ${approvalPath(cwd, hash)}`);
+  reporter.success(`approved plan ${hash2} (mode ${approval.mode})`);
+  reporter.success(`token: ${approvalPath(cwd, hash2)}`);
   if (approval.signature)
     reporter.success(`signed by ${approval.signer}`);
   reporter.finish({
-    planSha256: hash,
+    planSha256: hash2,
     mode: approval.mode,
-    tokenPath: approvalPath(cwd, hash),
+    tokenPath: approvalPath(cwd, hash2),
     signed: Boolean(approval.signature),
     nodes: plan.graph.tasks.length
   });
@@ -10907,7 +15600,7 @@ function cmdGraphCreate(cwd, args, format, noColor) {
   const reporter = makeReporter(dryRun ? "graph create --dry-run" : "graph create", format, noColor);
   const graphArg = flag(args, "--graph");
   if (!graphArg)
-    fail(USAGE, 2);
+    fail2(USAGE, 2);
   const plan = resolvePlan(cwd, graphArg);
   const { graph, loaded, base } = plan;
   const gid = plan.goalId;
@@ -10915,8 +15608,8 @@ function cmdGraphCreate(cwd, args, format, noColor) {
   if (errs.length > 0) {
     failWith(errs.map((e) => `graph error: ${e}`));
   }
-  for (const n of plan.notices)
-    reporter.success(n);
+  for (const n3 of plan.notices)
+    reporter.success(n3);
   if (dryRun) {
     renderPlan(cwd, graphArg, plan, reporter);
     return;
@@ -10932,7 +15625,7 @@ function cmdGraphCreate(cwd, args, format, noColor) {
   const aliasToId = new Map;
   const deps = {};
   const created = [];
-  let g;
+  let g2;
   const runBranch = runBranchName(gid);
   try {
     createBranchAt(cwd, runBranch, base.sha);
@@ -10943,7 +15636,7 @@ function cmdGraphCreate(cwd, args, format, noColor) {
       if (node.depends_on.length === 0) {
         const id = plan.idByAlias.get(node.alias);
         undo.branch(`sddx/${id}`);
-        undo.worktree(join12(worktreesDir(mainRepoRoot), id));
+        undo.worktree(join22(worktreesDir(mainRepoRoot), id));
         undo.taskState(id);
         const created0 = createRootTask(cwd, spec, src, reporter, base.sha);
         aliasToId.set(node.alias, created0.id);
@@ -10960,7 +15653,7 @@ function cmdGraphCreate(cwd, args, format, noColor) {
         reporter.success(`created ${id} phase=PLAN depends_on=${parentIds.join(",")} workspace=deferred(worktree)`);
       }
     }
-    g = createGoal(cwd, graph.goal, created, {
+    g2 = createGoal(cwd, graph.goal, created, {
       deps,
       id: gid,
       runBranch,
@@ -10982,12 +15675,12 @@ function cmdGraphCreate(cwd, args, format, noColor) {
       ] : ["graph create: everything this attempt created was rolled back; no run was started."]
     ]);
   }
-  reporter.success(`created goal ${g.id} tasks=[${g.task_ids.join(", ")}] run_branch=${runBranch}`);
+  reporter.success(`created goal ${g2.id} tasks=[${g2.task_ids.join(", ")}] run_branch=${runBranch}`);
   for (const [alias, id] of aliasToId)
     reporter.success(`  ${alias} → ${id}`);
   reporter.finish({
-    goalId: g.id,
-    taskIds: g.task_ids,
+    goalId: g2.id,
+    taskIds: g2.task_ids,
     aliasToId: Object.fromEntries(aliasToId),
     runBranch,
     baseSha: base.sha
@@ -10997,7 +15690,7 @@ function cmdTaskPhase(cwd, args, format, noColor) {
   const reporter = makeReporter("task phase", format, noColor);
   const [id, phase] = args;
   if (!id || !phase)
-    fail(USAGE, 2);
+    fail2(USAGE, 2);
   const testExitRaw = flag(args, "--test-exit");
   const task = readTask(cwd, id);
   if (phase === "ABANDONED") {
@@ -11031,10 +15724,10 @@ function cmdRedCheck(cwd, args, format, noColor) {
   const reporter = makeReporter("red-check", format, noColor);
   const [id] = args;
   if (!id)
-    fail(USAGE, 2);
+    fail2(USAGE, 2);
   const res = redCheck(cwd, id);
   if (!res.ok) {
-    fail(`red-check: oracle exited 0 while task ${id} is RED — the oracle does not discriminate; fix the spec's oracle before implementing`);
+    fail2(`red-check: oracle exited 0 while task ${id} is RED — the oracle does not discriminate; fix the spec's oracle before implementing`);
   }
   reporter.success(`red-check: oracle failed as required (exit ${res.exitCode}) — recorded oracle_red`);
   reporter.finish({ id, exitCode: res.exitCode });
@@ -11043,13 +15736,13 @@ function cmdVerify(cwd, args, format, noColor) {
   currentCommand = "verify";
   const [id] = args;
   if (!id)
-    fail(USAGE, 2);
+    fail2(USAGE, 2);
   const reporter = makeReporter("verify", format, noColor);
   reporter.progress(`running oracle for ${id}...`);
   const res = verifyTask(cwd, id, {
     model: flag(args, "--model") ?? null,
     harness: flag(args, "--harness"),
-    pluginVersion: pluginVersion()
+    pluginVersion: sddxVersion()
   });
   if (res.verdict === "pass") {
     const integration = res.integration ?? { result: "none" };
@@ -11088,15 +15781,15 @@ function cmdCleanup(cwd, args, format, noColor) {
   const reporter = makeReporter("cleanup", format, noColor);
   const [id] = args;
   if (!id)
-    fail(USAGE, 2);
+    fail2(USAGE, 2);
   const branch = `sddx/${id}`;
-  const wtPath = join12(worktreesDir(cwd), id);
-  if (existsSync11(wtPath)) {
+  const wtPath = join22(worktreesDir(cwd), id);
+  if (existsSync20(wtPath)) {
     if (isDirty(wtPath)) {
-      fail(`refusing: worktree ${join12(".sddx-worktrees", id)} has uncommitted changes`);
+      fail2(`refusing: worktree ${join22(".sddx-worktrees", id)} has uncommitted changes`);
     }
     removeWorktree(cwd, wtPath);
-    reporter.success(`removed worktree ${join12(".sddx-worktrees", id)}`);
+    reporter.success(`removed worktree ${join22(".sddx-worktrees", id)}`);
   }
   if (!branchExists(cwd, branch)) {
     reporter.success(`no branch ${branch} — nothing to clean up`);
@@ -11104,12 +15797,12 @@ function cmdCleanup(cwd, args, format, noColor) {
     return;
   }
   if (currentBranch(cwd) === branch) {
-    fail(`refusing: ${branch} is checked out — switch branches first`);
+    fail2(`refusing: ${branch} is checked out — switch branches first`);
   }
   if (!isMerged(cwd, branch)) {
     const goal = findGoalForTask(cwd, id);
     if (!goal || !currentlyMergedTaskIds(goal).includes(id)) {
-      fail(`refusing: ${branch} is not merged into HEAD`);
+      fail2(`refusing: ${branch} is not merged into HEAD`);
     }
     reporter.success(`${branch} not merged into HEAD but merged into run branch ${goal.run_branch}`);
     forceDeleteBranch(cwd, branch);
@@ -11125,7 +15818,7 @@ function cmdPrCreate(cwd, args, format, noColor) {
   const reporter = makeReporter("pr create", format, noColor);
   const goalIdArg = flag(args, "--goal");
   if (!goalIdArg)
-    fail(USAGE, 2);
+    fail2(USAGE, 2);
   const res = createGoalPr(cwd, goalIdArg, { title: flag(args, "--title") });
   reporter.success(`pr=${res.prUrl} branch=${res.branch} tasks=[${res.taskIds.join(", ")}]`);
   reporter.finish({ prUrl: res.prUrl, branch: res.branch, taskIds: res.taskIds });
@@ -11134,7 +15827,7 @@ function cmdRunReport(cwd, args, format, noColor) {
   const reporter = makeReporter("run report", format, noColor);
   const goalIdArg = flag(args, "--goal");
   if (!goalIdArg)
-    fail(USAGE, 2);
+    fail2(USAGE, 2);
   const report = generateRunReport(cwd, goalIdArg, defaultBranch(cwd));
   reporter.success(renderRunReport(report));
   reporter.finish(report);
@@ -11147,8 +15840,8 @@ function cmdSweep(cwd, format, noColor) {
     reporter.finish({ locked: true, removed: [], skipped: [] });
     return;
   }
-  for (const path of res.removed)
-    reporter.success(`swept ${path}`);
+  for (const path2 of res.removed)
+    reporter.success(`swept ${path2}`);
   for (const s of res.skipped)
     reporter.success(`skipped ${s.path} (${s.reason})`);
   reporter.success(`sweep: ${res.removed.length} removed, ${res.skipped.length} skipped`);
@@ -11158,7 +15851,7 @@ function cmdNextActionsRun(cwd, goalArg, selectArg, reporter) {
   if (selectArg === undefined) {
     const visible = runActions(cwd, detectRunState(cwd, goalArg));
     reporter.success(renderMenu(visible));
-    reporter.finish({ selected: null, nextActions: visible.map((a) => a.label) });
+    reporter.finish({ selected: null, nextActions: visible.map((a2) => a2.label) });
     return;
   }
   const fresh = detectRunState(cwd, goalArg);
@@ -11235,7 +15928,11 @@ function cmdConfigShow(cwd, args, format, noColor) {
     `agent_model: ${agentModel}`,
     `verbose: ${cfg.verbose}`,
     `interaction_mode: ${cfg.interaction_mode}`,
-    `auto_max_tasks: ${cfg.auto_max_tasks}`
+    `auto_max_tasks: ${cfg.auto_max_tasks}`,
+    `runtime_scope: ${cfg.runtime_scope}`,
+    `package_manager: ${cfg.package_manager}`,
+    `adapters: ${cfg.adapters.length > 0 ? cfg.adapters.join(",") : "(none)"}`,
+    `schema_version: ${cfg.schema_version ?? "(unset — predates sddx init)"}`
   ];
   reporter.success(lines.join(`
 `));
@@ -11250,22 +15947,330 @@ function cmdConfigShow(cwd, args, format, noColor) {
   }
   reporter.finish(cfg);
 }
+var ADAPTERS = { claude: claudeAdapter };
+function adapterContext(root, override) {
+  const cfg = resolveConfig(root);
+  return {
+    runtimeScope: cfg.runtime_scope,
+    packageManager: cfg.package_manager,
+    invocation: sddxCommand(cfg.runtime_scope, cfg.package_manager),
+    sddxVersion: sddxVersion(),
+    ...override
+  };
+}
+function requireAdapter(name) {
+  if (name === undefined)
+    fail2(`--adapter requires a value (one of ${Object.keys(ADAPTERS).join(", ")})`, 2);
+  const adapter = ADAPTERS[name];
+  if (!adapter) {
+    fail2(`unknown adapter "${name}" — known adapters: ${Object.keys(ADAPTERS).join(", ")}`, 2);
+  }
+  return adapter;
+}
+function cmdSync(cwd, args, format, noColor) {
+  currentCommand = "sync";
+  const adapter = requireAdapter(flag(args, "--adapter"));
+  const root = repositoryRoot(cwd);
+  const ctx = adapterContext(root);
+  const reporter = makeReporter("sync", format, noColor);
+  const plan = planAdapter(root, adapter, ctx);
+  const changing = plan.dispositions.filter((d) => d.kind === "create" || d.kind === "update");
+  for (const d of plan.dispositions) {
+    if (d.kind === "conflict")
+      reporter.warn(`conflict  ${d.path} — ${d.reason}`);
+    else if (d.kind !== "unchanged")
+      reporter.success(`${d.kind.padEnd(9)} ${d.path}`);
+  }
+  if (planHasConflicts(plan)) {
+    failWith(new AdapterConflictError(plan.conflicts).message.split(`
+`), 3, { plan });
+  }
+  if (changing.length === 0) {
+    reporter.success(`${adapter.name}: already up to date`);
+    reporter.finish({ adapter: adapter.name, changed: [] });
+    return;
+  }
+  if (!args.includes("--yes")) {
+    reporter.success(`${changing.length} file(s) would change — re-run with --yes to apply`);
+    reporter.finish({
+      adapter: adapter.name,
+      changed: changing.map((d) => d.path),
+      applied: false
+    });
+    return;
+  }
+  const result = applyAdapter(root, adapter, ctx, { force: args.includes("--force") });
+  reporter.success(`${adapter.name}: updated ${result.written.length} file(s)`);
+  reporter.finish({ adapter: adapter.name, changed: result.written, applied: true });
+}
+function cmdDoctor(cwd, format, noColor) {
+  currentCommand = "doctor";
+  const reporter = makeReporter("doctor", format, noColor);
+  let root = null;
+  try {
+    root = repositoryRoot(cwd);
+  } catch {
+    root = null;
+  }
+  const config = root === null ? null : resolveConfig(root);
+  const report = runDoctor({
+    cwd,
+    root,
+    config,
+    adapters: ADAPTERS,
+    adapterContext: root === null ? null : adapterContext(root),
+    runningVersion: sddxVersion()
+  });
+  for (const check of report.checks) {
+    const line = `${check.status.toUpperCase().padEnd(4)} ${check.id}: ${check.detail}`;
+    if (check.status === "fail")
+      reporter.error(line);
+    else if (check.status === "warn")
+      reporter.warn(line);
+    else
+      reporter.success(line);
+    if (check.fix)
+      reporter.success(`     fix: ${check.fix}`);
+  }
+  const failures = report.checks.filter((c3) => c3.status === "fail").length;
+  const warnings = report.checks.filter((c3) => c3.status === "warn").length;
+  reporter.success(`${report.checks.length} check(s): ${failures} failed, ${warnings} warning(s)`);
+  reporter.finish(report, report.failed ? { status: "error" } : {});
+  if (report.failed)
+    process.exit(1);
+}
+function cmdUninstall(cwd, args, format, noColor) {
+  currentCommand = "uninstall";
+  const adapter = requireAdapter(flag(args, "--adapter"));
+  const root = repositoryRoot(cwd);
+  const reporter = makeReporter("uninstall", format, noColor);
+  const result = uninstallAdapter(root, adapter, adapterContext(root));
+  for (const p3 of result.removed)
+    reporter.success(`removed   ${p3}`);
+  for (const p3 of result.keptModified) {
+    reporter.warn(`kept      ${p3} — modified after sddx wrote it, remove it by hand if you meant to`);
+  }
+  reporter.success(`${adapter.name}: removed ${result.removed.length} path(s), kept ${result.keptModified.length} modified`);
+  reporter.finish(result);
+}
+function adapterPlanFiles(root, opts) {
+  const files = [];
+  const ctx = {
+    runtimeScope: opts.runtimeScope,
+    packageManager: opts.packageManager,
+    invocation: sddxCommand(opts.runtimeScope, opts.packageManager),
+    sddxVersion: sddxVersion()
+  };
+  for (const name of opts.adapters) {
+    const adapter = ADAPTERS[name];
+    if (!adapter)
+      continue;
+    for (const d of planAdapter(root, adapter, ctx).dispositions) {
+      if (d.kind === "unchanged") {
+        files.push({ path: d.path, kind: "unchanged", reason: `${name} adapter` });
+      } else if (d.kind === "conflict") {
+        files.push({
+          path: d.path,
+          kind: "modify",
+          reason: `${name} adapter — CONFLICT: ${d.reason}`
+        });
+      } else {
+        files.push({
+          path: d.path,
+          kind: d.kind === "create" ? "create" : "modify",
+          reason: `${name} adapter`
+        });
+      }
+    }
+  }
+  return files;
+}
+var RUNTIME_CHOICE = { flag: "--runtime", values: RUNTIME_SCOPES };
+var PM_CHOICE = {
+  flag: "--package-manager",
+  values: PACKAGE_MANAGERS
+};
+var MODE_CHOICE = {
+  flag: "--interaction-mode",
+  values: INTERACTION_MODES2
+};
+function choice(args, spec) {
+  const raw = flag(args, spec.flag);
+  if (raw === undefined)
+    return;
+  if (!spec.values.includes(raw)) {
+    fail2(`${spec.flag} must be one of ${spec.values.join("|")} — got "${raw}"`, 2);
+  }
+  return raw;
+}
+function adapterFlags(args) {
+  const adapters = [];
+  for (let i2 = 0;i2 < args.length; i2++) {
+    if (args[i2] === "--adapter") {
+      const v = args[i2 + 1];
+      if (v === undefined)
+        fail2("--adapter requires a value", 2);
+      adapters.push(v);
+    }
+  }
+  return [...new Set(adapters)];
+}
+var KNOWN_ADAPTERS = ["claude"];
+function renderInitPlan(plan) {
+  const lines = [];
+  const changing = plan.files.filter((f2) => f2.kind !== "unchanged");
+  lines.push(`repository: ${plan.root}`, "");
+  lines.push("files:");
+  if (changing.length === 0) {
+    lines.push("  (none — everything is already in place)");
+  } else {
+    for (const f2 of changing)
+      lines.push(`  ${f2.kind.padEnd(6)} ${f2.path}    # ${f2.reason}`);
+  }
+  const unchanged = plan.files.length - changing.length;
+  if (unchanged > 0)
+    lines.push(`  (${unchanged} already up to date)`);
+  lines.push("", "package manager:");
+  if (plan.packageOps.length === 0) {
+    lines.push("  (nothing to run)");
+  } else {
+    for (const op of plan.packageOps)
+      lines.push(`  ${op.command.join(" ")}    # ${op.reason}`);
+  }
+  lines.push("", "config (.sddx/config.json):");
+  for (const [key, value] of Object.entries(plan.config)) {
+    lines.push(`  ${key}: ${JSON.stringify(value)}`);
+  }
+  return lines.join(`
+`);
+}
+async function cmdInit(cwd, args, format, noColor) {
+  currentCommand = "init";
+  const dryRun = args.includes("--dry-run");
+  const assumeYes = args.includes("--yes");
+  const force = args.includes("--force");
+  const interactive = isInteractive() && !assumeYes && format === "terminal";
+  const runtimeScope = choice(args, RUNTIME_CHOICE);
+  const packageManager = choice(args, PM_CHOICE);
+  const interactionMode2 = choice(args, MODE_CHOICE);
+  const adapters = adapterFlags(args);
+  for (const a2 of adapters) {
+    if (!KNOWN_ADAPTERS.includes(a2)) {
+      failWith([
+        `unknown adapter "${a2}" — known adapters: ${KNOWN_ADAPTERS.join(", ")}`,
+        "An adapter sddx does not implement cannot be installed, synced, or removed safely."
+      ], 2);
+    }
+  }
+  if (!interactive && runtimeScope === undefined && !dryRun) {
+    failWith([
+      "sddx init needs its choices as flags when stdin/stdout is not an interactive terminal.",
+      "Required: --runtime <global|project>",
+      "Optional: --package-manager <npm|bun> (project scope), --adapter <name> (repeatable), --interaction-mode <human|auto>",
+      "Add --yes to skip the confirmation, or --dry-run to preview without writing.",
+      "Example: sddx init --yes --runtime global --adapter claude"
+    ], 2);
+  }
+  let opts = {
+    runtimeScope: runtimeScope ?? "global",
+    packageManager: packageManager ?? "npm",
+    adapters,
+    interactionMode: interactionMode2 ?? "human"
+  };
+  if (interactive) {
+    try {
+      opts = await promptInitOptions({
+        ...runtimeScope !== undefined ? { runtimeScope } : {},
+        ...packageManager !== undefined ? { packageManager } : {},
+        ...interactionMode2 !== undefined ? { interactionMode: interactionMode2 } : {},
+        ...adapters.length > 0 ? { adapters } : {}
+      }, KNOWN_ADAPTERS);
+    } catch (e) {
+      if (e instanceof InitCancelled) {
+        printLine("cancelled — nothing was changed");
+        return;
+      }
+      throw e;
+    }
+  }
+  const reporter = makeReporter("init", format, noColor);
+  let plan;
+  try {
+    plan = planInit(cwd, opts, adapterPlanFiles);
+  } catch (e) {
+    if (e instanceof NotAGitRepositoryError)
+      failWith(e.message.split(`
+`), 1);
+    throw e;
+  }
+  reporter.success(renderInitPlan(plan));
+  if (dryRun) {
+    reporter.success("dry run: nothing was written");
+    reporter.finish({ plan, applied: false, dryRun: true });
+    return;
+  }
+  if (planIsNoop(plan)) {
+    reporter.success("already initialized — no changes");
+    reporter.finish({ plan, applied: false, dryRun: false });
+    return;
+  }
+  if (interactive && !await confirmPlan(renderInitPlan(plan))) {
+    printLine("cancelled — nothing was changed");
+    return;
+  }
+  try {
+    const result = applyInit(plan, {
+      runAdapters: (applied, record) => {
+        const written = [];
+        for (const name of opts.adapters) {
+          const adapter = ADAPTERS[name];
+          const ctx = adapterContext(applied.root);
+          record(declarationPath(name));
+          record(manifestPath(name));
+          for (const d of planAdapter(applied.root, adapter, ctx).dispositions) {
+            if (d.kind !== "unchanged")
+              record(d.path);
+          }
+          writeDeclaration(applied.root, name, {
+            schema_version: ADAPTER_SCHEMA_VERSION,
+            adapter: name
+          });
+          written.push(declarationPath(name));
+          const result2 = applyAdapter(applied.root, adapter, ctx, { force });
+          written.push(...result2.written);
+        }
+        return written;
+      }
+    });
+    rememberProject(plan.root);
+    reporter.success(`initialized: ${result.written.length} file(s) written${result.packageOps.length > 0 ? `, ran ${result.packageOps.join(", ")}` : ""}`);
+    reporter.finish({ plan, applied: true, dryRun: false, result });
+  } catch (e) {
+    if (e instanceof InitApplyError) {
+      failWith([
+        e.message,
+        ...e.rolledBack.length > 0 ? ["rolled back:", ...e.rolledBack.map((s) => `  ${s}`)] : ["nothing had been written yet"]
+      ], 1);
+    }
+    throw e;
+  }
+}
 function cmdConfigValidate(cwd, format, noColor) {
   const reporter = makeReporter("config validate", format, noColor);
-  const path = join12(sddxDir(cwd), "config.json");
-  if (!existsSync11(path)) {
+  const path2 = join22(sddxDir(cwd), "config.json");
+  if (!existsSync20(path2)) {
     reporter.success("config validate: no .sddx/config.json — using built-in defaults");
     reporter.finish({ hasConfig: false, warnings: [] });
     return;
   }
   let parsed;
   try {
-    parsed = JSON.parse(readFileSync9(path, "utf8"));
+    parsed = JSON.parse(readFileSync17(path2, "utf8"));
   } catch (e) {
-    fail(`config validate: .sddx/config.json is not valid JSON: ${e.message}`);
+    fail2(`config validate: .sddx/config.json is not valid JSON: ${e.message}`);
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    fail("config validate: .sddx/config.json must be a JSON object");
+    fail2("config validate: .sddx/config.json must be a JSON object");
   }
   const warnings = validateConfigObject(parsed);
   if (warnings.length === 0) {
@@ -11279,17 +16284,17 @@ function cmdConfigValidate(cwd, format, noColor) {
 }
 function cmdIntakeCheck(cwd, args, format, noColor) {
   const reporter = makeReporter("intake check", format, noColor);
-  const path = flag(args, "--batch");
-  if (!path)
-    fail("intake check: --batch <path> is required");
-  const abs = resolve2(cwd, path);
-  let text;
+  const path2 = flag(args, "--batch");
+  if (!path2)
+    fail2("intake check: --batch <path> is required");
+  const abs = resolve4(cwd, path2);
+  let text2;
   try {
-    text = readFileSync9(abs, "utf8");
+    text2 = readFileSync17(abs, "utf8");
   } catch (e) {
-    fail(`intake check: cannot read ${path}: ${e.message}`);
+    fail2(`intake check: cannot read ${path2}: ${e.message}`);
   }
-  const { questions, errors: errors2 } = parseQuestionBatch(text);
+  const { questions, errors: errors2 } = parseQuestionBatch(text2);
   if (!questions)
     failWith(errors2.map((e) => `intake check: ${e}`), 2);
   reporter.success(`intake check: ${questions.length} question${questions.length === 1 ? "" : "s"} (cap ${QUESTION_CAP})`);
@@ -11298,43 +16303,43 @@ function cmdIntakeCheck(cwd, args, format, noColor) {
 function draftPlan(cwd, args, action) {
   const graphArg = flag(args, "--graph");
   if (!graphArg)
-    fail(`graph ${action}: --graph <path> is required`);
-  const abs = resolve2(cwd, graphArg);
+    fail2(`graph ${action}: --graph <path> is required`);
+  const abs = resolve4(cwd, graphArg);
   const drafts = draftsDir(cwd);
   if (!within(drafts, abs)) {
-    fail(`graph ${action}: ${graphArg} is not under ${relative2(cwd, drafts)}/ — ${action} only ever removes plan drafts, and refuses any path outside the drafts directory`, 2);
+    fail2(`graph ${action}: ${graphArg} is not under ${relative3(cwd, drafts)}/ — ${action} only ever removes plan drafts, and refuses any path outside the drafts directory`, 2);
   }
-  let text;
+  let text2;
   try {
-    text = readFileSync9(abs, "utf8");
+    text2 = readFileSync17(abs, "utf8");
   } catch (e) {
-    fail(`graph ${action}: cannot read ${graphArg}: ${e.message}`);
+    fail2(`graph ${action}: cannot read ${graphArg}: ${e.message}`);
   }
-  const { graph, errors: errors2 } = parseGraph(text);
-  const goal = graph ? graph.goal : (/^goal:\s*(.+)$/m.exec(text)?.[1] ?? "").trim();
+  const { graph, errors: errors2 } = parseGraph(text2);
+  const goal = graph ? graph.goal : (/^goal:\s*(.+)$/m.exec(text2)?.[1] ?? "").trim();
   const gid = goal === "" ? null : goalId(goal);
   if (gid !== null && goalExists(cwd, gid)) {
-    fail(`graph ${action}: goal ${gid} has already been created from this plan — ${action} only applies while it is still a draft. Use cleanup/next-actions to unwind a materialized run.`, 3);
+    fail2(`graph ${action}: goal ${gid} has already been created from this plan — ${action} only applies while it is still a draft. Use cleanup/next-actions to unwind a materialized run.`, 3);
   }
-  const specs = (graph?.tasks ?? []).map((n) => resolve2(dirname3(abs), n.spec));
+  const specs = (graph?.tasks ?? []).map((n3) => resolve4(dirname9(abs), n3.spec));
   for (const spec of specs) {
     if (!within(drafts, spec)) {
-      fail(`graph ${action}: ${relative2(cwd, spec)} is outside ${relative2(cwd, drafts)}/ — a node's spec path may not escape the drafts directory`, 2);
+      fail2(`graph ${action}: ${relative3(cwd, spec)} is outside ${relative3(cwd, drafts)}/ — a node's spec path may not escape the drafts directory`, 2);
     }
   }
-  return { graphArg, abs, text, graph, errors: errors2, specs, goalId: gid };
+  return { graphArg, abs, text: text2, graph, errors: errors2, specs, goalId: gid };
 }
 function cmdGraphRegenerate(cwd, args, format, noColor) {
   const reporter = makeReporter("graph regenerate", format, noColor);
-  const { graphArg, abs, text, specs, goalId: gid } = draftPlan(cwd, args, "regenerate");
-  const header = truncateToHeader(text);
-  writeFileSync9(abs, header);
+  const { graphArg, abs, text: text2, specs, goalId: gid } = draftPlan(cwd, args, "regenerate");
+  const header = truncateToHeader(text2);
+  writeFileSync12(abs, header);
   const removed = [];
   for (const spec of specs) {
-    if (!existsSync11(spec))
+    if (!existsSync20(spec))
       continue;
-    rmSync3(spec, { force: true });
-    removed.push(relative2(cwd, spec));
+    rmSync5(spec, { force: true });
+    removed.push(relative3(cwd, spec));
   }
   dropRenderCache(cwd, gid);
   reporter.success([
@@ -11349,24 +16354,26 @@ function cmdGraphCancel(cwd, args, format, noColor) {
   const reporter = makeReporter("graph cancel", format, noColor);
   const { graphArg, abs, specs, goalId: gid } = draftPlan(cwd, args, "cancel");
   const removed = [];
-  for (const path of [...specs, abs]) {
-    if (!existsSync11(path))
+  for (const path2 of [...specs, abs]) {
+    if (!existsSync20(path2))
       continue;
-    rmSync3(path, { force: true });
-    removed.push(relative2(cwd, path));
+    rmSync5(path2, { force: true });
+    removed.push(relative3(cwd, path2));
   }
   dropRenderCache(cwd, gid);
   reporter.success(`graph cancel: removed ${removed.length} draft${removed.length === 1 ? "" : "s"} for ${graphArg} — no branch, worktree, task, goal, or approval token existed to undo`);
   reporter.finish({ removed });
 }
-function main(argv) {
+async function main(argv) {
   const cwd = process.cwd();
+  if (argv[0] === "hook")
+    runHook(argv[1]);
   const { format, noColor, rest: cleaned } = parseOutputFlag(argv);
   currentFormat = format;
   currentNoColor = noColor;
   const [cmd, ...rest] = cleaned;
   if (cmd === "--version" || cmd === "-v") {
-    printLine(packageVersion());
+    printLine(sddxVersion());
     return;
   }
   if (cmd === "--help" || cmd === "-h") {
@@ -11394,14 +16401,14 @@ function main(argv) {
     }
     if (cmd === "task" && rest[0] === "allow") {
       currentCommand = "task allow";
-      const [id, path] = rest.slice(1);
-      if (!id || !path)
-        fail(USAGE, 2);
+      const [id, path2] = rest.slice(1);
+      if (!id || !path2)
+        fail2(USAGE, 2);
       if (gateInteractionMode(resolveMainRepoRoot(cwd)) === "auto") {
-        fail(`task allow: refused in auto mode — a TDD-gate exemption always requires a human. Mode is read from reviewed configuration only: set "interaction_mode": "human" in .sddx/config.json to grant "${path}" on ${id}.`);
+        fail2(`task allow: refused in auto mode — a TDD-gate exemption always requires a human. Mode is read from reviewed configuration only: set "interaction_mode": "human" in .sddx/config.json to grant "${path2}" on ${id}.`);
       }
       const task = readTask(cwd, id);
-      allowPath(task, path);
+      allowPath(task, path2);
       writeTask(cwd, task);
       const reporter = makeReporter("task allow", format, noColor);
       reporter.success(`${id} allow=[${task.allow.join(", ")}]`);
@@ -11411,7 +16418,7 @@ function main(argv) {
     if (cmd === "task" && rest[0] === "show") {
       currentCommand = "task show";
       if (!rest[1])
-        fail(USAGE, 2);
+        fail2(USAGE, 2);
       const task = readTask(cwd, rest[1]);
       const reporter = makeReporter("task show", format, noColor);
       if (format === "terminal")
@@ -11424,12 +16431,12 @@ function main(argv) {
     if (cmd === "task" && rest[0] === "materialize") {
       currentCommand = "task materialize";
       if (!rest[1])
-        fail(USAGE, 2);
-      const { path, baseSha, mode } = materializeDependent(cwd, rest[1]);
-      const where = path ? `worktree=${relative2(cwd, path)}` : `branch=sddx/${rest[1]}`;
+        fail2(USAGE, 2);
+      const { path: path2, baseSha, mode } = materializeDependent(cwd, rest[1]);
+      const where = path2 ? `worktree=${relative3(cwd, path2)}` : `branch=sddx/${rest[1]}`;
       const reporter = makeReporter("task materialize", format, noColor);
       reporter.success(`materialized ${rest[1]} ${mode} ${where} base=${baseSha}`);
-      reporter.finish({ id: rest[1], mode, baseSha, path: path ? relative2(cwd, path) : null });
+      reporter.finish({ id: rest[1], mode, baseSha, path: path2 ? relative3(cwd, path2) : null });
       return;
     }
     if (cmd === "red-check") {
@@ -11449,18 +16456,18 @@ function main(argv) {
     }
     if (cmd === "audit") {
       currentCommand = "audit";
-      const unknown = rest.filter((a) => a !== "--signatures" && a !== "--ci");
+      const unknown = rest.filter((a2) => a2 !== "--signatures" && a2 !== "--ci");
       if (unknown.length > 0)
-        fail(USAGE, 2);
+        fail2(USAGE, 2);
       const withSignatures = rest.includes("--signatures");
       const reporter = makeReporter("audit", format, noColor);
       reporter.progress(`auditing receipts${withSignatures ? " (with signature verification)" : ""}...`);
       const res = auditReceipts(cwd, { signatures: withSignatures, ci: rest.includes("--ci") });
       if (withSignatures)
-        for (const n of res.notes)
-          reporter.success(n);
-      for (const f of res.findings)
-        reporter.error(f);
+        for (const n3 of res.notes)
+          reporter.success(n3);
+      for (const f2 of res.findings)
+        reporter.error(f2);
       if (res.findings.length > 0) {
         reporter.error(`audit: ${res.findings.length} finding(s)`);
         reporter.finish({ receipts: res.receipts, findings: res.findings, notes: res.notes }, { status: "error" });
@@ -11479,7 +16486,7 @@ function main(argv) {
     if (cmd === "goal" && rest[0] === "show") {
       currentCommand = "goal show";
       if (!rest[1])
-        fail(USAGE, 2);
+        fail2(USAGE, 2);
       const goal = readGoal(cwd, rest[1]);
       const reporter = makeReporter("goal show", format, noColor);
       if (format === "terminal")
@@ -11529,6 +16536,25 @@ function main(argv) {
       cmdNextActions(cwd, rest, format, noColor);
       return;
     }
+    if (cmd === "hook") {
+      runHook(rest[0]);
+    }
+    if (cmd === "init") {
+      await cmdInit(cwd, rest, format, noColor);
+      return;
+    }
+    if (cmd === "doctor") {
+      cmdDoctor(cwd, format, noColor);
+      return;
+    }
+    if (cmd === "sync") {
+      cmdSync(cwd, rest, format, noColor);
+      return;
+    }
+    if (cmd === "uninstall") {
+      cmdUninstall(cwd, rest, format, noColor);
+      return;
+    }
     if (cmd === "config" && rest[0] === "show") {
       cmdConfigShow(cwd, rest.slice(1), format, noColor);
       return;
@@ -11537,9 +16563,11 @@ function main(argv) {
       cmdConfigValidate(cwd, format, noColor);
       return;
     }
-    fail(USAGE, 2);
+    fail2(USAGE, 2);
   } catch (e) {
-    fail(e.message);
+    fail2(e.message);
   }
 }
-main(process.argv.slice(2));
+main(process.argv.slice(2)).catch((e) => {
+  fail2(e.message);
+});

@@ -86,10 +86,20 @@ test("M1 oracle: two real tasks end-to-end — receipts validate, chain verifies
   expect(files).toContain(`.sddx/tasks/${id1}.json`);
   expect(files).toContain(`.sddx/receipts/${id1}.json`);
 
-  // second task via the COMMITTED dist bundle under plain node (launcher parity)
-  const id2 = completeTask(cwd, ["node", CLI_DIST], 2);
+  // second task via the COMMITTED dist bundle — the exact layout a packaged
+  // install runs, so this is where the version stamp has to be proven.
+  const id2 = completeTask(cwd, ["bun", CLI_DIST], 2);
   const r2 = JSON.parse(readFileSync(join(cwd, ".sddx", "receipts", `${id2}.json`), "utf8"));
   expect(r2.seq).toBe(2);
   expect(r2.prev).toBe(sha256(readFileSync(r1Path)));
   expect(verifyChain(cwd)).toEqual([]);
+
+  // `plugin_version` is read from package.json (the single version source) and
+  // resolves from dist/cli.mjs's own location — never the "unknown" fallback.
+  const packageVersion = (
+    JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")) as { version: string }
+  ).version;
+  expect(r2.plugin_version).toBe(packageVersion);
+  expect(r2.plugin_version).not.toBe("unknown");
+  expect(r2.env.runtime).toBe("bun");
 });

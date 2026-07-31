@@ -1,7 +1,7 @@
 # sddx
 
 [![ci](https://img.shields.io/github/actions/workflow/status/glapsfun/sddx/ci.yml?branch=main&label=ci)](https://github.com/glapsfun/sddx/actions/workflows/ci.yml)
-[![version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fglapsfun%2Fsddx%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&prefix=v&label=version)](https://github.com/glapsfun/sddx)
+[![npm](https://img.shields.io/npm/v/%40glapsfun%2Fsddx?label=npm)](https://www.npmjs.com/package/@glapsfun/sddx)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![bun](https://img.shields.io/badge/runtime-bun-black?logo=bun)](https://bun.sh)
 [![typescript](https://img.shields.io/badge/lang-TypeScript-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
@@ -18,27 +18,52 @@ breakdown.
 
 ## Install
 
-For Claude Code, as a plugin:
+**[Bun](https://bun.sh) is required** — it is the only supported runtime, and
+no installer installs it for you:
 
 ```sh
-claude plugin marketplace add glapsfun/sddx
-claude plugin install sddx@sddx
+curl -fsSL https://bun.sh/install | bash
 ```
 
-For direct/standalone use — CI pipelines, other agent harnesses, or just the
-CLI by hand — independent of Claude Code, via npm/npx/bun:
+Then install sddx from npm and set up a repository:
 
 ```sh
-npx @glapsfun/sddx board          # no install
 npm install -g @glapsfun/sddx     # or: bun add -g @glapsfun/sddx
+cd your-repo
+sddx init
 ```
 
-Both paths install the same `sddx` command (the package is scoped as
-`@glapsfun/sddx` on npm, but its `bin` entry is plain `sddx`) — the plugin
-wraps it with Claude Code skills and hooks; the npm package is the bare CLI.
+No install needed to try it: `npx @glapsfun/sddx init` or
+`bunx @glapsfun/sddx init`. The package is scoped as `@glapsfun/sddx`; the
+command it installs is plain `sddx`.
 
-Local development, skills-only mode, prerequisites, and verifying the install:
-see [docs/how-to/install-sddx.md](docs/how-to/install-sddx.md).
+`sddx init` asks four short questions, previews every file it would touch, and
+does nothing until you approve:
+
+- **Runtime scope** — `global` (an `sddx` on your `PATH`) or `project` (a
+  lockfile-backed dev dependency, so the whole team runs the same version).
+- **Adapters** — `claude` installs Claude Code skills, agents, and the
+  TDD-gate hooks into `.claude/`, project-locally. No plugin, no global config.
+- **Interaction mode** — whether a human approves the plan before anything runs.
+
+For CI and scripts, the same choices are flags:
+
+```sh
+sddx init --yes --runtime global --adapter claude
+```
+
+Check everything landed with `sddx doctor`. Migrating from the old marketplace
+plugin? See [docs/how-to/migrate-from-plugin.md](docs/how-to/migrate-from-plugin.md).
+
+### Privacy
+
+The sddx runtime makes **zero network calls**. All state is local files
+(`.sddx/` under version control) and local git.
+
+There is exactly one exception, and it is never silent: installing the package
+itself, and — if you choose the project-pinned runtime scope — the single
+dependency install `sddx init` runs *after you confirm it*. Nothing on a hot
+path (session start, hooks, gates) ever reaches the network.
 
 ## Quickstart
 

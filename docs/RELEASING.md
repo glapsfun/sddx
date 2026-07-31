@@ -1,7 +1,7 @@
 # Releasing sddx
 
-Semver, with `plugin.json`, `package.json`, and `marketplace.json` metadata in
-lockstep; every release is tagged `v<version>`. The process is automated by
+Semver, with `package.json` as the single version source; every release is
+tagged `v<version>`. The process is automated by
 [release-please](https://github.com/googleapis/release-please): a bot proposes
 each release as a pull request, and merging that PR is the release.
 
@@ -13,13 +13,14 @@ PR merges to main (conventional commits: feat:, fix:, docs:, ci:, ...)
         ▼
 release-please opens/updates a standing "chore: release vX.Y.Z" PR
   • new CHANGELOG.md section drafted from the commits since the last release
-  • plugin.json, package.json, marketplace.json#metadata.version bumped together
+  • package.json#version bumped
         │
         ▼
-required checks run on that PR, including the clean-checkout install
-smoke test (.github/workflows/release-smoke-test.yml) — a fresh runner
-installs the plugin, drives the README quickstart, and asserts
-`sddx board` / `sddx audit` both exit 0
+required checks run on that PR, including the published-package install
+smoke test (.github/workflows/release-smoke-test.yml) — a fresh runner with
+Bun installs the packed tarball, runs `sddx init` in a throwaway repo, drives
+the README quickstart, and asserts `sddx doctor` / `sddx board` / `sddx audit`
+all exit 0
         │
         ▼
 maintainer reviews/edits the changelog section, merges when green

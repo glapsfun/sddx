@@ -21,7 +21,10 @@ export interface OracleRun {
 export interface ReceiptEnv {
   os: string;
   arch: string;
-  runtime: "bun" | "node";
+  /** Bun is the only supported runtime. `unknown` is recorded rather than
+   * naming another runtime, so no receipt ever reads as evidence that an
+   * unsupported runtime is supported. */
+  runtime: "bun" | "unknown";
   runtime_version: string;
   dirty_tree: boolean;
 }
@@ -56,6 +59,10 @@ export interface Receipt {
   prev: string;
   harness: string;
   model: string | null;
+  /** The sddx version that produced this receipt, read from `package.json`.
+   * The key predates the retirement of plugin distribution and is retained
+   * deliberately: receipts are immutable and hash-chained, so renaming it
+   * would break `sddx audit` across the version boundary. */
   plugin_version: string;
   oracle: { run: string; expect: string };
   /** v1–v2 only: the single oracle run. v3 stores runs in `runs`. */
@@ -213,7 +220,11 @@ export function validateReceipt(raw: unknown): string[] {
         env.os !== "" &&
         typeof env.arch === "string" &&
         env.arch !== "" &&
-        (env.runtime === "bun" || env.runtime === "node") &&
+        // Accepts `node` for receipts written before Bun became the only
+        // supported runtime. Receipts are immutable and hash-chained, so
+        // rejecting the historical value would break `sddx audit` at the
+        // version boundary. Nothing WRITES `node` any more — see captureEnv.
+        (env.runtime === "bun" || env.runtime === "unknown" || env.runtime === "node") &&
         typeof env.runtime_version === "string" &&
         env.runtime_version !== "" &&
         typeof env.dirty_tree === "boolean",

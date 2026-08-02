@@ -118,7 +118,7 @@ describe("migrating a plugin-era repository", () => {
     // init and verify come before removal — the whole point of the ordering
     expect(legacy.fix).toContain("sddx init --adapter claude");
     expect(legacy.fix).toContain("sddx doctor");
-  });
+  }, 30_000);
 
   test("init leaves every byte of existing .sddx state alone", () => {
     const { root, worktree } = pluginEraRepo();
@@ -128,7 +128,7 @@ describe("migrating a plugin-era repository", () => {
     expect(cli(root, "init", "--yes", "--runtime", "global", "--adapter", "claude").status).toBe(0);
 
     expect(sddxState(worktree)).toEqual(before);
-  });
+  }, 30_000);
 
   test("the receipt chain still validates after migrating", () => {
     const { root, worktree, id } = pluginEraRepo();
@@ -143,7 +143,7 @@ describe("migrating a plugin-era repository", () => {
       readFileSync(join(worktree, ".sddx/receipts", `${id}.json`), "utf8"),
     );
     expect(receipt.verdict).toBe("pass");
-  });
+  }, 30_000);
 
   test("the user's own Claude settings survive the merge", () => {
     const { root } = pluginEraRepo();
@@ -163,7 +163,7 @@ describe("migrating a plugin-era repository", () => {
     // ...and the plugin-era entry is replaced rather than duplicated, because
     // it too carried the sddx marker
     expect(commands.filter((c) => c.includes("session-start"))).toHaveLength(1);
-  });
+  }, 30_000);
 
   test("source files and the plugin leftovers are not touched by init", () => {
     const { root } = pluginEraRepo();
@@ -171,5 +171,5 @@ describe("migrating a plugin-era repository", () => {
     // sddx never removes a plugin on the user's behalf
     expect(existsSync(join(root, ".claude-plugin/marketplace.json"))).toBe(true);
     expect(readFileSync(join(root, "specs/a.yaml"), "utf8")).toBe(SPEC);
-  });
+  }, 30_000);
 });

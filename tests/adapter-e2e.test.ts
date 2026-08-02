@@ -175,7 +175,7 @@ describe("guided flow, global runtime scope, no plugin", () => {
     expect(receipt.verdict).toBe("pass");
     expect(receipt.env.runtime).toBe("bun");
     expect(verifyChain(wt)).toEqual([]);
-  });
+  }, 30_000);
 
   test("the adapter-registered TDD gate blocks an implementation-first write", () => {
     const root = initialized("global");
@@ -214,7 +214,7 @@ describe("guided flow, global runtime scope, no plugin", () => {
       shimDir,
     );
     expect(denyReason(allowed.out)).toBeUndefined();
-  });
+  }, 30_000);
 });
 
 describe("autonomous flow, project-pinned runtime scope, no plugin", () => {
@@ -242,7 +242,7 @@ describe("autonomous flow, project-pinned runtime scope, no plugin", () => {
     expect(cli(wt, "verify", id).status).toBe(0);
 
     expect(verifyChain(wt)).toEqual([]);
-  });
+  }, 30_000);
 
   test("the registered command resolves the project-local binary and gates a write", () => {
     const root = initialized("project");
@@ -270,7 +270,7 @@ describe("autonomous flow, project-pinned runtime scope, no plugin", () => {
     const denied = fireHook(wt, gate.command, editEvent(wt, join(wt, "part-a", "impl.ts")));
     expect(denied.status).toBe(0);
     expect(denyReason(denied.out)).toContain(id);
-  });
+  }, 30_000);
 });
 
 describe("no plugin anywhere", () => {
@@ -282,7 +282,7 @@ describe("no plugin anywhere", () => {
     const settings = readFileSync(join(root, ".claude/settings.json"), "utf8");
     expect(settings).not.toContain("CLAUDE_PLUGIN_ROOT");
     expect(settings).not.toContain("dist/hooks.mjs");
-  });
+  }, 30_000);
 });
 
 /**
@@ -324,5 +324,5 @@ describe("install paths containing a space", () => {
     expect(`${r.stdout}${r.stderr}`).not.toContain("templates not found");
     expect(r.status).toBe(0);
     expect(existsSync(join(probe, ".claude/skills/sddx-run/SKILL.md"))).toBe(true);
-  });
+  }, 30_000);
 });

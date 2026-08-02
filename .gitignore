@@ -11,6 +11,9 @@ openspec
 # deps
 node_modules/
 
+# npm pack output (release smoke test packs in the workspace)
+*.tgz
+
 # sddx examples (local runs only — CI uses its own scratch dir)
 examples/*/.sandbox/
 

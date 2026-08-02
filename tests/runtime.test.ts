@@ -120,7 +120,10 @@ describe("verified no-install behavior", () => {
       const r = spawnSync(bin as string, args, { cwd: dir, encoding: "utf8", timeout: 30_000 });
       expect(r.stdout).toContain("LOCAL BINARY RAN");
       expect(r.status).toBe(0);
-    });
+      // Explicit, and larger than the spawn's own bound: these shell out to a
+      // real package manager, which is slow and slower still under the suite's
+      // parallelism on a loaded runner. bun's 5s default would flake first.
+    }, 45_000);
 
     test(`${pm}: a missing local binary fails without fetching it`, () => {
       const dir = projectWithLocalBin();
@@ -134,7 +137,7 @@ describe("verified no-install behavior", () => {
       const combined = `${r.stdout}${r.stderr}`;
       expect(combined).not.toContain("added 1 package");
       expect(combined).not.toContain("LOCAL BINARY RAN");
-    });
+    }, 90_000);
   }
 });
 

@@ -5,6 +5,11 @@ name: release smoke test
 # install smoke test: a GitHub Actions runner is a clean machine on every run,
 # so the check that used to depend on a maintainer remembering to run it by
 # hand becomes a merge-blocking required status check instead.
+#
+# It exercises the artifact a user actually receives — the packed tarball,
+# installed globally into an empty prefix — and drives the canonical run
+# lifecycle with it. The repository checkout is only the source of the pack;
+# nothing below runs sddx out of the working tree.
 on:
   pull_request:
     branches: [main]
@@ -21,41 +26,79 @@ jobs:
         with:
           bun-version-file: .bun-version
 
-      - name: validate plugin package (install-equivalent)
-        uses: ./.github/actions/validate-plugin
+      - run: bun install --frozen-lockfile
 
-      - name: clean-checkout quickstart (PLAN -> RED -> GREEN -> VERIFY -> board/audit)
+      - run: bun run build
+
+      - name: pack the release candidate and install it into a clean prefix
         run: |
-          set -eu
-          root="$GITHUB_WORKSPACE"
-          sddx() { "$root/bin/sddx-run" "$root/dist/cli.mjs" "$@"; }
+          set -euo pipefail
+          tarball="$(npm pack --silent)"
+          mkdir -p "$RUNNER_TEMP/global"
+          npm install --prefix "$RUNNER_TEMP/global" --global "$PWD/$tarball"
+          echo "$RUNNER_TEMP/global/bin" >> "$GITHUB_PATH"
+
+      - name: the installed package reports the version being released
+        run: |
+          set -euo pipefail
+          installed="$(sddx --version)"
+          expected="$(node -p 'require("./package.json").version')"
+          echo "installed=$installed expected=$expected"
+          [ "$installed" = "$expected" ] || {
+            echo "the packed CLI reports $installed but this release is $expected" >&2
+            exit 1
+          }
+
+      - name: clean-machine quickstart (init -> PLAN -> RED -> GREEN -> VERIFY -> board/audit)
+        run: |
+          set -euo pipefail
 
           demo="$(mktemp -d)"
           cd "$demo"
-          git init -q
+          git init -q -b main .
           git config user.email smoke-test@example.com
           git config user.name smoke-test
-          # sddx task create needs a resolvable HEAD; a fresh `git init` has none
+          # graph create forks a worktree from HEAD, so the repo needs one commit
           git commit --allow-empty -q -m init
 
-          cat > spec.yaml <<'SPEC'
+          # Set the project up the way a user does, then COMMIT the setup: a
+          # task's worktree is a checkout of a commit, so an uncommitted
+          # .sddx/config.json would not exist inside it.
+          sddx init --yes --runtime global --adapter claude
+          git add -A
+          git commit -q -m "chore: sddx init"
+          sddx doctor
+
+          mkdir -p specs
+          cat > specs/health.yaml <<'SPEC'
           task: health endpoint returns ok
-          context: []
           success_criteria:
             - "bun test tests/health.test.ts exits 0"
+          scope:
+            - "tests/**"
           oracle:
             type: command
             run: "bun test tests/health.test.ts"
             expect: exit 0
-          stop_rules:
-            - max_iterations: 5
-          out_of_scope: []
           SPEC
 
-          out="$(sddx task create --spec spec.yaml --workspace none)"
-          echo "$out"
-          id="$(echo "$out" | grep '^created ' | awk '{print $2}')"
-          [ -n "$id" ] || { echo "could not parse task id from: $out" >&2; exit 1; }
+          cat > graph.yaml <<'GRAPH'
+          schema_version: "1.0"
+          interaction_mode: human
+          goal: prove the release candidate
+          tasks:
+            - alias: health
+              spec: specs/health.yaml
+          GRAPH
+
+          sddx graph approve --graph graph.yaml
+          sddx graph create --graph graph.yaml --output json > create.json
+          id="$(node -p 'require("./create.json").data.taskIds[0]')"
+          [ -n "$id" ] || { echo "could not parse the created task id" >&2; exit 1; }
+          echo "task: $id"
+
+          # The task lives in its own worktree — that is where the loop runs.
+          cd ".sddx-worktrees/$id"
 
           mkdir -p tests
           cat > tests/health.test.ts <<'RED'
@@ -83,3 +126,19 @@ jobs:
 
           sddx board
           sddx audit
+          sddx doctor
+
+      - name: the tarball ships what the distribution model promises
+        run: |
+          set -euo pipefail
+          pkg="$RUNNER_TEMP/global/lib/node_modules/@glapsfun/sddx"
+          for required in bin/sddx bin/sddx-run dist/cli.mjs templates/claude/hooks/hooks.json; do
+            [ -e "$pkg/$required" ] || { echo "missing from the tarball: $required" >&2; exit 1; }
+          done
+          for forbidden in .claude-plugin dist/bootstrap.mjs dist/hooks.mjs openspec tests; do
+            [ ! -e "$pkg/$forbidden" ] || { echo "should not ship: $forbidden" >&2; exit 1; }
+          done
+          # Bun is the only supported runtime, and nothing may claim otherwise.
+          ! grep -rqiE "fall ?back to node|bun-or-node" "$pkg" || {
+            echo "the package claims a Node fallback" >&2; exit 1
+          }

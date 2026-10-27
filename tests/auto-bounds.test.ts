@@ -1,160 +1,144 @@
 import { describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { decideGate, SELF_MODIFYING_GLOBS } from "../src/lib/approval";
 import { scopesOverlap } from "../src/lib/glob-overlap";
-import { fixtureClone, fixtureRepo } from "./fixtures";
-import { createRun, GRAPH_HEADER_LINES, goalIds, repoRoot } from "./helpers";
+import { parseGoalSpec } from "../src/lib/goalspec";
+import { fixtureClone, fixtureRepo, writeConfig } from "./fixtures";
+import {
+  createRun,
+  goalIds,
+  goalSpec,
+  type SpecTaskInput,
+  sddx,
+  startTask,
+  writeSpec,
+} from "./helpers";
 
-const CLI_SRC = join(repoRoot, "src/cli.ts");
-function cli(cwd: string, env: NodeJS.ProcessEnv, ...args: string[]) {
-  return spawnSync("bun", [CLI_SRC, ...args], { cwd, encoding: "utf8", env });
-}
 // Interaction mode is config-only by design (see config.ts interactionMode): the
 // environment is part of the command line the agent composes, so it must not be
 // able to switch the gate. Tests therefore write config, exactly as a user does.
-const auto = process.env;
-const human = process.env;
 function withMode(cwd: string, mode: "human" | "auto", autoMaxTasks?: number): void {
-  mkdirSync(join(cwd, ".sddx"), { recursive: true });
-  writeFileSync(
-    join(cwd, ".sddx", "config.json"),
-    JSON.stringify({
-      interaction_mode: mode,
-      ...(autoMaxTasks ? { auto_max_tasks: autoMaxTasks } : {}),
+  writeConfig(cwd, {
+    interaction_mode: mode,
+    ...(autoMaxTasks ? { auto_max_tasks: autoMaxTasks } : {}),
+  });
+}
+
+const NAME = "2026-01-01-ship-the-widget";
+
+function planRepo(
+  cwd: string,
+  tasks: number,
+  perTask: (i: number) => Partial<SpecTaskInput> = (i) => ({ scope: [`src/n${i}/**`] }),
+  openDecisions: string[] = [],
+): string {
+  return writeSpec(
+    cwd,
+    NAME,
+    goalSpec({
+      title: "ship the widget",
+      tasks: Array.from({ length: tasks }, (_, i) => ({ id: `n${i}`, ...perTask(i) })),
+      openDecisions,
     }),
   );
 }
 
-const SPEC = (task: string, opts: { scope?: string; oracleType?: string } = {}) => `task: ${task}
-success_criteria:
-  - "it works"
-${opts.scope ? `scope:\n  - "${opts.scope}"\n` : ""}oracle:
-  type: ${opts.oracleType ?? "command"}
-  run: "true"
-`;
-
-function planRepo(
-  cwd: string,
-  nodes: number,
-  perNode: (i: number) => { scope?: string; oracleType?: string } = (i) => ({
-    scope: `src/n${i}/**`,
-  }),
-): string {
-  const drafts = join(cwd, ".sddx", "drafts");
-  mkdirSync(drafts, { recursive: true });
-  const lines = [...GRAPH_HEADER_LINES, "goal: ship the widget", "tasks:"];
-  for (let i = 0; i < nodes; i++) {
-    const alias = `n${i}`;
-    writeFileSync(join(drafts, `${alias}.yaml`), SPEC(`build part ${i}`, perNode(i)));
-    lines.push(`  - alias: ${alias}`, `    spec: ${alias}.yaml`);
-  }
-  const rel = join(".sddx", "drafts", "graph.yaml");
-  writeFileSync(join(cwd, rel), `${lines.join("\n")}\n`);
-  return rel;
-}
-
-function created(cwd: string) {
-  const dir = (p: string) => (existsSync(join(cwd, p)) ? readdirSync(join(cwd, p)) : []);
-  const branches = spawnSync("git", ["branch", "--list", "sddx/*"], { cwd, encoding: "utf8" });
-  return { goals: goalIds(cwd), branches: (branches.stdout ?? "").trim() };
-}
-
 describe("auto mode refuses a manual oracle", () => {
-  test("hard refusal at dry-run time, before any approval is requested", () => {
+  test("hard refusal at start, before any approval is requested", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, 2, (i) =>
-      i === 1 ? { scope: "src/n1/**", oracleType: "manual" } : { scope: "src/n0/**" },
+      i === 1 ? { scope: ["src/n1/**"], type: "manual" } : { scope: ["src/n0/**"] },
     );
     withMode(cwd, "auto");
-    const r = cli(cwd, auto, "graph", "create", "--graph", rel);
+    const r = sddx(cwd, "plan", "start", rel);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("n1");
     expect(r.stderr).toContain("manual");
-    expect(created(cwd).goals).toEqual([]);
+    expect(goalIds(cwd)).toEqual([]);
   });
 
-  test("refusal is not an approval prompt — it names incoherence, not a missing token", () => {
+  test("refusal is not an approval prompt; it names incoherence, not a missing token", () => {
     const { clone: cwd } = fixtureClone();
-    const rel = planRepo(cwd, 1, () => ({ scope: "src/n0/**", oracleType: "manual" }));
+    const rel = planRepo(cwd, 1, () => ({ scope: ["src/n0/**"], type: "manual" }));
     withMode(cwd, "auto");
-    const r = cli(cwd, auto, "graph", "create", "--graph", rel);
-    expect(r.stderr).not.toContain("graph approve");
+    const r = sddx(cwd, "plan", "start", rel);
+    expect(r.stderr).not.toContain("plan approve");
   });
 
   test("a browser oracle is still permitted under auto", () => {
     const { clone: cwd } = fixtureClone();
-    const rel = planRepo(cwd, 1, () => ({ scope: "src/n0/**", oracleType: "browser" }));
+    const rel = planRepo(cwd, 1, () => ({ scope: ["src/n0/**"], type: "browser" }));
     withMode(cwd, "auto");
-    const r = cli(cwd, auto, "graph", "create", "--graph", rel);
+    const r = sddx(cwd, "plan", "start", rel);
     expect(r.status).toBe(0);
-    expect(created(cwd).goals).toHaveLength(1);
+    expect(goalIds(cwd)).toHaveLength(1);
   });
 
   test("human mode may still plan a manual oracle", () => {
     const { clone: cwd } = fixtureClone();
-    const rel = planRepo(cwd, 1, () => ({ scope: "src/n0/**", oracleType: "manual" }));
+    const rel = planRepo(cwd, 1, () => ({ scope: ["src/n0/**"], type: "manual" }));
     withMode(cwd, "human");
-    expect(cli(cwd, human, "graph", "approve", "--graph", rel).status).toBe(0);
-    expect(cli(cwd, human, "graph", "create", "--graph", rel).status).toBe(0);
+    expect(sddx(cwd, "plan", "approve", rel).status).toBe(0);
+    expect(sddx(cwd, "plan", "start", rel).status).toBe(0);
   });
 });
 
-describe("auto mode never widens the TDD gate", () => {
-  /** One task in its own one-node run; returns its id and its worktree, which
-   * is where the task state lives and where `task allow` is actually run. */
-  function taskInRepo(cwd: string): { id: string; wt: string } {
-    const { taskIds } = createRun(cwd, (c, ...a) => cli(c, human, ...a), "widget goal", [
-      { alias: "only", spec: SPEC("do the widget work", { scope: "src/widget/**" }) },
-    ]);
+describe("auto mode never widens the strict gate", () => {
+  // `task allow` exists only in the strict profile, where the allow list is the
+  // one escape from the per-edit gate.
+  const strict = (cwd: string, mode: "human" | "auto") =>
+    writeConfig(cwd, { interaction_mode: mode, profile: "strict" });
+
+  /** One started task in its own one-task run; returns its id and its worktree,
+   * which is where the task state lives and where `task allow` is actually run. */
+  function taskInRepo(cwd: string, mode: "human" | "auto" = "human"): { id: string; wt: string } {
+    strict(cwd, mode);
+    const { taskIds } = createRun(cwd, {
+      tasks: [{ id: "T1", scope: ["src/widget/**"] }],
+      approve: mode === "human",
+    });
     const id = taskIds[0] as string;
-    return { id, wt: join(cwd, ".sddx-worktrees", id) };
+    return { id, wt: startTask(cwd, id) };
   }
+
+  const allowOf = (wt: string, id: string): string[] =>
+    JSON.parse(readFileSync(join(wt, ".sddx", "tasks", `${id}.json`), "utf8")).allow ?? [];
 
   test("task allow is refused under auto mode with no entry written", () => {
     const cwd = fixtureRepo();
     const { id, wt } = taskInRepo(cwd);
-    withMode(cwd, "auto");
-    const r = cli(cwd, auto, "task", "allow", id, "src/migration.sql");
+    strict(cwd, "auto");
+    const r = sddx(cwd, "task", "allow", id, "src/migration.sql");
     expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("refused in auto mode");
     expect(r.stderr.toLowerCase()).toContain("human");
-    const task = JSON.parse(readFileSync(join(wt, ".sddx", "tasks", `${id}.json`), "utf8"));
-    expect(task.allow ?? []).toEqual([]);
+    expect(allowOf(wt, id)).toEqual([]);
   });
 
   test("task allow is refused from inside a worktree, where config.json is absent", () => {
-    // `task allow` is run BY the executor, from its own worktree — and
-    // `.sddx/config.json` is not committed, so a worktree forked from
-    // origin/HEAD has no copy. Reading the mode from the process cwd returned
-    // `{}` there, which resolves to `human`, silently granting the one escape
-    // hatch from the TDD gate on exactly the unattended runs it exists to stop.
+    // `task allow` is run BY the executor, from its own worktree, and
+    // `.sddx/config.json` is not committed, so a worktree forked from the run
+    // branch has no copy. Reading the mode from the process cwd returned `{}`
+    // there, which resolves to `human`, silently granting the one escape hatch
+    // from the gate on exactly the unattended runs it exists to stop.
     const { clone: cwd } = fixtureClone();
-    const spec = join(cwd, "spec.yaml");
-    writeFileSync(spec, SPEC("do the widget work"));
-    withMode(cwd, "auto");
-    const { taskIds } = createRun(cwd, (c, ...a) => cli(c, auto, ...a), "worktree allow goal", [
-      { alias: "only", spec: SPEC("do the widget work", { scope: "src/widget/**" }) },
-    ]);
-    const id = taskIds[0] as string;
-    const wt = join(cwd, ".sddx-worktrees", id);
+    const { id, wt } = taskInRepo(cwd, "auto");
     expect(existsSync(join(wt, ".sddx", "config.json"))).toBe(false);
 
-    const r = cli(wt, auto, "task", "allow", id, "src/migration.sql");
+    const r = sddx(wt, "task", "allow", id, "src/migration.sql");
     expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("refused in auto mode");
     expect(r.stderr.toLowerCase()).toContain("human");
-    const task = JSON.parse(readFileSync(join(wt, ".sddx", "tasks", `${id}.json`), "utf8"));
-    expect(task.allow ?? []).toEqual([]);
+    expect(allowOf(wt, id)).toEqual([]);
   });
 
   test("task allow still succeeds under human mode and is recorded", () => {
     const cwd = fixtureRepo();
     const { id, wt } = taskInRepo(cwd);
-    withMode(cwd, "human");
-    const r = cli(wt, human, "task", "allow", id, "src/migration.sql");
+    const r = sddx(wt, "task", "allow", id, "src/migration.sql");
     expect(r.status).toBe(0);
-    const task = JSON.parse(readFileSync(join(wt, ".sddx", "tasks", `${id}.json`), "utf8"));
-    expect(task.allow).toContain("src/migration.sql");
+    expect(allowOf(wt, id)).toContain("src/migration.sql");
   });
 });
 
@@ -163,51 +147,53 @@ describe("auto mode blast radius", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, 4);
     withMode(cwd, "auto", 3);
-    const r = cli(cwd, auto, "graph", "create", "--graph", rel);
+    const r = sddx(cwd, "plan", "start", rel);
     // exit 3 means "approval required"; a bound refuses instead, so not 3
     expect(r.status).not.toBe(0);
     expect(r.status).not.toBe(3);
     expect(r.stderr).toContain("auto_max_tasks");
-    expect(created(cwd).goals).toEqual([]);
+    expect(goalIds(cwd)).toEqual([]);
   });
 
   test("within the ceiling it proceeds unattended", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, 3);
     withMode(cwd, "auto", 3);
-    const r = cli(cwd, auto, "graph", "create", "--graph", rel);
-    expect(r.status).toBe(0);
+    expect(sddx(cwd, "plan", "start", rel).status).toBe(0);
   });
 
-  test("a self-modifying scope is refused regardless of node count", () => {
+  test("a self-modifying scope is refused regardless of task count", () => {
     const { clone: cwd } = fixtureClone();
-    const rel = planRepo(cwd, 1, () => ({ scope: "hooks/**" }));
+    const rel = planRepo(cwd, 1, () => ({ scope: ["hooks/**"] }));
     withMode(cwd, "auto", 99);
-    const r = cli(cwd, auto, "graph", "create", "--graph", rel);
+    const r = sddx(cwd, "plan", "start", rel);
     expect(r.status).not.toBe(0);
     expect(r.status).not.toBe(3);
     expect(r.stderr).toContain("n0");
-    expect(created(cwd).goals).toEqual([]);
+    expect(r.stderr).toContain("enforcement paths");
+    expect(goalIds(cwd)).toEqual([]);
   });
 
   test("auto cannot approve its way past a bound", () => {
     // Previously a token let an over-ceiling plan run unattended, recording the
     // degradation on the token. Approving is a human act, so it belongs to
-    // human mode — reached by editing reviewed configuration, not by a token.
+    // human mode, reached by editing reviewed configuration, not by a token.
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, 4);
     withMode(cwd, "auto", 3);
-    expect(cli(cwd, auto, "graph", "approve", "--graph", rel).status).not.toBe(0);
-    expect(cli(cwd, auto, "graph", "create", "--graph", rel).status).not.toBe(0);
-    expect(created(cwd).goals).toEqual([]);
+    const approve = sddx(cwd, "plan", "approve", rel);
+    expect(approve.status).not.toBe(0);
+    expect(approve.stderr).toContain("auto_max_tasks");
+    expect(sddx(cwd, "plan", "start", rel).status).not.toBe(0);
+    expect(goalIds(cwd)).toEqual([]);
   });
 
   test("the same plan runs once configuration selects human mode", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, 4);
     withMode(cwd, "human", 3);
-    expect(cli(cwd, human, "graph", "approve", "--graph", rel).status).toBe(0);
-    expect(cli(cwd, human, "graph", "create", "--graph", rel).status).toBe(0);
+    expect(sddx(cwd, "plan", "approve", rel).status).toBe(0);
+    expect(sddx(cwd, "plan", "start", rel).status).toBe(0);
   });
 });
 
@@ -219,77 +205,73 @@ describe("decideGate refuses rather than degrading", () => {
       oracleType: "command",
     }));
 
-  function graphOn(cwd: string, n: number): string {
-    return join(cwd, planRepo(cwd, n));
-  }
+  const specOn = (cwd: string, n: number, openDecisions: string[] = []): string =>
+    join(cwd, planRepo(cwd, n, undefined, openDecisions));
+
+  const openDecisionsOf = (spec: string): string[] =>
+    parseGoalSpec(readFileSync(spec, "utf8")).spec?.design.openDecisions ?? ["(unparseable)"];
 
   test("names the requested mode and the triggering bound", () => {
     const cwd = fixtureRepo();
-    const g = graphOn(cwd, 4);
-    const d = decideGate(cwd, g, nodes(4), "auto", 3, scopesOverlap);
+    const spec = specOn(cwd, 4);
+    const d = decideGate(cwd, spec, nodes(4), "auto", 3, scopesOverlap, []);
     expect(d.ok).toBe(false);
     expect(d.requestedMode).toBe("auto");
-    // the mode is not rewritten to "human" — nothing degraded
+    // the mode is not rewritten to "human": nothing degraded
     expect(d.mode).toBe("auto");
     expect(d.refusal).toContain("auto_max_tasks");
     expect(d.nodeCount).toBe(4);
   });
 
-  /** Adds an `unresolved:` list to an already-written graph draft. */
-  function withUnresolved(graphPath: string, ...items: string[]): string {
-    const text = readFileSync(graphPath, "utf8");
-    const block = ["unresolved:", ...items.map((i) => `  - "${i}"`), ""].join("\n");
-    writeFileSync(graphPath, text.replace("tasks:", `${block}tasks:`));
-    return graphPath;
-  }
-
-  test("a non-empty unresolved list refuses an auto plan that clears every path bound", () => {
-    // The additive half of the blocker rule: intake reporting a decision it
-    // could not safely take. It is layered ON TOP of the deterministic bounds,
-    // never instead of them — see the next test.
+  test("a non-empty Open decisions list refuses an auto plan that clears every path bound", () => {
+    // The additive half of the blocker rule: a decision nobody has made yet. It
+    // is layered ON TOP of the deterministic bounds, never instead of them; see
+    // the protected-path test below.
     const cwd = fixtureRepo();
-    const g = withUnresolved(graphOn(cwd, 2), "should signup collect date of birth?");
-    const d = decideGate(cwd, g, nodes(2), "auto", 99, scopesOverlap);
+    const spec = specOn(cwd, 2, ["should signup collect date of birth?"]);
+    const d = decideGate(cwd, spec, nodes(2), "auto", 99, scopesOverlap, openDecisionsOf(spec));
     expect(d.ok).toBe(false);
     expect(d.refusal).toContain("should signup collect date of birth?");
   });
 
-  test("the same unresolved plan is untouched in human mode, where a human already reviews it", () => {
+  test("the same open decision is untouched in human mode, where a human already reviews it", () => {
     const cwd = fixtureRepo();
-    const g = withUnresolved(graphOn(cwd, 2), "should signup collect date of birth?");
-    const d = decideGate(cwd, g, nodes(2), "human", 99, scopesOverlap);
+    const spec = specOn(cwd, 2, ["should signup collect date of birth?"]);
+    const d = decideGate(cwd, spec, nodes(2), "human", 99, scopesOverlap, openDecisionsOf(spec));
     expect(d.refusal).toBeUndefined();
   });
 
-  test("a protected-path plan refuses even when intake reports nothing unresolved", () => {
+  test("a protected-path plan refuses even when the spec lists no open decisions", () => {
     // The point of the deterministic bounds: they do not consult the
     // self-report, so a model that assumes its way past an auth decision and
-    // writes an empty `unresolved` still cannot run unattended.
+    // leaves Open decisions empty still cannot run unattended.
     const cwd = fixtureRepo();
-    const g = graphOn(cwd, 2);
-    expect(readFileSync(g, "utf8")).not.toContain("unresolved");
+    const spec = specOn(cwd, 2);
+    expect(openDecisionsOf(spec)).toEqual([]);
     const d = decideGate(
       cwd,
-      g,
+      spec,
       nodes(2, (i) => (i === 1 ? ["src/auth/**"] : ["src/n0/**"])),
       "auto",
       99,
       scopesOverlap,
+      openDecisionsOf(spec),
     );
     expect(d.ok).toBe(false);
     expect(d.refusal).toContain("auth");
   });
 
-  test("self-modification is reported with the offending node and paths", () => {
+  test("self-modification is reported with the offending task and paths", () => {
     const cwd = fixtureRepo();
-    const g = graphOn(cwd, 2);
+    const spec = specOn(cwd, 2);
     const d = decideGate(
       cwd,
-      g,
+      spec,
       nodes(2, (i) => (i === 1 ? [".github/workflows/**"] : ["src/n0/**"])),
       "auto",
       99,
       scopesOverlap,
+      [],
     );
     expect(d.ok).toBe(false);
     expect(d.refusal).toContain("n1");
@@ -298,31 +280,33 @@ describe("decideGate refuses rather than degrading", () => {
 
   test("self-modification outranks the ceiling when both apply", () => {
     const cwd = fixtureRepo();
-    const g = graphOn(cwd, 4);
+    const spec = specOn(cwd, 4);
     const d = decideGate(
       cwd,
-      g,
+      spec,
       nodes(4, (i) => (i === 0 ? ["hooks/**"] : [`src/n${i}/**`])),
       "auto",
       1,
       scopesOverlap,
+      [],
     );
     expect(d.refusal).toContain("enforcement paths");
   });
 
-  test("an UNSCOPED node is refused — empty scope is unconfined", () => {
+  test("an UNSCOPED task is refused; empty scope is unconfined", () => {
     // An empty scope means the task may write anywhere, which includes hooks/,
-    // .claude-plugin/, and every protected path. Treating "no scope" as "no
-    // reach" penalized honest scope declarations and made omitting `scope` a bypass.
+    // .claude/, and every protected path. Treating "no scope" as "no reach"
+    // penalized honest scope declarations and made omitting `scope` a bypass.
     const cwd = fixtureRepo();
-    const g = graphOn(cwd, 1);
+    const spec = specOn(cwd, 1);
     const d = decideGate(
       cwd,
-      g,
+      spec,
       [{ alias: "n0", scope: [], oracleType: "command" }],
       "auto",
       6,
       scopesOverlap,
+      [],
     );
     expect(d.ok).toBe(false);
     expect(d.refusal).toContain("unconfined");
@@ -330,7 +314,15 @@ describe("decideGate refuses rather than degrading", () => {
 
   test("an unhashable plan is never approved", () => {
     const cwd = fixtureRepo();
-    const d = decideGate(cwd, join(cwd, "missing.yaml"), nodes(1), "auto", 6, scopesOverlap);
+    const d = decideGate(
+      cwd,
+      join(cwd, ".sddx", "specs", "missing.md"),
+      nodes(1),
+      "auto",
+      6,
+      scopesOverlap,
+      [],
+    );
     expect(d.ok).toBe(false);
     expect(d.hash).toBe("");
   });

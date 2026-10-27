@@ -36,12 +36,6 @@
           }
         }
       }
-    },
-    {
-      "includes": ["templates/claude/hooks/hooks.json"],
-      "formatter": {
-        "enabled": false
-      }
     }
   ],
   "assist": {

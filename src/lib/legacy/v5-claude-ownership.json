@@ -1,0 +1,57 @@
+{
+  "sddx_version": "5.0.0",
+  "invocations": ["sddx", "npm exec --offline --no -- sddx", "bunx --no-install sddx"],
+  "files": {
+    ".claude/agents/sddx-intake.md": [
+      "d844d296cc81cb1055cc4ed547c5d11a5eafac5753ec60b21d38409bd2ac03e6"
+    ],
+    ".claude/agents/sddx-orchestrator.md": [
+      "1e3fbe630edd66103c79881a45f1fe80b69e3084005d0a634ebe54bf783b9def",
+      "34d133e2ed654fb62ccdae7cbb9d869504036ba81da90fcecfcc067efe063b04",
+      "398bff50cbe37d7d4640e46e1d8cfc7d4c703ff43b1b6661a325cd766ef8e360"
+    ],
+    ".claude/agents/sddx-planner.md": [
+      "0139f2cd94b1983e2a5ff31f501b147083b2694a0a7997160777cca12cf4449a"
+    ],
+    ".claude/agents/sddx-tdd-executor.md": [
+      "464df6da8cfc94dff617c030eb50f84a6a0dc43e1dba07f39c4e6af2c7b4dda2",
+      "79c35b32218a0451596fd32e33b9713c745afd5ca62fd9e927b4e9b9a3ba946b",
+      "a2439a3f763c6121042125a7c0481e40d43a4dbfcb999ef6bce511f6612954ff"
+    ],
+    ".claude/agents/sddx-verifier.md": [
+      "3c6941890ba743487c748c4fa7f1131d4e65f420a1c1e8e1212ececbafff810a",
+      "6656887d457a9e190732be3b517d77e9429acee81f8fea64ad21d4ee8601df78",
+      "fb3bb258a076c9104351dbe45eff01b0462afa34d5f4ee5b744cdd799450052c"
+    ],
+    ".claude/skills/sddx-audit/SKILL.md": [
+      "47774c6b82e49966a83c7d97713d588deaa3156f04b421a1fa34e05f0e199d62",
+      "510a5b2713dd8497314a93526ba7aa6688b83e4c16b21a1d7075818c96eee4f6",
+      "f5888c303271f8c63b4aa546ba82e433bdb46df1aca02b771cc5fdff266b99ca"
+    ],
+    ".claude/skills/sddx-board/SKILL.md": [
+      "be43cd08e4e801d305b5938973cd60ae5755aa3460c3adad07c5a96f6c5e2231",
+      "c276f6265ac19b8ec0b1c34773544a8bcdf2b33af570653bb8448509e9e0c84c",
+      "e21b9ba983d9d40c61f2d7192f00576e96d3deb85123baa235d037b7998d6500"
+    ],
+    ".claude/skills/sddx-plan/SKILL.md": [
+      "03b8ffebf4c8b9c0fb004c5fee30edf8730dfd7f722d785225239a59e5767234",
+      "1d64e4c090035a113ee9a5179779ddf31fafa8dc6f72d140ad765072effcc479",
+      "9107c2db210a428c831ae9b19e533f1bb908c5f8ce02eed9556c67ef92647c75"
+    ],
+    ".claude/skills/sddx-pr/SKILL.md": [
+      "88feb94bbebab16b611ec2648751ea62f1f911a529a9bfb7685743917a6e5f93",
+      "c9755b04836c7a61a3192efeef9ccf881f27af6c5d641e3636c7447ddbf93e5f",
+      "d7359126bfd7cac285682f704613ee855d85cf396581a0c74a7c200e9bf75bd5"
+    ],
+    ".claude/skills/sddx-run/SKILL.md": [
+      "079829680a2f48b30a6a2e26632d0bca6e70a4348e9f7f674e3be4dd55d427f3",
+      "f1ae008b71e9c1cf6d0393f7d27aad1832cdc859dd6b308fef1d4b2f9fbceddf",
+      "fe99bf70b7e78b41a33f0916becba8e1d40171c004392849b4f916382b3f9aa8"
+    ],
+    ".claude/skills/sddx-verify/SKILL.md": [
+      "540472a2ce44bffdafdbbc64759fef598cdc5d3daad5122a383e75f1faed97e3",
+      "5e6c45a70b3841ccaadd1dd33c06957504ceb3aa585c776c9298343cdaa178b3",
+      "66eb84ab2b44f58be9d6a752a94f54ba797f0bd996a81b117520a5ff357e6354"
+    ]
+  }
+}

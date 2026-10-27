@@ -1,13 +1,8 @@
-# Example: a parallel multi-task run
+# Example: two tasks in parallel
 
-Two independent tasks — disjoint file scope, no `depends_on` — registered
-together from one `graph.yaml`, each getting its own worktree immediately.
-This is the primitive `/sddx:run` automates inside Claude Code: an
-orchestrator splits a goal into tasks like these, then hands each worktree to
-a separate tdd-executor running concurrently. Here both are driven from one
-terminal, one after another, so every command stays copy-pasteable — nothing
-about the workflow requires that; each worktree's state is fully independent
-of the other's.
+Two independent tasks, each in its own worktree, worked on at the same time and
+merged into one run branch. Builds on
+[01-single-task](../01-single-task/README.md).
 
 ## Setup
 
@@ -15,151 +10,104 @@ of the other's.
 bash examples/02-parallel-run/setup.sh
 ```
 
-`cd` into the printed directory before running anything below.
-
-## Write two independent specs and the graph
-
 ```sh
+SDDX="$PWD/sddx"
 ROOT="$PWD"
-mkdir -p specs
-cat > specs/alpha.yaml <<'EOF'
-task: alpha module reports its name
-success_criteria:
-  - "bun test tests/alpha.test.ts exits 0"
-oracle:
-  type: command
-  run: "bun test tests/alpha.test.ts"
-  expect: exit 0
-scope:
-  - "src/alpha/**"
+SPEC=.sddx/specs/2026-01-01-strings.md
+GOAL=2026-01-01-strings
+```
+
+## Two tasks with disjoint scopes
+
+Tasks with no dependency between them may run at the same time, so their
+scopes must not overlap. `plan check` proves that before anything starts.
+
+```sh
+mkdir -p .sddx/specs
+cat > "$SPEC" <<'EOF'
+# String helpers
+
+## Design
+
+### Goal
+Two small string helpers.
+
+### Acceptance
+- upper("ab") returns "AB"
+- reverse("ab") returns "ba"
+
+### Non-goals
+
+### Assumptions
+
+### Open decisions
+
+## Tasks
+
+### s-upper Upper case
+
+~~~sddx
+oracle: {type: command, run: bun test tests/upper.test.ts, expect: exit 0}
+scope: [src/upper.ts]
+~~~
+
+### s-reverse Reverse
+
+~~~sddx
+oracle: {type: command, run: bun test tests/reverse.test.ts, expect: exit 0}
+scope: [src/reverse.ts]
+~~~
 EOF
-cat > specs/bravo.yaml <<'EOF'
-task: bravo module reports its name
-success_criteria:
-  - "bun test tests/bravo.test.ts exits 0"
-oracle:
-  type: command
-  run: "bun test tests/bravo.test.ts"
-  expect: exit 0
-scope:
-  - "src/bravo/**"
-EOF
-cat > graph.yaml <<'EOF'
-schema_version: "1.0"
-interaction_mode: human
-goal: add two independent modules
-tasks:
-  - alias: alpha
-    spec: specs/alpha.yaml
-  - alias: bravo
-    spec: specs/bravo.yaml
-EOF
+git add "$SPEC"
+git commit -q -m "plan: strings"
+"$SDDX" plan check "$SPEC"
+"$SDDX" plan approve "$SPEC"
+"$SDDX" plan start "$SPEC"
 ```
 
-## Review the plan, then register it
-
-`human` mode (the default) refuses to create anything until the plan is
-approved. Render it first — this writes nothing at all:
+## Both are ready, so start both
 
 ```sh
-"$ROOT/sddx" graph create --graph graph.yaml --dry-run
+"$SDDX" task ready --goal "$GOAL"
+"$SDDX" task start s-upper
+"$SDDX" task start s-reverse
+git worktree list
 ```
 
-Nothing exists yet, so cancelling here would cost one `rm`:
+Each worktree sees only its own task. In a harness, an orchestrator would hand
+each one to its own worker here.
 
 ```sh
-test ! -d "$ROOT/.sddx-worktrees"
-```
-
-Approve it, then create:
-
-```sh
-"$ROOT/sddx" graph approve --graph graph.yaml
-OUT=$("$ROOT/sddx" graph create --graph graph.yaml)
-echo "$OUT"
-ALPHA_ID=$(echo "$OUT" | grep -E '^ *alpha →' | awk '{print $3}')
-BRAVO_ID=$(echo "$OUT" | grep -E '^ *bravo →' | awk '{print $3}')
-```
-
-Two independent worktrees exist right now, before either task is touched:
-
-```sh
-test -d "$ROOT/.sddx-worktrees/$ALPHA_ID" && test -d "$ROOT/.sddx-worktrees/$BRAVO_ID"
-```
-
-## Drive alpha through the loop, inside its own worktree
-
-```sh
-cd "$ROOT/.sddx-worktrees/$ALPHA_ID"
-mkdir -p src/alpha tests
-cat > tests/alpha.test.ts <<'EOF'
+U="$ROOT/.sddx-worktrees/s-upper"
+R="$ROOT/.sddx-worktrees/s-reverse"
+mkdir -p "$U/tests" "$U/src" "$R/tests" "$R/src"
+cat > "$U/tests/upper.test.ts" <<'EOF'
 import { expect, test } from "bun:test";
-import { alphaName } from "../src/alpha/mod";
-
-test("alpha module reports its name", () => {
-  expect(alphaName()).toBe("alpha");
-});
+import { upper } from "../src/upper";
+test("upper", () => expect(upper("ab")).toBe("AB"));
 EOF
-```
-
-```sh expect=1
-bun test tests/alpha.test.ts
-```
-
-```sh
-"$ROOT/sddx" task phase "$ALPHA_ID" RED --test-exit 1
-"$ROOT/sddx" red-check "$ALPHA_ID"
-cat > src/alpha/mod.ts <<'EOF'
-export function alphaName(): string {
-  return "alpha";
-}
-EOF
-bun test tests/alpha.test.ts
-"$ROOT/sddx" task phase "$ALPHA_ID" GREEN --test-exit 0
-"$ROOT/sddx" task phase "$ALPHA_ID" VERIFY
-"$ROOT/sddx" verify "$ALPHA_ID"
-```
-
-## Drive bravo the same way, in parallel — here, right after
-
-```sh
-cd "$ROOT/.sddx-worktrees/$BRAVO_ID"
-mkdir -p src/bravo tests
-cat > tests/bravo.test.ts <<'EOF'
+echo 'export const upper = (s: string): string => s.toUpperCase();' > "$U/src/upper.ts"
+cat > "$R/tests/reverse.test.ts" <<'EOF'
 import { expect, test } from "bun:test";
-import { bravoName } from "../src/bravo/mod";
-
-test("bravo module reports its name", () => {
-  expect(bravoName()).toBe("bravo");
-});
+import { reverse } from "../src/reverse";
+test("reverse", () => expect(reverse("ab")).toBe("ba"));
 EOF
+echo 'export const reverse = (s: string): string => [...s].reverse().join("");' > "$R/src/reverse.ts"
 ```
 
-```sh expect=1
-bun test tests/bravo.test.ts
-```
+## Verify and review each
 
 ```sh
-"$ROOT/sddx" task phase "$BRAVO_ID" RED --test-exit 1
-"$ROOT/sddx" red-check "$BRAVO_ID"
-cat > src/bravo/mod.ts <<'EOF'
-export function bravoName(): string {
-  return "bravo";
-}
-EOF
-bun test tests/bravo.test.ts
-"$ROOT/sddx" task phase "$BRAVO_ID" GREEN --test-exit 0
-"$ROOT/sddx" task phase "$BRAVO_ID" VERIFY
-"$ROOT/sddx" verify "$BRAVO_ID"
+"$SDDX" verify s-upper
+"$SDDX" verify s-reverse
+"$SDDX" review record s-upper --verdict pass --reviewer you
+"$SDDX" review record s-reverse --verdict pass --reviewer you
 ```
 
-## Check the board from the main checkout
+Each review merged its task into the run branch. The two receipts are siblings:
+both chain onto the same parent, because neither task saw the other.
 
 ```sh
-cd "$ROOT"
-"$ROOT/sddx" board
+"$SDDX" run report --goal "$GOAL"
+git log --oneline --graph "sddx/run-$GOAL"
 ```
-
-Both rows read `Completed` — two tasks, two worktrees, two receipts, zero
-merge conflicts in `.sddx/`. Shipping this goal as one PR is
-[examples/08-pr-from-goal](../08-pr-from-goal/).

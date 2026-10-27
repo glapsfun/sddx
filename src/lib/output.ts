@@ -150,11 +150,12 @@ function renderMarkdown<T>(result: Result<T>): string {
   if (tasks) {
     lines.push("## Task Results");
     lines.push("");
-    lines.push("| Task | Branch | Phase | Receipt |");
+    lines.push("| Task | Goal | State | Receipt |");
     lines.push("| --- | --- | --- | --- |");
     for (const raw of tasks) {
       const t = raw as Record<string, unknown>;
-      lines.push(`| ${t.id ?? ""} | ${t.branch ?? ""} | ${t.phase ?? ""} | ${t.receipt ?? "—"} |`);
+      const state = t.label ?? t.state ?? t.phase ?? "";
+      lines.push(`| ${t.id ?? ""} | ${t.goal ?? ""} | ${state} | ${t.receipt ?? "-"} |`);
     }
     lines.push("");
   }

@@ -1,12 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { headSha } from "../src/lib/git";
+import { readFileSync } from "node:fs";
 import { type Receipt, validateReceipt } from "../src/lib/receipt";
-import { parseSpec } from "../src/lib/spec";
-import { createTask, transition, writeTask } from "../src/lib/task";
-import { verifyTask } from "../src/lib/verify";
 import { fixtureRepo } from "./fixtures";
+import { completeTask, createRun } from "./helpers";
 
 const HEX = "a".repeat(64);
 const SHA40 = "b".repeat(40);
@@ -75,35 +71,20 @@ describe("receipt v3 schema", () => {
   });
 });
 
-describe("verifyTask writes the current receipt version", () => {
+describe("finalizing writes the current receipt version", () => {
   test("receipt carries one run and captured env with dirty_tree true", () => {
     const cwd = fixtureRepo();
-    const spec = parseSpec(
-      'task: v3 fixture\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\n',
-    ).spec!;
-    let t = createTask(cwd, spec, ".sddx/specs/x.yaml", {
-      mode: "worktree",
-      branch: null,
-      base_sha: headSha(cwd),
-    });
-    t = transition(t, "RED", { testExit: 1 });
-    t = transition(t, "GREEN", { testExit: 0 });
-    t = transition(t, "VERIFY");
-    // forward-compat with Task 3's red-check gate on verify
-    t.evidence.oracle_red = { exit_code: 1, at: new Date(0).toISOString() };
-    writeTask(cwd, t);
-    writeFileSync(join(cwd, "impl.txt"), "code\n");
-
-    const res = verifyTask(cwd, t.id, { pluginVersion: "0.2.0" });
-    expect(res.verdict).toBe("pass");
-    const receipt = JSON.parse(readFileSync(res.receiptPath!, "utf8")) as Receipt;
+    createRun(cwd, { tasks: [{ id: "T1" }] });
+    const { receiptPath } = completeTask(cwd, "T1");
+    const receipt = JSON.parse(readFileSync(receiptPath, "utf8")) as Receipt;
     expect(validateReceipt(receipt)).toEqual([]);
-    expect(receipt.version).toBe(4);
+    expect(receipt.version).toBe(5);
     expect(receipt.runs).toHaveLength(1);
     expect(receipt.runs![0]!.exit_code).toBe(0);
     expect(receipt.env!.runtime).toBe("bun");
     expect(receipt.env!.runtime_version.length).toBeGreaterThan(0);
-    expect(receipt.env!.dirty_tree).toBe(true); // impl.txt was uncommitted when the oracle ran
+    // the change is staged but not yet committed when finalize captures the env
+    expect(receipt.env!.dirty_tree).toBe(true);
     expect(receipt.exit_code).toBeUndefined();
   });
 });

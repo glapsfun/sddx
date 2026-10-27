@@ -35,6 +35,11 @@ export type TaskStatus = "merged" | "failed" | "skipped" | "blocked" | "conflict
 export interface TaskOutcome {
   taskId: string;
   status: TaskStatus;
+  /** The task's own lifecycle state, or "missing" when its state cannot be found. */
+  state: string;
+  attempt: number | null;
+  /** Why an ABANDONED task was abandoned ("skipped" when an ancestor failed). */
+  reason: string | null;
   /** The oracle and its verdict, as `OracleOutcome` reports them. */
   oracle: OracleOutcome;
   /** Path of the receipt backing a `pass`, or null when there is none. A
@@ -95,10 +100,11 @@ export interface RunReport {
 export function generateRunReport(cwd: string, goalId: string, targetBranch: string): RunReport {
   const goal = readGoal(cwd, goalId);
   const merged = currentlyMergedTaskIds(goal);
-  const failed = goal.task_ids.filter(
-    (id) => !merged.includes(id) && resolveTaskState(cwd, id)?.phase === "ABANDONED",
-  );
-  const outstanding = goal.task_ids.filter((id) => !merged.includes(id) && !failed.includes(id));
+  // abandoned by a person or agent, as opposed to skipped by sddx after a dependency failed
+  const failed = goal.task_ids.filter((id) => {
+    const t = resolveTaskState(cwd, id);
+    return !merged.includes(id) && t?.phase === "ABANDONED" && t.skipped_on === undefined;
+  });
   // Run from the repository root, never the caller's cwd. A pathspec is
   // relative to cwd, and so is git's own default diff scope — reporting from a
   // subdirectory silently truncated the summary to that subtree, showing a
@@ -137,8 +143,13 @@ export function generateRunReport(cwd: string, goalId: string, targetBranch: str
     oracles.push(oracle);
 
     const entry = latestMerge.get(id) ?? null;
-    const skipper = task ? skippedOn(cwd, task) : null;
-    const blocker = task ? blockedOn(cwd, task) : null;
+    const skipper =
+      task?.phase === "ABANDONED" && task.skipped_on !== undefined
+        ? task.skipped_on
+        : task
+          ? skippedOn(cwd, task)
+          : null;
+    const blocker = task?.phase === "PLANNED" ? blockedOn(cwd, task) : null;
     // Precedence mirrors the board's: a terminal outcome for the task itself
     // outranks anything inherited from an ancestor.
     const status: TaskStatus = merged.includes(id)
@@ -155,6 +166,9 @@ export function generateRunReport(cwd: string, goalId: string, targetBranch: str
     tasks.push({
       taskId: id,
       status,
+      state: task?.phase ?? "missing",
+      attempt: task?.attempt_count ?? null,
+      reason: task?.phase === "ABANDONED" ? (task.abandon_reason ?? null) : null,
       oracle,
       receiptPath,
       integration: entry?.result ?? null,
@@ -240,12 +254,13 @@ export function renderRunReport(r: RunReport): string {
     "Tasks",
     ...r.tasks.map((t) => {
       const why = t.because ? ` (${t.because})` : "";
-      const receipt = t.receiptPath ? ` — receipt ${t.receiptPath}` : "";
-      return `- ${t.taskId}: ${t.status}${why}${receipt}`;
+      const state = `[${t.state}${t.attempt ? `, attempt ${t.attempt}` : ""}${t.reason ? `: ${t.reason}` : ""}]`;
+      const receipt = t.receiptPath ? `, receipt ${t.receiptPath}` : "";
+      return `- ${t.taskId}: ${t.status}${why} ${state}${receipt}`;
     }),
     "",
     "Oracle results",
-    ...r.oracles.map((o) => `- ${o.taskId}: ${o.verdict} — ${o.run} (expect ${o.expect})`),
+    ...r.oracles.map((o) => `- ${o.taskId}: ${o.verdict}, ${o.run} (expect ${o.expect})`),
     "",
     ...(r.assumptions.length > 0 ? ["Assumptions", ...r.assumptions.map((a) => `- ${a}`), ""] : []),
     "Review commands",

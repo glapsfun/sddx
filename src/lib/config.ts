@@ -1,7 +1,7 @@
 // Shared reader for .sddx/config.json, the repository's reviewed project
-// policy, authored by `sddx init` against the CLI-owned schema below.
-// Unreadable config never changes behavior — defaults apply.
-import { existsSync, readFileSync } from "node:fs";
+// policy, written with defaults by the first `sddx plan start` and edited by
+// people. An absent or unreadable file never changes behavior: defaults apply.
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 export interface SddxConfig {
@@ -20,12 +20,16 @@ export interface SddxConfig {
   /** DEPRECATED — read for compatibility, never written. See `interactionMode`. */
   execution_mode?: InteractionMode;
   auto_max_tasks?: number;
-  /** Written by `sddx init`. Absent in files predating the bootstrap command. */
+  profile?: Profile;
   schema_version?: string;
-  runtime_scope?: RuntimeScope;
-  package_manager?: PackageManager;
-  adapters?: string[];
 }
+
+/**
+ * `strict` adds per-edit test-first enforcement through blocking hooks, on
+ * harnesses that have them. `default` relies on the boundary proof alone.
+ */
+export type Profile = "default" | "strict";
+export const PROFILES = ["default", "strict"] as const;
 
 /**
  * Which approval gates are armed. `auto` is `human` with the plan-approval gate
@@ -41,35 +45,33 @@ export type InteractionMode = "human" | "auto";
 export const INTERACTION_MODES = ["human", "auto"] as const;
 
 /**
- * How generated adapter content invokes sddx.
- *
- * `global` resolves an `sddx` from PATH; `project` runs a lockfile-backed
- * project dependency through the package manager. Neither ever copies an sddx
- * runtime into `.sddx/` — package managers own package bytes.
+ * The schema this sddx writes. Bumped when a key's meaning changes, not when one
+ * is added: an added key resolves to its default under an older reader. A 1.x
+ * file was written by sddx 5, and v6 commands refuse until `sddx migrate` runs.
  */
-export type RuntimeScope = "global" | "project";
-export const RUNTIME_SCOPES = ["global", "project"] as const;
-
-/**
- * Package managers whose no-install local execution form has been verified.
- *
- * Only verified managers are offered: guessing an invocation would generate
- * adapter content that fails at the moment a user actually needs it to work.
- */
-export type PackageManager = "npm" | "bun";
-export const PACKAGE_MANAGERS = ["npm", "bun"] as const;
-
-/**
- * The schema `sddx init` writes. Bumped when a key's meaning changes, not when
- * one is added — an added key resolves to its default under an older reader.
- */
-export const CONFIG_SCHEMA_VERSION = "1.0";
+export const CONFIG_SCHEMA_VERSION = "2.0";
 
 /** The node-count ceiling above which `auto` arms the approval gate anyway. */
 export const DEFAULT_AUTO_MAX_TASKS = 6;
 
+export const configPath = (root: string): string => join(root, ".sddx", "config.json");
+
+/** What the first `sddx plan start` writes when the repository has no config. */
+export function defaultConfig(): SddxConfig {
+  return { schema_version: CONFIG_SCHEMA_VERSION, interaction_mode: "human", profile: "default" };
+}
+
+/** Writes the default config unless one exists. Returns whether it wrote. */
+export function ensureConfig(root: string): boolean {
+  const path = configPath(root);
+  if (existsSync(path)) return false;
+  mkdirSync(join(root, ".sddx"), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(defaultConfig(), null, 2)}\n`);
+  return true;
+}
+
 export function readConfig(root: string): SddxConfig {
-  const path = join(root, ".sddx", "config.json");
+  const path = configPath(root);
   if (!existsSync(path)) return {};
   try {
     const parsed: unknown = JSON.parse(readFileSync(path, "utf8"));
@@ -110,6 +112,23 @@ export function resolveValue<T>(opts: {
     if (parsed !== null && parsed !== undefined) return parsed;
   }
   return opts.fallback;
+}
+
+/** Extra test and exempt globs for path classification: env wins, then config. */
+export function classifyConfig(
+  root: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { testGlobs?: string; exemptGlobs?: string } {
+  const cfg = readConfig(root);
+  return {
+    testGlobs: env.SDDX_TEST_GLOBS ?? cfg.test_globs,
+    exemptGlobs: env.SDDX_EXEMPT_GLOBS ?? cfg.exempt_globs,
+  };
+}
+
+/** Verify runs plus failed reviews allowed per attempt before a task needs a human. */
+export function maxIterations(root: string): number {
+  return positiveInt(readConfig(root).max_iterations_default) ?? 5;
 }
 
 /** Precedence: SDDX_STUCK_THRESHOLD > config stuck_threshold > 3. */
@@ -202,6 +221,17 @@ export function autoMaxTasks(root: string): number {
   return positiveInt(readConfig(root).auto_max_tasks) ?? DEFAULT_AUTO_MAX_TASKS;
 }
 
+/**
+ * Config only, like `interactionMode`, and failing closed: an absent file or key
+ * means `default`, but a present value that is not a known profile resolves to
+ * `strict`, so a typo can tighten the gate and never loosen it.
+ */
+export function profile(root: string): Profile {
+  const v = readConfig(root).profile;
+  if (v === undefined) return "default";
+  return (PROFILES as readonly string[]).includes(v as string) ? (v as Profile) : "strict";
+}
+
 const KNOWN_AGENT_ROLES = ["intake", "orchestrator", "planner", "tddExecutor", "verifier"] as const;
 
 /**
@@ -226,7 +256,7 @@ export function parseAgentModel(raw: string | undefined): {
     const model = eq === -1 ? "" : segment.slice(eq + 1).trim();
     if (eq === -1 || model === "" || !(KNOWN_AGENT_ROLES as readonly string[]).includes(role)) {
       warnings.push(
-        `agent_model: ignoring "${segment}" — expected one of ${KNOWN_AGENT_ROLES.join("|")} followed by =<model>`,
+        `agent_model: ignoring "${segment}"; expected one of ${KNOWN_AGENT_ROLES.join("|")} followed by =<model>`,
       );
       continue;
     }
@@ -248,23 +278,11 @@ export interface ResolvedConfig {
   verbose: boolean;
   interaction_mode: InteractionMode;
   auto_max_tasks: number;
-  runtime_scope: RuntimeScope;
-  package_manager: PackageManager;
-  adapters: string[];
+  profile: Profile;
   schema_version: string | null;
 }
 
 const bool = (v: unknown): boolean | null => (typeof v === "boolean" ? v : null);
-
-const asRuntimeScope = (v: unknown): RuntimeScope | null =>
-  typeof v === "string" && (RUNTIME_SCOPES as readonly string[]).includes(v)
-    ? (v as RuntimeScope)
-    : null;
-
-const asPackageManager = (v: unknown): PackageManager | null =>
-  typeof v === "string" && (PACKAGE_MANAGERS as readonly string[]).includes(v)
-    ? (v as PackageManager)
-    : null;
 
 /** Every config key, fully resolved (env/config/default precedence applied),
  * for `sddx config show` and any caller that wants the whole picture at once. */
@@ -324,12 +342,7 @@ export function resolveConfig(root: string, env: NodeJS.ProcessEnv = process.env
     // both config-only by design — see interactionMode()
     interaction_mode: interactionMode(root),
     auto_max_tasks: autoMaxTasks(root),
-    // Bootstrap policy: config-file-only, like interaction_mode. An env var
-    // here would let a caller change which sddx a generated adapter invokes,
-    // which is the one thing the resolver exists to make reproducible.
-    runtime_scope: asRuntimeScope(cfg.runtime_scope) ?? "global",
-    package_manager: asPackageManager(cfg.package_manager) ?? "npm",
-    adapters: Array.isArray(cfg.adapters) ? cfg.adapters.filter((a) => typeof a === "string") : [],
+    profile: profile(root),
     schema_version: typeof cfg.schema_version === "string" ? cfg.schema_version : null,
   };
 }
@@ -351,7 +364,7 @@ export interface ConfigKeySpec {
   expectation: string;
   /** The value that applies when the key is absent. */
   default: string | number | boolean;
-  /** Short label, shown when `sddx init` asks about the key. */
+  /** Short human label for the key. */
   title: string;
   description: string;
   /** Deprecated compatibility spellings are validated but never offered. */
@@ -362,11 +375,9 @@ export interface ConfigKeySpec {
  * The full known-key schema, owned by the CLI.
  *
  * This is the single description of sddx's configuration surface: the
- * validator, `sddx config show`, and `sddx init`'s prompts all read it. It
- * previously lived in the plugin manifest's `userConfig` block, where an AI
- * harness prompted for it at plugin-enable time — which made a harness the
- * source of a project's policy. Configuration is now authored by `sddx init`
- * into `.sddx/config.json` and no manifest is read to determine what a key is.
+ * validator and `sddx config show` read it. Policy lives in the repository's
+ * committed `.sddx/config.json`, never in a harness or plugin manifest, so no
+ * per-user install can change what a key means for the team.
  *
  * `isValid` enforces the domain rule, not just JS `typeof` — so a
  * structurally-valid-but-out-of-range value (`stuck_threshold: -2`) is caught
@@ -450,7 +461,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     default: "",
     title: "Agent model overrides",
     description:
-      "Comma-separated role=model pairs (roles: orchestrator, planner, tddExecutor, verifier) — advisory, read by /sddx:run when dispatching subagents",
+      "Comma-separated role=model pairs (roles: orchestrator, planner, tddExecutor, verifier); advisory, read by /sddx:run when dispatching subagents",
   },
   {
     key: "verbose",
@@ -488,29 +499,13 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     description: "In auto mode, a plan with more nodes than this is refused rather than run",
   },
   {
-    key: "runtime_scope",
-    isValid: isOneOf(RUNTIME_SCOPES),
-    expectation: `one of ${RUNTIME_SCOPES.join("|")}`,
-    default: "global",
-    title: "Runtime scope",
+    key: "profile",
+    isValid: isOneOf(PROFILES),
+    expectation: `one of ${PROFILES.join("|")}`,
+    default: "default",
+    title: "Profile",
     description:
-      "How generated adapter content invokes sddx: global (an `sddx` on PATH) | project (a lockfile-backed project dependency run through the package manager)",
-  },
-  {
-    key: "package_manager",
-    isValid: isOneOf(PACKAGE_MANAGERS),
-    expectation: `one of ${PACKAGE_MANAGERS.join("|")}`,
-    default: "npm",
-    title: "Package manager",
-    description: "Which package manager runs the project-local binary when runtime_scope=project",
-  },
-  {
-    key: "adapters",
-    isValid: (v) => Array.isArray(v) && v.every((a) => typeof a === "string"),
-    expectation: "an array of strings",
-    default: "",
-    title: "Enabled adapters",
-    description: "Project adapters `sddx init`/`sync` maintain (currently: claude)",
+      "default (the boundary proof in verify) | strict (adds the per-edit test-first gate on harnesses with blocking hooks)",
   },
   {
     key: "schema_version",
@@ -540,11 +535,23 @@ export const KNOWN_CONFIG_KEYS: ReadonlySet<string> = new Set(CONFIG_KEYS.map((k
 const REMOVED_CONFIG_KEYS: ReadonlyMap<string, string> = new Map([
   [
     "workspace_mode",
-    "removed in sddx 4.0 — worktree is the only workspace strategy, so there is nothing to select. Remove the key; runs are unaffected.",
+    "removed in sddx 4.0: worktree is the only workspace strategy, so there is nothing to select. Remove the key; runs are unaffected.",
+  ],
+  [
+    "runtime_scope",
+    "removed in sddx 6: harness integration is installed by the sddx plugin, not generated into the repository. Remove the key.",
+  ],
+  [
+    "package_manager",
+    "removed in sddx 6: harness integration is installed by the sddx plugin, not generated into the repository. Remove the key.",
+  ],
+  [
+    "adapters",
+    "removed in sddx 6: harness integration is installed by the sddx plugin, not generated into the repository. Remove the key.",
   ],
   [
     "prefer_solo",
-    "removed in sddx 4.0 along with `--solo` and `/sddx:quick` — a trivial task is a one-node `/sddx:run`. Remove the key; runs are unaffected.",
+    "removed in sddx 4.0 along with `--solo` and `/sddx:quick`; a trivial task is a one-node `/sddx:run`. Remove the key; runs are unaffected.",
   ],
 ]);
 
@@ -567,16 +574,17 @@ export function validateConfigObject(obj: Record<string, unknown>): string[] {
   }
   for (const { key, isValid, expectation } of CONFIG_KEYS) {
     if (key in obj && !isValid(obj[key])) {
-      warnings.push(`"${key}" must be ${expectation} — got ${JSON.stringify(obj[key])}`);
+      warnings.push(`"${key}" must be ${expectation}, got ${JSON.stringify(obj[key])}`);
     }
   }
-  // A file written by a NEWER sddx is reported, never rewritten: silently
-  // upgrading a config as a side effect of an unrelated command would edit
-  // reviewed policy without review. `sddx init` is how policy changes.
+  // Reported, never rewritten: silently upgrading a config as a side effect of
+  // an unrelated command would edit reviewed policy without review.
   const version = obj.schema_version;
   if (typeof version === "string" && version !== CONFIG_SCHEMA_VERSION) {
     warnings.push(
-      `"schema_version" is "${version}" but this sddx writes "${CONFIG_SCHEMA_VERSION}" — re-run \`sddx init\` to reconcile it`,
+      version.startsWith("1.")
+        ? `"schema_version" is "${version}", written by sddx 5; run \`sddx migrate\``
+        : `"schema_version" is "${version}" but this sddx writes "${CONFIG_SCHEMA_VERSION}"`,
     );
   }
   if (typeof obj.agent_model === "string") {
@@ -588,8 +596,8 @@ export function validateConfigObject(obj: Record<string, unknown>): string[] {
   if ("execution_mode" in obj) {
     warnings.push(
       obj.interaction_mode === undefined
-        ? '"execution_mode" has been renamed to "interaction_mode" — the old name is still read, rename it to silence this'
-        : '"execution_mode" is ignored because "interaction_mode" is also set — remove the old key',
+        ? '"execution_mode" has been renamed to "interaction_mode"; the old name is still read, rename it to silence this'
+        : '"execution_mode" is ignored because "interaction_mode" is also set; remove the old key',
     );
   }
   return warnings;

@@ -11,10 +11,15 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Adapter, AdapterContext } from "./adapter";
-import { planAdapter, readManifest } from "./adapter";
-import { CONFIG_SCHEMA_VERSION, type ResolvedConfig, validateConfigObject } from "./config";
-import { sddxCommand } from "./runtime";
+import { CONFIG_SCHEMA_VERSION, validateConfigObject } from "./config";
+import {
+  readV5Manifest,
+  unmergeV5Settings,
+  V5_DECLARATION_PATH,
+  V5_OWNED,
+  V5_SETTINGS_PATH,
+  v5Ownership,
+} from "./legacy/v5-claude";
 
 export type CheckStatus = "pass" | "warn" | "fail";
 
@@ -76,7 +81,10 @@ function checkGit(root: string | null, cwd: string): Check {
 function checkConfig(root: string): Check {
   const path = join(root, ".sddx", "config.json");
   if (!existsSync(path)) {
-    return fail("project-config", ".sddx/config.json is missing", "sddx init");
+    return pass(
+      "project-config",
+      "no .sddx/config.json; defaults apply until the first plan start",
+    );
   }
   let parsed: unknown;
   try {
@@ -85,11 +93,23 @@ function checkConfig(root: string): Check {
     return fail(
       "project-config",
       `.sddx/config.json is not valid JSON: ${(e as Error).message}`,
-      "sddx init",
+      "fix the JSON by hand, then: sddx config validate",
     );
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return fail("project-config", ".sddx/config.json is not a JSON object", "sddx init");
+    return fail(
+      "project-config",
+      ".sddx/config.json is not a JSON object",
+      "fix it by hand, then: sddx config validate",
+    );
+  }
+  const version = (parsed as { schema_version?: unknown }).schema_version;
+  if (typeof version === "string" && version.startsWith("1.")) {
+    return fail(
+      "project-config",
+      `.sddx/config.json was written by sddx 5 (${version})`,
+      "sddx migrate",
+    );
   }
   const warnings = validateConfigObject(parsed as Record<string, unknown>);
   if (warnings.length > 0) {
@@ -98,254 +118,41 @@ function checkConfig(root: string): Check {
   return pass("project-config", `schema_version ${CONFIG_SCHEMA_VERSION}`);
 }
 
-/**
- * Is `@glapsfun/sddx` resolvable as a project dependency?
- *
- * Checked by looking for the installed package rather than by running the
- * package manager: `doctor` must not mutate, and several package managers
- * install on a miss.
- */
-function projectDependency(root: string): { declared: boolean; installedVersion: string | null } {
-  let declared = false;
-  try {
-    const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as Record<
-      string,
-      Record<string, string> | undefined
-    >;
-    declared =
-      pkg.dependencies?.["@glapsfun/sddx"] !== undefined ||
-      pkg.devDependencies?.["@glapsfun/sddx"] !== undefined;
-  } catch {
-    declared = false;
-  }
-  let installedVersion: string | null = null;
-  try {
-    const manifest = join(root, "node_modules", "@glapsfun", "sddx", "package.json");
-    installedVersion = (JSON.parse(readFileSync(manifest, "utf8")) as { version: string }).version;
-  } catch {
-    installedVersion = null;
-  }
-  return { declared, installedVersion };
-}
-
-function checkRuntimeScope(root: string, cfg: ResolvedConfig, runningVersion: string): Check[] {
-  const invocation = sddxCommand(cfg.runtime_scope, cfg.package_manager);
-  const checks: Check[] = [pass("runtime-scope", `${cfg.runtime_scope} → \`${invocation}\``)];
-
-  if (cfg.runtime_scope === "global") {
-    const found = which("sddx");
-    checks.push(
-      found
-        ? pass("runtime-resolution", `sddx resolves to ${found}`)
-        : fail(
-            "runtime-resolution",
-            "runtime_scope is global but no `sddx` is on PATH",
-            "npm install -g @glapsfun/sddx",
-          ),
-    );
-    return checks;
-  }
-
-  const { declared, installedVersion } = projectDependency(root);
-  const install =
-    cfg.package_manager === "bun"
-      ? "bun add --dev @glapsfun/sddx"
-      : "npm install --save-dev @glapsfun/sddx";
-
-  if (!declared) {
-    checks.push(
-      fail(
-        "runtime-resolution",
-        "runtime_scope is project but @glapsfun/sddx is not a project dependency",
-        install,
-      ),
-    );
-  } else if (installedVersion === null) {
-    checks.push(
-      fail(
-        "runtime-resolution",
-        "@glapsfun/sddx is declared but not installed (no node_modules entry)",
-        cfg.package_manager === "bun" ? "bun install" : "npm install",
-      ),
-    );
-  } else if (installedVersion !== runningVersion) {
-    // Not a failure: running a global sddx to inspect a pinned project is a
-    // normal thing to do. It is a mismatch worth naming, with both versions,
-    // because a stale local copy is exactly what makes generated content drift.
-    checks.push(
-      warn(
-        "runtime-resolution",
-        `project-local @glapsfun/sddx is ${installedVersion}, this process is ${runningVersion}`,
-        install,
-      ),
-    );
-  } else {
-    checks.push(pass("runtime-resolution", `project-local @glapsfun/sddx ${installedVersion}`));
-  }
-
-  // A global binary inspecting a pinned repository must say so rather than
-  // quietly standing in for the pinned one.
-  const globalBin = which("sddx");
-  if (globalBin !== null) {
-    checks.push(
-      warn(
-        "runtime-mismatch",
-        `this repository pins its runtime, but a global sddx exists at ${globalBin}`,
-        `${invocation} doctor`,
-      ),
-    );
-  }
-  return checks;
-}
-
-function checkAdapters(
-  root: string,
-  cfg: ResolvedConfig,
-  adapters: Record<string, Adapter>,
-  ctx: AdapterContext,
-): Check[] {
-  if (cfg.adapters.length === 0) {
-    return [pass("adapters", "no adapters enabled")];
-  }
-  const checks: Check[] = [];
-  for (const name of cfg.adapters) {
-    const adapter = adapters[name];
-    if (!adapter) {
-      checks.push(
-        fail(
-          `adapter:${name}`,
-          `config enables adapter "${name}", which this sddx does not implement`,
-          "sddx config validate",
-        ),
-      );
-      continue;
-    }
-    const manifest = readManifest(root, name);
-    const plan = planAdapter(root, adapter, ctx);
-
-    if (plan.conflicts.length > 0) {
-      checks.push(
-        fail(
-          `adapter:${name}`,
-          plan.conflicts.map((c) => `${c.path} — ${c.reason}`).join("; "),
-          `sddx sync --adapter ${name}   # or --force to overwrite (keeps a .bak)`,
-        ),
-      );
-      continue;
-    }
-    const stale = plan.dispositions.filter((d) => d.kind === "create" || d.kind === "update");
-    if (stale.length > 0) {
-      checks.push(
-        warn(
-          `adapter:${name}`,
-          `${stale.length} generated file(s) are out of date: ${stale.map((d) => d.path).join(", ")}`,
-          `sddx sync --adapter ${name} --yes`,
-        ),
-      );
-      continue;
-    }
-    if (manifest !== null && manifest.invocation !== ctx.invocation) {
-      checks.push(
-        warn(
-          `adapter:${name}`,
-          `generated content invokes \`${manifest.invocation}\` but policy says \`${ctx.invocation}\``,
-          `sddx sync --adapter ${name} --yes`,
-        ),
-      );
-      continue;
-    }
-    checks.push(
-      pass(`adapter:${name}`, `up to date (${Object.keys(manifest?.files ?? {}).length} files)`),
-    );
-    checks.push(...checkGeneratedTracked(root, adapter, ctx));
-  }
-  return checks;
-}
-
-/**
- * Are the adapter's generated files actually going to reach teammates?
- *
- * The gate is a team contract — that is the entire reason hooks go into the
- * committed settings file rather than the personal one. A repository that
- * gitignores the harness directory gets a working gate for whoever ran `init`
- * and no gate at all for everyone else, which is the failure mode sddx exists
- * to remove. Worth naming loudly; not worth failing over, since a solo
- * repository is a legitimate reason to keep it ignored.
- */
-function checkGeneratedTracked(root: string, adapter: Adapter, ctx: AdapterContext): Check[] {
-  const paths = [
-    ...adapter.generate(ctx).map((f) => f.path),
-    ...adapter.mergeTargets(ctx).map((t) => t.path),
-  ];
-  const ignored = paths.filter((p) => {
-    const r = spawnSync("git", ["check-ignore", "-q", p], { cwd: root });
-    return r.status === 0;
-  });
-  if (ignored.length === 0) return [];
-  return [
-    warn(
-      `adapter:${adapter.name}:tracked`,
-      `${ignored.length} generated file(s) are gitignored (${ignored.slice(0, 3).join(", ")}${ignored.length > 3 ? ", …" : ""}) — teammates will not get the TDD gate`,
-      `git check-ignore -v ${ignored[0]}   # then un-ignore the sddx-owned paths, or accept a local-only setup`,
-    ),
-  ];
-}
-
-/**
- * Legacy plugin state, reported and never touched.
- *
- * sddx does not remove a Claude plugin on the user's behalf: that is global
- * harness configuration, which this design deliberately puts out of reach. So
- * this check's job is to be unambiguous about what to do and in what order.
- */
-function checkLegacyPlugin(root: string): Check[] {
+/** sddx 5 generated `.claude/` content or registered hooks; the plugin replaces both. */
+function checkV5Leftovers(root: string): Check {
   const findings: string[] = [];
-
-  if (existsSync(join(root, ".claude-plugin", "marketplace.json"))) {
-    findings.push(".claude-plugin/marketplace.json is still present");
-  }
-  const settings = join(root, ".claude", "settings.json");
+  const manifest = readV5Manifest(root);
+  const owned = Object.keys(V5_OWNED).filter((p) => v5Ownership(root, p, manifest) !== "absent");
+  if (owned.length > 0) findings.push(`${owned.length} sddx 5 file(s) under .claude/`);
+  if (existsSync(join(root, V5_DECLARATION_PATH))) findings.push(V5_DECLARATION_PATH);
+  const settings = join(root, V5_SETTINGS_PATH);
   if (existsSync(settings)) {
     try {
-      if (readFileSync(settings, "utf8").includes("CLAUDE_PLUGIN_ROOT")) {
-        findings.push(".claude/settings.json still registers plugin-root hooks");
+      if (unmergeV5Settings(readFileSync(settings, "utf8")).removed > 0) {
+        findings.push(`sddx 5 hook registrations in ${V5_SETTINGS_PATH}`);
       }
     } catch {
-      // unreadable settings are the settings check's business, not this one
+      // unreadable settings are not this check's to diagnose
     }
   }
-  if (findings.length === 0) return [pass("legacy-plugin", "no legacy plugin state")];
-
-  return [
-    warn(
-      "legacy-plugin",
-      `${findings.join("; ")}. Running both is safe while you verify, but the duplicate hook registrations will both fire.`,
-      "sddx init --adapter claude && sddx doctor   # then remove the plugin from Claude Code",
-    ),
-  ];
+  if (findings.length === 0) return pass("v5-leftovers", "no sddx 5 integration files");
+  return warn(
+    "v5-leftovers",
+    `${findings.join("; ")}; the sddx plugin replaces them and both would fire`,
+    "sddx migrate   # preview, then: sddx migrate --yes",
+  );
 }
 
 export function runDoctor(opts: {
   cwd: string;
   root: string | null;
-  config: ResolvedConfig | null;
-  adapters: Record<string, Adapter>;
-  adapterContext: AdapterContext | null;
   runningVersion: string;
 }): DoctorReport {
   const checks: Check[] = [checkBun(), checkGit(opts.root, opts.cwd)];
-
   checks.push(pass("sddx-version", opts.runningVersion));
-
   if (opts.root !== null) {
-    const configCheck = checkConfig(opts.root);
-    checks.push(configCheck);
-    if (opts.config !== null && opts.adapterContext !== null && configCheck.status !== "fail") {
-      checks.push(...checkRuntimeScope(opts.root, opts.config, opts.runningVersion));
-      checks.push(...checkAdapters(opts.root, opts.config, opts.adapters, opts.adapterContext));
-    }
-    checks.push(...checkLegacyPlugin(opts.root));
+    checks.push(checkConfig(opts.root));
+    checks.push(checkV5Leftovers(opts.root));
   }
-
   return { checks, failed: checks.some((c) => c.status === "fail") };
 }

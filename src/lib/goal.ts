@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { dependsOnList, resolveTaskState, sddxDir, taskId } from "./task";
+import { dependsOnList, resolveTaskState, sddxDir } from "./task";
 
 export type MergeResult = "merged" | "conflict" | "reverted";
 
@@ -38,7 +38,10 @@ export interface GoalApproval {
 
 export interface Goal {
   id: string;
+  /** The goal's title, from its spec's level-1 heading. */
   goal: string;
+  /** Repository-relative path of the goal spec. Absent on goals written by sddx 5. */
+  spec_path?: string;
   task_ids: string[];
   /** Dependency edges: task id → its predecessor task id(s) (fan-in allowed). A
    * legacy single-string value (the pre-DAG shape) is still readable via
@@ -174,20 +177,17 @@ function readGoalFromBranch(root: string, id: string): Goal | null {
   }
 }
 
-/** Same UTC-date-plus-slug derivation as `taskId` — collisions with a task id are
- * harmless since goals and tasks live in separate directories and the run
- * branch carries a `run-` prefix that keeps branch names distinct. */
-export const goalId = (sentence: string, date = new Date()): string => taskId(sentence, date);
+/** A goal's id is its spec file's name without `.md`. */
+export const goalIdFromSpec = (specPath: string): string =>
+  (specPath.split(/[\\/]/).pop() ?? specPath).replace(/\.md$/, "");
 
 /** `sddx/run-<goalId>` — the goal's live integration branch name. */
 export const runBranchName = (id: string): string => `sddx/run-${id}`;
 
 export interface CreateGoalOptions {
   deps?: Record<string, string[]>;
-  /** Precomputed goal id, so callers that already derived it (to name the run
-   * branch before any task exists) don't risk a second, possibly different,
-   * derivation if this happens to run across a UTC day boundary. */
-  id?: string;
+  id: string;
+  specPath: string;
   runBranch: string;
   baseSha: string;
   /** Approval provenance, when the goal came from an approved plan. */
@@ -204,7 +204,7 @@ export function createGoal(
     throw new Error("a goal requires at least one task id");
   }
   const now = new Date().toISOString();
-  const id = opts.id ?? goalId(goalSentence);
+  const id = opts.id;
   const root = mainRoot(cwd);
   const path = goalPath(root, id);
   if (existsSync(path)) throw new Error(`goal ${id} already exists at ${path}`);
@@ -219,6 +219,7 @@ export function createGoal(
   const g: Goal = {
     id,
     goal: goalSentence,
+    spec_path: opts.specPath,
     task_ids: taskIds,
     ...(opts.deps && Object.keys(opts.deps).length > 0 ? { deps: opts.deps } : {}),
     run_branch: opts.runBranch,
@@ -281,6 +282,19 @@ export function readGoal(cwd: string, id: string): Goal {
 export function goalExists(cwd: string, id: string): boolean {
   const root = mainRoot(cwd);
   return goalBlobSha(root, id) !== null || existsSync(goalPath(root, id));
+}
+
+/** Removes a goal record that `createGoal` just wrote, guarded by its blob sha
+ * so a record someone else rewrote in between is left alone. For rollback only. */
+export function deleteCreatedGoal(cwd: string, created: Goal): void {
+  const root = mainRoot(cwd);
+  const current = goalBlobSha(root, created.id);
+  if (current !== null) {
+    const r = sh(root, ["update-ref", "-d", goalRef(created.id), current]);
+    if (r.status !== 0) throw new Error(`git update-ref -d failed: ${(r.stderr ?? "").trim()}`);
+    return;
+  }
+  rmSync(goalPath(root, created.id), { force: true });
 }
 
 export function writeGoal(cwd: string, g: Goal): void {

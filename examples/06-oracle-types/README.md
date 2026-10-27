@@ -1,9 +1,11 @@
 # Example: oracle types
 
-Proves, rather than just states, that `command`/`test-suite`/`browser`
-oracles execute identically — the same `oracle.run` shell command, the same
-verifier code path — and shows today's real limitation with `manual`:
-`sddx verify` refuses it outright.
+`command`, `test-suite` and `browser` oracles run the same way: `sddx verify`
+executes `run` in the proof worktree, twice over (RED, then GREEN). The type
+tells a reader what the command proves; it never changes the mechanics.
+`manual` is different: nobody can execute it, so `verify` refuses it and `auto`
+mode refuses any plan containing one. See
+[choose-an-oracle-type](../../docs/how-to/choose-an-oracle-type.md).
 
 ## Setup
 
@@ -11,98 +13,136 @@ verifier code path — and shows today's real limitation with `manual`:
 bash examples/06-oracle-types/setup.sh
 ```
 
-`cd` into the printed directory before running anything below.
-
-## The three automated types run identically
-
-```sh
-ROOT="$PWD"
-for TYPE in command test-suite browser; do
-  cat > "spec-$TYPE.yaml" <<EOF
-task: oracle type demo $TYPE
-success_criteria:
-  - "ok-$TYPE.txt exists"
-oracle:
-  type: $TYPE
-  run: "test -f ok-$TYPE.txt"
-  expect: exit 0
-EOF
-done
-```
-
-(A real `browser` oracle would run something like `bunx playwright test
-e2e/login.spec.ts` — this example substitutes a dependency-free stand-in so
-it runs fully offline; the mechanics below are identical either way, since
-`type` never changes how `run` executes.)
-
-Each is its own one-node run, so the three stay independent:
-
 ```sh
 SDDX="$PWD/sddx"
-for TYPE in command test-suite browser; do
-  cat > "graph-$TYPE.yaml" <<EOF
-schema_version: "1.0"
-interaction_mode: human
-goal: demonstrate the $TYPE oracle
-tasks:
-  - alias: demo
-    spec: spec-$TYPE.yaml
+ROOT="$PWD"
+SPEC=.sddx/specs/2026-01-01-oracles.md
+mkdir -p .sddx/specs
+```
+
+## Three executable types, one manual
+
+`runs: 3` on the test suite makes the GREEN half run three times; every run
+must pass. A real `browser` oracle would run something like
+`bunx playwright test e2e/login.spec.ts`; this one is a stand-in so the example
+runs offline.
+
+```sh
+cat > "$SPEC" <<'EOF'
+# Oracle types
+
+## Design
+
+### Goal
+Show every oracle type.
+
+### Acceptance
+- each executable oracle passes after its change
+
+### Non-goals
+
+### Assumptions
+
+### Open decisions
+
+## Tasks
+
+### o-cmd Command
+
+~~~sddx
+oracle: {type: command, run: test -f cmd.done, expect: exit 0}
+scope: [cmd.done]
+~~~
+
+### o-suite Test suite
+
+~~~sddx
+oracle: {type: test-suite, run: test -f suite.done, expect: exit 0, runs: 3}
+scope: [suite.done]
+~~~
+
+### o-browser Browser
+
+~~~sddx
+oracle: {type: browser, run: test -f browser.done, expect: exit 0}
+scope: [browser.done]
+~~~
+
+### o-manual Manual
+
+~~~sddx
+oracle: {type: manual}
+scope: [manual.done]
+~~~
 EOF
-  "$SDDX" graph approve --graph "graph-$TYPE.yaml"
-  OUT=$("$SDDX" graph create --graph "graph-$TYPE.yaml")
-  ID=$(echo "$OUT" | grep -o 'created [0-9]\{8\}-[a-z0-9-]*' | head -1 | awk '{print $2}')
-  echo "$ID" > "id-$TYPE.txt"
-  WT="$ROOT/.sddx-worktrees/$ID"
-  cd "$WT"
-  "$SDDX" task phase "$ID" RED --test-exit 1
-  "$SDDX" red-check "$ID"
-  touch "ok-$TYPE.txt"
-  "$SDDX" task phase "$ID" GREEN --test-exit 0
-  "$SDDX" task phase "$ID" VERIFY
+git add "$SPEC"
+git commit -q -m "plan: oracles"
+"$SDDX" plan approve "$SPEC"
+"$SDDX" plan start "$SPEC"
+```
+
+## The executable types prove themselves the same way
+
+```sh
+for T in cmd suite browser; do
+  ID="o-$T"
+  "$SDDX" task start "$ID" > /dev/null
+  echo done > "$ROOT/.sddx-worktrees/$ID/$T.done"
   "$SDDX" verify "$ID"
-  cd "$ROOT"
+  "$SDDX" review record "$ID" --verdict pass --reviewer you > /dev/null
 done
+"$SDDX" task show o-suite | grep -c '"exit_code": 0' | grep -q 3
+"$SDDX" task show o-suite | grep -q '"exit_code": 1'
 ```
 
-All three reach `verdict=pass` through the exact same code path — swapping
-`type` never changed the mechanics, only what a reader understands the
-command is proving.
+The suite's record holds its failing RED run plus three passing GREEN runs.
 
-## `manual` is accepted, but `verify` refuses it today
+## `manual` needs a person
 
 ```sh
-cat > spec-manual.yaml <<'EOF'
-task: oracle type demo manual
-success_criteria:
-  - "a human confirms the page renders correctly"
-oracle:
-  type: manual
-  run: ""
-  expect: "human approves the rendered page"
-EOF
-cat > graph-manual.yaml <<'EOF'
-schema_version: "1.0"
-interaction_mode: human
-goal: demonstrate the manual oracle
-tasks:
-  - alias: manual
-    spec: spec-manual.yaml
-EOF
-"$SDDX" graph approve --graph graph-manual.yaml
-OUT=$("$SDDX" graph create --graph graph-manual.yaml)
-MANUAL_ID=$(echo "$OUT" | grep -o 'created [0-9]\{8\}-[a-z0-9-]*' | head -1 | awk '{print $2}')
-cd "$ROOT/.sddx-worktrees/$MANUAL_ID"
-"$SDDX" task phase "$MANUAL_ID" RED --test-exit 1
-"$SDDX" task phase "$MANUAL_ID" GREEN --test-exit 0
-"$SDDX" task phase "$MANUAL_ID" VERIFY
+"$SDDX" task start o-manual
+```
+
+```sh expect=1
+"$SDDX" verify o-manual
 ```
 
 ```sh
-"$SDDX" verify "$MANUAL_ID" 2>&1 | grep -q "manual oracles need a human decision"
+"$SDDX" verify o-manual 2>&1 | grep "manual oracle, which needs a human"
 ```
 
-The spec parser accepts `type: manual` with an empty `run` — registration
-never rejects it — but today's verifier refuses to settle it. Until that
-changes, a genuinely non-automatable outcome needs a different oracle
-shaped as a proxy check (a file a human touches after reviewing, a status
-endpoint a human flips) rather than `type: manual` itself.
+Unattended, the plan would never have started:
+
+```sh
+SPEC2=.sddx/specs/2026-01-02-manual-auto.md
+cat > "$SPEC2" <<'EOF'
+# Manual, unattended
+
+## Design
+
+### Goal
+Show auto mode refusing a manual oracle.
+
+### Acceptance
+- a person confirms the page looks right
+
+### Non-goals
+
+### Assumptions
+
+### Open decisions
+
+## Tasks
+
+### m-auto Visual check
+
+~~~sddx
+oracle: {type: manual}
+scope: [m.done]
+~~~
+EOF
+git add "$SPEC2"
+git commit -q -m "plan: manual in auto"
+echo '{"schema_version": "2.0", "interaction_mode": "auto"}' > .sddx/config.json
+"$SDDX" plan start "$SPEC2" 2>&1 | grep "declares oracle.type: manual"
+```

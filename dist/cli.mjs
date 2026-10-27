@@ -1,49 +1,5 @@
 import { createRequire } from "node:module";
-var __create = Object.create;
-var __getProtoOf = Object.getPrototypeOf;
-var __defProp = Object.defineProperty;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-function __accessProp(key) {
-  return this[key];
-}
-var __toESMCache_node;
-var __toESMCache_esm;
-var __toESM = (mod, isNodeMode, target) => {
-  var canCache = mod != null && typeof mod === "object";
-  if (canCache) {
-    var cache = isNodeMode ? __toESMCache_node ??= new WeakMap : __toESMCache_esm ??= new WeakMap;
-    var cached = cache.get(mod);
-    if (cached)
-      return cached;
-  }
-  target = mod != null ? __create(__getProtoOf(mod)) : {};
-  const to = isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target;
-  for (let key of __getOwnPropNames(mod))
-    if (!__hasOwnProp.call(to, key))
-      __defProp(to, key, {
-        get: __accessProp.bind(mod, key),
-        enumerable: true
-      });
-  if (canCache)
-    cache.set(mod, to);
-  return to;
-};
 var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
-var __returnValue = (v) => v;
-function __exportSetter(name, newValue) {
-  this[name] = __returnValue.bind(null, newValue);
-}
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, {
-      get: all[name],
-      enumerable: true,
-      configurable: true,
-      set: __exportSetter.bind(all, name)
-    });
-};
-var __esm = (fn, res) => () => (fn && (res = fn(fn = 0)), res);
 var __require = /* @__PURE__ */ createRequire(import.meta.url);
 
 // node_modules/yaml/dist/nodes/identity.js
@@ -1621,7 +1577,7 @@ var require_log = __commonJS((exports) => {
     if (logLevel === "debug")
       console.log(...messages);
   }
-  function warn(logLevel, warning) {
+  function warn2(logLevel, warning) {
     if (logLevel === "debug" || logLevel === "warn") {
       if (typeof node_process.emitWarning === "function")
         node_process.emitWarning(warning);
@@ -1630,7 +1586,7 @@ var require_log = __commonJS((exports) => {
     }
   }
   exports.debug = debug;
-  exports.warn = warn;
+  exports.warn = warn2;
 });
 
 // node_modules/yaml/dist/schema/yaml-1.1/merge.js
@@ -2366,7 +2322,7 @@ var require_schema = __commonJS((exports) => {
   var _null = require_null();
   var seq = require_seq();
   var string = require_string();
-  var bool = require_bool();
+  var bool2 = require_bool();
   var float = require_float();
   var int = require_int();
   var schema = [
@@ -2374,7 +2330,7 @@ var require_schema = __commonJS((exports) => {
     seq.seq,
     string.string,
     _null.nullTag,
-    bool.boolTag,
+    bool2.boolTag,
     int.intOct,
     int.int,
     int.intHex,
@@ -2974,7 +2930,7 @@ var require_schema3 = __commonJS((exports) => {
   var seq = require_seq();
   var string = require_string();
   var binary = require_binary();
-  var bool = require_bool2();
+  var bool2 = require_bool2();
   var float = require_float2();
   var int = require_int2();
   var merge = require_merge();
@@ -2987,8 +2943,8 @@ var require_schema3 = __commonJS((exports) => {
     seq.seq,
     string.string,
     _null.nullTag,
-    bool.trueTag,
-    bool.falseTag,
+    bool2.trueTag,
+    bool2.falseTag,
     int.intBin,
     int.intOct,
     int.int,
@@ -3014,7 +2970,7 @@ var require_tags = __commonJS((exports) => {
   var _null = require_null();
   var seq = require_seq();
   var string = require_string();
-  var bool = require_bool();
+  var bool2 = require_bool();
   var float = require_float();
   var int = require_int();
   var schema = require_schema();
@@ -3035,7 +2991,7 @@ var require_tags = __commonJS((exports) => {
   ]);
   var tagsByName = {
     binary: binary.binary,
-    bool: bool.boolTag,
+    bool: bool2.boolTag,
     float: float.float,
     floatExp: float.floatExp,
     floatNaN: float.floatNaN,
@@ -3724,10 +3680,10 @@ var require_resolve_block_map = __commonJS((exports) => {
     let offset = bm.offset;
     let commentEnd = null;
     for (const collItem of bm.items) {
-      const { start, key, sep, value } = collItem;
+      const { start, key, sep: sep2, value } = collItem;
       const keyProps = resolveProps.resolveProps(start, {
         indicator: "explicit-key-ind",
-        next: key ?? sep?.[0],
+        next: key ?? sep2?.[0],
         offset,
         onError,
         parentIndent: bm.indent,
@@ -3741,7 +3697,7 @@ var require_resolve_block_map = __commonJS((exports) => {
           else if ("indent" in key && key.indent !== bm.indent)
             onError(offset, "BAD_INDENT", startColMsg);
         }
-        if (!keyProps.anchor && !keyProps.tag && !sep) {
+        if (!keyProps.anchor && !keyProps.tag && !sep2) {
           commentEnd = keyProps.end;
           if (keyProps.comment) {
             if (map.comment)
@@ -3766,7 +3722,7 @@ var require_resolve_block_map = __commonJS((exports) => {
       ctx.atKey = false;
       if (utilMapIncludes.mapIncludes(ctx, map.items, keyNode))
         onError(keyStart, "DUPLICATE_KEY", "Map keys must be unique");
-      const valueProps = resolveProps.resolveProps(sep ?? [], {
+      const valueProps = resolveProps.resolveProps(sep2 ?? [], {
         indicator: "map-value-ind",
         next: value,
         offset: keyNode.range[2],
@@ -3782,7 +3738,7 @@ var require_resolve_block_map = __commonJS((exports) => {
           if (ctx.options.strict && keyProps.start < valueProps.found.offset - 1024)
             onError(keyNode.range, "KEY_OVER_1024_CHARS", "The : indicator must be at most 1024 chars after the start of an implicit block mapping key");
         }
-        const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep, null, valueProps, onError);
+        const valueNode = value ? composeNode(ctx, value, valueProps, onError) : composeEmptyNode(ctx, offset, sep2, null, valueProps, onError);
         if (ctx.schema.compat)
           utilFlowIndentCheck.flowIndentCheck(bm.indent, value, onError);
         offset = valueNode.range[2];
@@ -3868,7 +3824,7 @@ var require_resolve_end = __commonJS((exports) => {
     let comment = "";
     if (end) {
       let hasSpace = false;
-      let sep = "";
+      let sep2 = "";
       for (const token of end) {
         const { source, type } = token;
         switch (type) {
@@ -3882,13 +3838,13 @@ var require_resolve_end = __commonJS((exports) => {
             if (!comment)
               comment = cb;
             else
-              comment += sep + cb;
-            sep = "";
+              comment += sep2 + cb;
+            sep2 = "";
             break;
           }
           case "newline":
             if (comment)
-              sep += source;
+              sep2 += source;
             hasSpace = true;
             break;
           default:
@@ -3928,18 +3884,18 @@ var require_resolve_flow_collection = __commonJS((exports) => {
     let offset = fc.offset + fc.start.source.length;
     for (let i = 0;i < fc.items.length; ++i) {
       const collItem = fc.items[i];
-      const { start, key, sep, value } = collItem;
+      const { start, key, sep: sep2, value } = collItem;
       const props = resolveProps.resolveProps(start, {
         flow: fcName,
         indicator: "explicit-key-ind",
-        next: key ?? sep?.[0],
+        next: key ?? sep2?.[0],
         offset,
         onError,
         parentIndent: fc.indent,
         startOnNewline: false
       });
       if (!props.found) {
-        if (!props.anchor && !props.tag && !sep && !value) {
+        if (!props.anchor && !props.tag && !sep2 && !value) {
           if (i === 0 && props.comma)
             onError(props.comma, "UNEXPECTED_TOKEN", `Unexpected , in ${fcName}`);
           else if (i < fc.items.length - 1)
@@ -3991,8 +3947,8 @@ var require_resolve_flow_collection = __commonJS((exports) => {
           }
         }
       }
-      if (!isMap && !sep && !props.found) {
-        const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep, null, props, onError);
+      if (!isMap && !sep2 && !props.found) {
+        const valueNode = value ? composeNode(ctx, value, props, onError) : composeEmptyNode(ctx, props.end, sep2, null, props, onError);
         coll.items.push(valueNode);
         offset = valueNode.range[2];
         if (isBlock(value))
@@ -4004,7 +3960,7 @@ var require_resolve_flow_collection = __commonJS((exports) => {
         if (isBlock(key))
           onError(keyNode.range, "BLOCK_IN_FLOW", blockMsg);
         ctx.atKey = false;
-        const valueProps = resolveProps.resolveProps(sep ?? [], {
+        const valueProps = resolveProps.resolveProps(sep2 ?? [], {
           flow: fcName,
           indicator: "map-value-ind",
           next: value,
@@ -4015,8 +3971,8 @@ var require_resolve_flow_collection = __commonJS((exports) => {
         });
         if (valueProps.found) {
           if (!isMap && !props.found && ctx.options.strict) {
-            if (sep)
-              for (const st of sep) {
+            if (sep2)
+              for (const st of sep2) {
                 if (st === valueProps.found)
                   break;
                 if (st.type === "newline") {
@@ -4033,7 +3989,7 @@ var require_resolve_flow_collection = __commonJS((exports) => {
           else
             onError(valueProps.start, "MISSING_CHAR", `Missing , or : between ${fcName} items`);
         }
-        const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep, null, valueProps, onError) : null;
+        const valueNode = value ? composeNode(ctx, value, valueProps, onError) : valueProps.found ? composeEmptyNode(ctx, valueProps.end, sep2, null, valueProps, onError) : null;
         if (valueNode) {
           if (isBlock(value))
             onError(valueNode.range, "BLOCK_IN_FLOW", blockMsg);
@@ -4210,7 +4166,7 @@ var require_resolve_block_scalar = __commonJS((exports) => {
         chompStart = i + 1;
     }
     let value = "";
-    let sep = "";
+    let sep2 = "";
     let prevMoreIndented = false;
     for (let i = 0;i < contentStart; ++i)
       value += lines[i][0].slice(trimIndent) + `
@@ -4228,33 +4184,33 @@ var require_resolve_block_scalar = __commonJS((exports) => {
         indent = "";
       }
       if (type === Scalar.Scalar.BLOCK_LITERAL) {
-        value += sep + indent.slice(trimIndent) + content;
-        sep = `
+        value += sep2 + indent.slice(trimIndent) + content;
+        sep2 = `
 `;
       } else if (indent.length > trimIndent || content[0] === "\t") {
-        if (sep === " ")
-          sep = `
+        if (sep2 === " ")
+          sep2 = `
 `;
-        else if (!prevMoreIndented && sep === `
+        else if (!prevMoreIndented && sep2 === `
 `)
-          sep = `
+          sep2 = `
 
 `;
-        value += sep + indent.slice(trimIndent) + content;
-        sep = `
+        value += sep2 + indent.slice(trimIndent) + content;
+        sep2 = `
 `;
         prevMoreIndented = true;
       } else if (content === "") {
-        if (sep === `
+        if (sep2 === `
 `)
           value += `
 `;
         else
-          sep = `
+          sep2 = `
 `;
       } else {
-        value += sep + content;
-        sep = " ";
+        value += sep2 + content;
+        sep2 = " ";
         prevMoreIndented = false;
       }
     }
@@ -4435,27 +4391,27 @@ var require_resolve_flow_scalar = __commonJS((exports) => {
     if (!match)
       return source;
     let res = match[1];
-    let sep = " ";
+    let sep2 = " ";
     let pos = first.lastIndex;
     line.lastIndex = pos;
     while (match = line.exec(source)) {
       if (match[1] === "") {
-        if (sep === `
+        if (sep2 === `
 `)
-          res += sep;
+          res += sep2;
         else
-          sep = `
+          sep2 = `
 `;
       } else {
-        res += sep + match[1];
-        sep = " ";
+        res += sep2 + match[1];
+        sep2 = " ";
       }
       pos = line.lastIndex;
     }
     const last = /[ \t]*(.*)/sy;
     last.lastIndex = pos;
     match = last.exec(source);
-    return res + sep + (match?.[1] ?? "");
+    return res + sep2 + (match?.[1] ?? "");
   }
   function doubleQuotedValue(source, onError) {
     let res = "";
@@ -5236,14 +5192,14 @@ var require_cst_stringify = __commonJS((exports) => {
       }
     }
   }
-  function stringifyItem({ start, key, sep, value }) {
+  function stringifyItem({ start, key, sep: sep2, value }) {
     let res = "";
     for (const st of start)
       res += st.source;
     if (key)
       res += stringifyToken(key);
-    if (sep)
-      for (const st of sep)
+    if (sep2)
+      for (const st of sep2)
         res += st.source;
     if (value)
       res += stringifyToken(value);
@@ -6391,18 +6347,18 @@ var require_parser = __commonJS((exports) => {
       if (this.type === "map-value-ind") {
         const prev = getPrevProps(this.peek(2));
         const start = getFirstKeyStartProps(prev);
-        let sep;
+        let sep2;
         if (scalar.end) {
-          sep = scalar.end;
-          sep.push(this.sourceToken);
+          sep2 = scalar.end;
+          sep2.push(this.sourceToken);
           delete scalar.end;
         } else
-          sep = [this.sourceToken];
+          sep2 = [this.sourceToken];
         const map = {
           type: "block-map",
           offset: scalar.offset,
           indent: scalar.indent,
-          items: [{ start, key: scalar, sep }]
+          items: [{ start, key: scalar, sep: sep2 }]
         };
         this.onKeyLine = true;
         this.stack[this.stack.length - 1] = map;
@@ -6556,15 +6512,15 @@ var require_parser = __commonJS((exports) => {
               } else if (isFlowToken(it.key) && !includesToken(it.sep, "newline")) {
                 const start2 = getFirstKeyStartProps(it.start);
                 const key = it.key;
-                const sep = it.sep;
-                sep.push(this.sourceToken);
+                const sep2 = it.sep;
+                sep2.push(this.sourceToken);
                 delete it.key;
                 delete it.sep;
                 this.stack.push({
                   type: "block-map",
                   offset: this.offset,
                   indent: this.indent,
-                  items: [{ start: start2, key, sep }]
+                  items: [{ start: start2, key, sep: sep2 }]
                 });
               } else if (start.length > 0) {
                 it.sep = it.sep.concat(start, this.sourceToken);
@@ -6758,13 +6714,13 @@ var require_parser = __commonJS((exports) => {
           const prev = getPrevProps(parent);
           const start = getFirstKeyStartProps(prev);
           fixFlowSeqItems(fc);
-          const sep = fc.end.splice(1, fc.end.length);
-          sep.push(this.sourceToken);
+          const sep2 = fc.end.splice(1, fc.end.length);
+          sep2.push(this.sourceToken);
           const map = {
             type: "block-map",
             offset: fc.offset,
             indent: fc.indent,
-            items: [{ start, key: fc, sep }]
+            items: [{ start, key: fc, sep: sep2 }]
           };
           this.onKeyLine = true;
           this.stack[this.stack.length - 1] = map;
@@ -6987,2638 +6943,1029 @@ var require_public_api = __commonJS((exports) => {
   exports.stringify = stringify;
 });
 
-// node_modules/fast-string-truncated-width/dist/utils.js
-var getCodePointsLength, isFullWidth = (x) => {
-  return x === 12288 || x >= 65281 && x <= 65376 || x >= 65504 && x <= 65510;
-}, isWideNotCJKTNotEmoji = (x) => {
-  return x === 8987 || x === 9001 || x >= 12272 && x <= 12287 || x >= 12289 && x <= 12350 || x >= 12441 && x <= 12543 || x >= 12549 && x <= 12591 || x >= 12593 && x <= 12686 || x >= 12688 && x <= 12771 || x >= 12783 && x <= 12830 || x >= 12832 && x <= 12871 || x >= 12880 && x <= 19903 || x >= 65040 && x <= 65049 || x >= 65072 && x <= 65106 || x >= 65108 && x <= 65126 || x >= 65128 && x <= 65131 || x >= 127488 && x <= 127490 || x >= 127504 && x <= 127547 || x >= 127552 && x <= 127560 || x >= 131072 && x <= 196605 || x >= 196608 && x <= 262141;
-};
-var init_utils = __esm(() => {
-  getCodePointsLength = (() => {
-    const SURROGATE_PAIR_RE = /[\uD800-\uDBFF][\uDC00-\uDFFF]/g;
-    return (input) => {
-      let surrogatePairsNr = 0;
-      SURROGATE_PAIR_RE.lastIndex = 0;
-      while (SURROGATE_PAIR_RE.test(input)) {
-        surrogatePairsNr += 1;
-      }
-      return input.length - surrogatePairsNr;
-    };
-  })();
-});
-
-// node_modules/fast-string-truncated-width/dist/index.js
-var ANSI_RE, CONTROL_RE, CJKT_WIDE_RE, TAB_RE, EMOJI_RE, LATIN_RE, MODIFIER_RE, NO_TRUNCATION, getStringTruncatedWidth = (input, truncationOptions = {}, widthOptions = {}) => {
-  const LIMIT = truncationOptions.limit ?? Infinity;
-  const ELLIPSIS = truncationOptions.ellipsis ?? "";
-  const ELLIPSIS_WIDTH = truncationOptions?.ellipsisWidth ?? (ELLIPSIS ? getStringTruncatedWidth(ELLIPSIS, NO_TRUNCATION, widthOptions).width : 0);
-  const ANSI_WIDTH = 0;
-  const CONTROL_WIDTH = widthOptions.controlWidth ?? 0;
-  const TAB_WIDTH = widthOptions.tabWidth ?? 8;
-  const EMOJI_WIDTH = widthOptions.emojiWidth ?? 2;
-  const FULL_WIDTH_WIDTH = 2;
-  const REGULAR_WIDTH = widthOptions.regularWidth ?? 1;
-  const WIDE_WIDTH = widthOptions.wideWidth ?? FULL_WIDTH_WIDTH;
-  const PARSE_BLOCKS = [
-    [LATIN_RE, REGULAR_WIDTH],
-    [ANSI_RE, ANSI_WIDTH],
-    [CONTROL_RE, CONTROL_WIDTH],
-    [TAB_RE, TAB_WIDTH],
-    [EMOJI_RE, EMOJI_WIDTH],
-    [CJKT_WIDE_RE, WIDE_WIDTH]
-  ];
-  let indexPrev = 0;
-  let index = 0;
-  let length = input.length;
-  let lengthExtra = 0;
-  let truncationEnabled = false;
-  let truncationIndex = length;
-  let truncationLimit = Math.max(0, LIMIT - ELLIPSIS_WIDTH);
-  let unmatchedStart = 0;
-  let unmatchedEnd = 0;
-  let width = 0;
-  let widthExtra = 0;
-  outer:
-    while (true) {
-      if (unmatchedEnd > unmatchedStart || index >= length && index > indexPrev) {
-        const unmatched = input.slice(unmatchedStart, unmatchedEnd) || input.slice(indexPrev, index);
-        lengthExtra = 0;
-        for (const char of unmatched.replaceAll(MODIFIER_RE, "")) {
-          const codePoint = char.codePointAt(0) || 0;
-          if (isFullWidth(codePoint)) {
-            widthExtra = FULL_WIDTH_WIDTH;
-          } else if (isWideNotCJKTNotEmoji(codePoint)) {
-            widthExtra = WIDE_WIDTH;
-          } else {
-            widthExtra = REGULAR_WIDTH;
-          }
-          if (width + widthExtra > truncationLimit) {
-            truncationIndex = Math.min(truncationIndex, Math.max(unmatchedStart, indexPrev) + lengthExtra);
-          }
-          if (width + widthExtra > LIMIT) {
-            truncationEnabled = true;
-            break outer;
-          }
-          lengthExtra += char.length;
-          width += widthExtra;
-        }
-        unmatchedStart = unmatchedEnd = 0;
-      }
-      if (index >= length) {
-        break outer;
-      }
-      for (let i = 0, l = PARSE_BLOCKS.length;i < l; i++) {
-        const [BLOCK_RE, BLOCK_WIDTH] = PARSE_BLOCKS[i];
-        BLOCK_RE.lastIndex = index;
-        if (BLOCK_RE.test(input)) {
-          lengthExtra = BLOCK_RE === CJKT_WIDE_RE ? getCodePointsLength(input.slice(index, BLOCK_RE.lastIndex)) : BLOCK_RE === EMOJI_RE ? 1 : BLOCK_RE.lastIndex - index;
-          widthExtra = lengthExtra * BLOCK_WIDTH;
-          if (width + widthExtra > truncationLimit) {
-            truncationIndex = Math.min(truncationIndex, index + Math.floor((truncationLimit - width) / BLOCK_WIDTH));
-          }
-          if (width + widthExtra > LIMIT) {
-            truncationEnabled = true;
-            break outer;
-          }
-          width += widthExtra;
-          unmatchedStart = indexPrev;
-          unmatchedEnd = index;
-          index = indexPrev = BLOCK_RE.lastIndex;
-          continue outer;
-        }
-      }
-      index += 1;
-    }
-  return {
-    width: truncationEnabled ? truncationLimit : width,
-    index: truncationEnabled ? truncationIndex : length,
-    truncated: truncationEnabled,
-    ellipsed: truncationEnabled && LIMIT >= ELLIPSIS_WIDTH
-  };
-}, dist_default;
-var init_dist = __esm(() => {
-  init_utils();
-  ANSI_RE = /[\u001b\u009b][[()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]|\u001b\]8;[^;]*;.*?(?:\u0007|\u001b\u005c)/y;
-  CONTROL_RE = /[\x00-\x08\x0A-\x1F\x7F-\x9F]{1,1000}/y;
-  CJKT_WIDE_RE = /(?:(?![\uFF61-\uFF9F\uFF00-\uFFEF])[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Tangut}]){1,1000}/yu;
-  TAB_RE = /\t{1,1000}/y;
-  EMOJI_RE = /[\u{1F1E6}-\u{1F1FF}]{2}|\u{1F3F4}[\u{E0061}-\u{E007A}]{2}[\u{E0030}-\u{E0039}\u{E0061}-\u{E007A}]{1,3}\u{E007F}|(?:\p{Emoji}\uFE0F\u20E3?|\p{Emoji_Modifier_Base}\p{Emoji_Modifier}?|\p{Emoji_Presentation})(?:\u200D(?:\p{Emoji_Modifier_Base}\p{Emoji_Modifier}?|\p{Emoji_Presentation}|\p{Emoji}\uFE0F\u20E3?))*/yu;
-  LATIN_RE = /(?:[\x20-\x7E\xA0-\xFF](?!\uFE0F)){1,1000}/y;
-  MODIFIER_RE = /\p{M}+/gu;
-  NO_TRUNCATION = { limit: Infinity, ellipsis: "" };
-  dist_default = getStringTruncatedWidth;
-});
-
-// node_modules/fast-string-width/dist/index.js
-var NO_TRUNCATION2, fastStringWidth = (input, options = {}) => {
-  return dist_default(input, NO_TRUNCATION2, options).width;
-}, dist_default2;
-var init_dist2 = __esm(() => {
-  init_dist();
-  NO_TRUNCATION2 = {
-    limit: Infinity,
-    ellipsis: "",
-    ellipsisWidth: 0
-  };
-  dist_default2 = fastStringWidth;
-});
-
-// node_modules/fast-wrap-ansi/lib/main.js
-function wrapAnsi(string, columns, options) {
-  return String(string).normalize().split(CRLF_OR_LF).map((line) => exec(line, columns, options)).join(`
-`);
-}
-var ESC = "\x1B", CSI = "", END_CODE = 39, ANSI_ESCAPE_BELL = "\x07", ANSI_CSI = "[", ANSI_OSC = "]", ANSI_SGR_TERMINATOR = "m", ANSI_ESCAPE_LINK, GROUP_REGEX, getClosingCode = (openingCode) => {
-  if (openingCode >= 30 && openingCode <= 37)
-    return 39;
-  if (openingCode >= 90 && openingCode <= 97)
-    return 39;
-  if (openingCode >= 40 && openingCode <= 47)
-    return 49;
-  if (openingCode >= 100 && openingCode <= 107)
-    return 49;
-  if (openingCode === 1 || openingCode === 2)
-    return 22;
-  if (openingCode === 3)
-    return 23;
-  if (openingCode === 4)
-    return 24;
-  if (openingCode === 7)
-    return 27;
-  if (openingCode === 8)
-    return 28;
-  if (openingCode === 9)
-    return 29;
-  if (openingCode === 0)
-    return 0;
-  return;
-}, wrapAnsiCode = (code) => `${ESC}${ANSI_CSI}${code}${ANSI_SGR_TERMINATOR}`, wrapAnsiHyperlink = (url) => `${ESC}${ANSI_ESCAPE_LINK}${url}${ANSI_ESCAPE_BELL}`, wrapWord = (rows, word, columns) => {
-  const characters = word[Symbol.iterator]();
-  let isInsideEscape = false;
-  let isInsideLinkEscape = false;
-  let lastRow = rows.at(-1);
-  let visible = lastRow === undefined ? 0 : dist_default2(lastRow);
-  let currentCharacter = characters.next();
-  let nextCharacter = characters.next();
-  let rawCharacterIndex = 0;
-  while (!currentCharacter.done) {
-    const character = currentCharacter.value;
-    const characterLength = dist_default2(character);
-    if (visible + characterLength <= columns) {
-      rows[rows.length - 1] += character;
-    } else {
-      rows.push(character);
-      visible = 0;
-    }
-    if (character === ESC || character === CSI) {
-      isInsideEscape = true;
-      isInsideLinkEscape = word.startsWith(ANSI_ESCAPE_LINK, rawCharacterIndex + 1);
-    }
-    if (isInsideEscape) {
-      if (isInsideLinkEscape) {
-        if (character === ANSI_ESCAPE_BELL) {
-          isInsideEscape = false;
-          isInsideLinkEscape = false;
-        }
-      } else if (character === ANSI_SGR_TERMINATOR) {
-        isInsideEscape = false;
-      }
-    } else {
-      visible += characterLength;
-      if (visible === columns && !nextCharacter.done) {
-        rows.push("");
-        visible = 0;
-      }
-    }
-    currentCharacter = nextCharacter;
-    nextCharacter = characters.next();
-    rawCharacterIndex += character.length;
-  }
-  lastRow = rows.at(-1);
-  if (!visible && lastRow !== undefined && lastRow.length && rows.length > 1) {
-    rows[rows.length - 2] += rows.pop();
-  }
-}, stringVisibleTrimSpacesRight = (string) => {
-  const words = string.split(" ");
-  let last = words.length;
-  while (last) {
-    if (dist_default2(words[last - 1])) {
-      break;
-    }
-    last--;
-  }
-  if (last === words.length) {
-    return string;
-  }
-  return words.slice(0, last).join(" ") + words.slice(last).join("");
-}, exec = (string, columns, options = {}) => {
-  if (options.trim !== false && string.trim() === "") {
-    return "";
-  }
-  let returnValue = "";
-  let escapeCode;
-  let escapeUrl;
-  const words = string.split(" ");
-  let rows = [""];
-  let rowLength = 0;
-  for (let index = 0;index < words.length; index++) {
-    const word = words[index];
-    if (options.trim !== false) {
-      const row = rows.at(-1) ?? "";
-      const trimmed = row.trimStart();
-      if (row.length !== trimmed.length) {
-        rows[rows.length - 1] = trimmed;
-        rowLength = dist_default2(trimmed);
-      }
-    }
-    if (index !== 0) {
-      if (rowLength >= columns && (options.wordWrap === false || options.trim === false)) {
-        rows.push("");
-        rowLength = 0;
-      }
-      if (rowLength || options.trim === false) {
-        rows[rows.length - 1] += " ";
-        rowLength++;
-      }
-    }
-    const wordLength = dist_default2(word);
-    if (options.hard && wordLength > columns) {
-      const remainingColumns = columns - rowLength;
-      const breaksStartingThisLine = 1 + Math.floor((wordLength - remainingColumns - 1) / columns);
-      const breaksStartingNextLine = Math.floor((wordLength - 1) / columns);
-      if (breaksStartingNextLine < breaksStartingThisLine) {
-        rows.push("");
-      }
-      wrapWord(rows, word, columns);
-      rowLength = dist_default2(rows.at(-1) ?? "");
-      continue;
-    }
-    if (rowLength + wordLength > columns && rowLength && wordLength) {
-      if (options.wordWrap === false && rowLength < columns) {
-        wrapWord(rows, word, columns);
-        rowLength = dist_default2(rows.at(-1) ?? "");
-        continue;
-      }
-      rows.push("");
-      rowLength = 0;
-    }
-    if (rowLength + wordLength > columns && options.wordWrap === false) {
-      wrapWord(rows, word, columns);
-      rowLength = dist_default2(rows.at(-1) ?? "");
-      continue;
-    }
-    rows[rows.length - 1] += word;
-    rowLength += wordLength;
-  }
-  if (options.trim !== false) {
-    rows = rows.map((row) => stringVisibleTrimSpacesRight(row));
-  }
-  const preString = rows.join(`
-`);
-  let inSurrogate = false;
-  for (let i = 0;i < preString.length; i++) {
-    const character = preString[i];
-    returnValue += character;
-    if (!inSurrogate) {
-      inSurrogate = character >= "\uD800" && character <= "\uDBFF";
-      if (inSurrogate) {
-        continue;
-      }
-    } else {
-      inSurrogate = false;
-    }
-    if (character === ESC || character === CSI) {
-      GROUP_REGEX.lastIndex = i + 1;
-      const groupsResult = GROUP_REGEX.exec(preString);
-      const groups = groupsResult?.groups;
-      if (groups?.code !== undefined) {
-        const code = Number.parseFloat(groups.code);
-        escapeCode = code === END_CODE ? undefined : code;
-      } else if (groups?.uri !== undefined) {
-        escapeUrl = groups.uri.length === 0 ? undefined : groups.uri;
-      }
-    }
-    if (preString[i + 1] === `
-`) {
-      if (escapeUrl) {
-        returnValue += wrapAnsiHyperlink("");
-      }
-      const closingCode = escapeCode ? getClosingCode(escapeCode) : undefined;
-      if (escapeCode && closingCode) {
-        returnValue += wrapAnsiCode(closingCode);
-      }
-    } else if (character === `
-`) {
-      if (escapeCode && getClosingCode(escapeCode)) {
-        returnValue += wrapAnsiCode(escapeCode);
-      }
-      if (escapeUrl) {
-        returnValue += wrapAnsiHyperlink(escapeUrl);
-      }
-    }
-  }
-  return returnValue;
-}, CRLF_OR_LF;
-var init_main = __esm(() => {
-  init_dist2();
-  ANSI_ESCAPE_LINK = `${ANSI_OSC}8;;`;
-  GROUP_REGEX = new RegExp(`(?:\\${ANSI_CSI}(?<code>\\d+)m|\\${ANSI_ESCAPE_LINK}(?<uri>.*)${ANSI_ESCAPE_BELL})`, "y");
-  CRLF_OR_LF = /\r?\n/;
-});
-
-// node_modules/sisteransi/src/index.js
-var require_src = __commonJS((exports, module) => {
-  var ESC2 = "\x1B";
-  var CSI2 = `${ESC2}[`;
-  var beep = "\x07";
-  var cursor = {
-    to(x, y) {
-      if (!y)
-        return `${CSI2}${x + 1}G`;
-      return `${CSI2}${y + 1};${x + 1}H`;
-    },
-    move(x, y) {
-      let ret = "";
-      if (x < 0)
-        ret += `${CSI2}${-x}D`;
-      else if (x > 0)
-        ret += `${CSI2}${x}C`;
-      if (y < 0)
-        ret += `${CSI2}${-y}A`;
-      else if (y > 0)
-        ret += `${CSI2}${y}B`;
-      return ret;
-    },
-    up: (count = 1) => `${CSI2}${count}A`,
-    down: (count = 1) => `${CSI2}${count}B`,
-    forward: (count = 1) => `${CSI2}${count}C`,
-    backward: (count = 1) => `${CSI2}${count}D`,
-    nextLine: (count = 1) => `${CSI2}E`.repeat(count),
-    prevLine: (count = 1) => `${CSI2}F`.repeat(count),
-    left: `${CSI2}G`,
-    hide: `${CSI2}?25l`,
-    show: `${CSI2}?25h`,
-    save: `${ESC2}7`,
-    restore: `${ESC2}8`
-  };
-  var scroll = {
-    up: (count = 1) => `${CSI2}S`.repeat(count),
-    down: (count = 1) => `${CSI2}T`.repeat(count)
-  };
-  var erase = {
-    screen: `${CSI2}2J`,
-    up: (count = 1) => `${CSI2}1J`.repeat(count),
-    down: (count = 1) => `${CSI2}J`.repeat(count),
-    line: `${CSI2}2K`,
-    lineEnd: `${CSI2}K`,
-    lineStart: `${CSI2}1K`,
-    lines(count) {
-      let clear = "";
-      for (let i = 0;i < count; i++)
-        clear += this.line + (i < count - 1 ? cursor.up() : "");
-      if (count)
-        clear += cursor.left;
-      return clear;
-    }
-  };
-  module.exports = { cursor, scroll, erase, beep };
-});
-
-// node_modules/@clack/core/dist/index.mjs
-import { styleText } from "node:util";
-import { stdout, stdin } from "node:process";
-import * as l from "node:readline";
-import l__default from "node:readline";
-import { ReadStream } from "node:tty";
-function findCursor(s, o, l2) {
-  if (!l2.some((r) => !r.disabled))
-    return s;
-  const t = s + o, n = Math.max(l2.length - 1, 0), e = t < 0 ? n : t > n ? 0 : t;
-  return l2[e]?.disabled ? findCursor(e, o < 0 ? -1 : 1, l2) : e;
-}
-function findTextCursor(s, o, l2, i) {
-  const t = i.split(`
-`);
-  let n = 0, e = s;
-  for (const r of t) {
-    if (e <= r.length)
-      break;
-    e -= r.length + 1, n++;
-  }
-  for (n = Math.max(0, Math.min(t.length - 1, n + l2)), e = Math.min(e, t[n].length) + o;e < 0 && n > 0; )
-    n--, e += t[n].length + 1;
-  for (;e > t[n].length && n < t.length - 1; )
-    e -= t[n].length + 1, n++;
-  e = Math.max(0, Math.min(t[n].length, e));
-  let h = 0;
-  for (let r = 0;r < n; r++)
-    h += t[r].length + 1;
-  return h + e;
-}
-function updateSettings(n) {
-  if (n.aliases !== undefined) {
-    const e = n.aliases;
-    for (const s in e) {
-      if (!Object.hasOwn(e, s))
-        continue;
-      const i = e[s];
-      i === undefined || !settings.actions.has(i) || settings.aliases.has(s) || settings.aliases.set(s, i);
-    }
-  }
-  if (n.messages !== undefined) {
-    const e = n.messages;
-    e.cancel !== undefined && (settings.messages.cancel = e.cancel), e.error !== undefined && (settings.messages.error = e.error);
-  }
-  if (n.withGuide !== undefined && (settings.withGuide = n.withGuide !== false), n.date !== undefined) {
-    const e = n.date;
-    e.monthNames !== undefined && (settings.date.monthNames = [...e.monthNames]), e.messages !== undefined && (e.messages.required !== undefined && (settings.date.messages.required = e.messages.required), e.messages.invalidMonth !== undefined && (settings.date.messages.invalidMonth = e.messages.invalidMonth), e.messages.invalidDay !== undefined && (settings.date.messages.invalidDay = e.messages.invalidDay), e.messages.afterMin !== undefined && (settings.date.messages.afterMin = e.messages.afterMin), e.messages.beforeMax !== undefined && (settings.date.messages.beforeMax = e.messages.beforeMax));
-  }
-}
-function isActionKey(n, e) {
-  if (typeof n == "string")
-    return settings.aliases.get(n) === e;
-  for (const s of n)
-    if (s !== undefined && isActionKey(s, e))
-      return true;
-  return false;
-}
-function diffLines(i, s) {
-  if (i === s)
-    return;
-  const e = i.split(`
-`), t2 = s.split(`
-`), r = Math.max(e.length, t2.length), f = [];
-  for (let n = 0;n < r; n++)
-    e[n] !== t2[n] && f.push(n);
-  return {
-    lines: f,
-    numLinesBefore: e.length,
-    numLinesAfter: t2.length,
-    numLines: r
-  };
-}
-function isCancel(e) {
-  return e === CANCEL_SYMBOL;
-}
-function setRawMode(e, r) {
-  const o = e;
-  o.isTTY && o.setRawMode(r);
-}
-function block({
-  input: e = stdin,
-  output: r = stdout,
-  overwrite: o = true,
-  hideCursor: t2 = true
-} = {}) {
-  const s = l.createInterface({
-    input: e,
-    output: r,
-    prompt: "",
-    tabSize: 1
-  });
-  l.emitKeypressEvents(e, s), e instanceof ReadStream && e.isTTY && e.setRawMode(true);
-  const n = (f, { name: a, sequence: p }) => {
-    const c = String(f);
-    if (isActionKey([c, a, p], "cancel")) {
-      t2 && r.write(import_sisteransi.cursor.show), process.exit(0);
-      return;
-    }
-    if (!o)
-      return;
-    const i = a === "return" ? 0 : -1, m = a === "return" ? -1 : 0;
-    l.moveCursor(r, i, m, () => {
-      l.clearLine(r, 1, () => {
-        e.once("keypress", n);
-      });
-    });
-  };
-  return t2 && r.write(import_sisteransi.cursor.hide), e.once("keypress", n), () => {
-    e.off("keypress", n), t2 && r.write(import_sisteransi.cursor.show), e instanceof ReadStream && e.isTTY && !R && e.setRawMode(false), s.terminal = false, s.close();
-  };
-}
-function wrapTextWithPrefix(e, r, o, t2 = o, s = o, n) {
-  const f = getColumns(e ?? stdout);
-  return wrapAnsi(r, f - o.length, {
-    hard: true,
-    trim: false
-  }).split(`
-`).map((c, i, m) => {
-    const d = n ? n(c, i) : c;
-    return i === 0 ? `${t2}${d}` : i === m.length - 1 ? `${s}${d}` : `${o}${d}`;
-  }).join(`
-`);
-}
-function runValidation(e, n) {
-  if ("~standard" in e) {
-    const a = e["~standard"].validate(n);
-    if (a instanceof Promise)
-      throw new TypeError("Schema validation must be synchronous. Update `validate()` and remove any asynchronous logic.");
-    return a.issues?.at(0)?.message;
-  }
-  return e(n);
-}
-
-class V {
-  input;
-  output;
-  _abortSignal;
-  rl;
-  opts;
-  _render;
-  _track = false;
-  _prevFrame = "";
-  _subscribers = /* @__PURE__ */ new Map;
-  _cursor = 0;
-  state = "initial";
-  error = "";
-  value;
-  userInput = "";
-  constructor(t2, e = true) {
-    const { input: i = stdin, output: n = stdout, render: s, signal: r, ...o } = t2;
-    this.opts = o, this.onKeypress = this.onKeypress.bind(this), this.close = this.close.bind(this), this.render = this.render.bind(this), this._render = s.bind(this), this._track = e, this._abortSignal = r, this.input = i, this.output = n;
-  }
-  unsubscribe() {
-    this._subscribers.clear();
-  }
-  setSubscriber(t2, e) {
-    const i = this._subscribers.get(t2) ?? [];
-    i.push(e), this._subscribers.set(t2, i);
-  }
-  on(t2, e) {
-    this.setSubscriber(t2, { cb: e });
-  }
-  once(t2, e) {
-    this.setSubscriber(t2, { cb: e, once: true });
-  }
-  emit(t2, ...e) {
-    const i = this._subscribers.get(t2) ?? [], n = [];
-    for (const s of i)
-      s.cb(...e), s.once && n.push(() => i.splice(i.indexOf(s), 1));
-    for (const s of n)
-      s();
-  }
-  prompt() {
-    return new Promise((t2) => {
-      if (this._abortSignal) {
-        if (this._abortSignal.aborted)
-          return this.state = "cancel", this.close(), t2(CANCEL_SYMBOL);
-        this._abortSignal.addEventListener("abort", () => {
-          this.state = "cancel", this.close();
-        }, { once: true });
-      }
-      this.rl = l__default.createInterface({
-        input: this.input,
-        tabSize: 2,
-        prompt: "",
-        escapeCodeTimeout: 50,
-        terminal: true
-      }), this.rl.prompt(), this.opts.initialUserInput !== undefined && this._setUserInput(this.opts.initialUserInput, true), this.input.on("keypress", this.onKeypress), setRawMode(this.input, true), this.output.on("resize", this.render), this.render(), this.once("submit", () => {
-        this.output.write(import_sisteransi.cursor.show), this.output.off("resize", this.render), setRawMode(this.input, false), t2(this.value);
-      }), this.once("cancel", () => {
-        this.output.write(import_sisteransi.cursor.show), this.output.off("resize", this.render), setRawMode(this.input, false), t2(CANCEL_SYMBOL);
-      });
-    });
-  }
-  _isActionKey(t2, e) {
-    return t2 === "\t";
-  }
-  _shouldSubmit(t2, e) {
-    return true;
-  }
-  _setValue(t2) {
-    this.value = t2, this.emit("value", this.value);
-  }
-  _setUserInput(t2, e) {
-    this.userInput = t2 ?? "", this.emit("userInput", this.userInput), e && this._track && this.rl && (this.rl.write(this.userInput), this._cursor = this.rl.cursor);
-  }
-  _clearUserInput() {
-    this.rl?.write(null, { ctrl: true, name: "u" }), this._setUserInput("");
-  }
-  onKeypress(t2, e) {
-    if (this._track && e.name !== "return" && (e.name && this._isActionKey(t2, e) && this.rl?.write(null, { ctrl: true, name: "h" }), this._cursor = this.rl?.cursor ?? 0, this._setUserInput(this.rl?.line)), this.state === "error" && (this.state = "active"), e?.name && (!this._track && settings.aliases.has(e.name) && this.emit("cursor", settings.aliases.get(e.name)), settings.actions.has(e.name) && this.emit("cursor", e.name)), t2 && (t2.toLowerCase() === "y" || t2.toLowerCase() === "n") && this.emit("confirm", t2.toLowerCase() === "y"), this.emit("key", t2, e), e?.name === "return" && this._shouldSubmit(t2, e)) {
-      if (this.opts.validate) {
-        const i = runValidation(this.opts.validate, this.value);
-        i && (this.error = i instanceof Error ? i.message : i, this.state = "error", this.rl?.write(this.userInput));
-      }
-      this.state !== "error" && (this.state = "submit");
-    }
-    isActionKey([t2, e?.name, e?.sequence], "cancel") && (this.state = "cancel"), (this.state === "submit" || this.state === "cancel") && this.emit("finalize"), this.render(), (this.state === "submit" || this.state === "cancel") && this.close();
-  }
-  close() {
-    this.input.unpipe(), this.input.removeListener("keypress", this.onKeypress), this.output.write(`
-`), setRawMode(this.input, false), this.rl?.close(), this.rl = undefined, this.emit(`${this.state}`, this.value), this.unsubscribe();
-  }
-  restoreCursor() {
-    const t2 = wrapAnsi(this._prevFrame, process.stdout.columns, { hard: true, trim: false }).split(`
-`).length - 1;
-    this.output.write(import_sisteransi.cursor.move(-999, t2 * -1));
-  }
-  render() {
-    const t2 = wrapAnsi(this._render(this) ?? "", process.stdout.columns, {
-      hard: true,
-      trim: false
-    });
-    if (t2 !== this._prevFrame) {
-      if (this.state === "initial")
-        this.output.write(import_sisteransi.cursor.hide);
-      else {
-        const e = diffLines(this._prevFrame, t2), i = getRows(this.output);
-        if (this.restoreCursor(), e) {
-          const n = Math.max(0, e.numLinesAfter - i), s = Math.max(0, e.numLinesBefore - i);
-          let r = e.lines.find((o) => o >= n);
-          if (r === undefined) {
-            this._prevFrame = t2;
-            return;
-          }
-          if (e.lines.length === 1) {
-            this.output.write(import_sisteransi.cursor.move(0, r - s)), this.output.write(import_sisteransi.erase.lines(1));
-            const o = t2.split(`
-`);
-            this.output.write(o[r]), this._prevFrame = t2, this.output.write(import_sisteransi.cursor.move(0, o.length - r - 1));
-            return;
-          } else if (e.lines.length > 1) {
-            if (n < s)
-              r = n;
-            else {
-              const h = r - s;
-              h > 0 && this.output.write(import_sisteransi.cursor.move(0, h));
-            }
-            this.output.write(import_sisteransi.erase.down());
-            const f = t2.split(`
-`).slice(r);
-            this.output.write(f.join(`
-`)), this._prevFrame = t2;
-            return;
-          }
-        }
-        this.output.write(import_sisteransi.erase.down());
-      }
-      this.output.write(t2), this.state === "initial" && (this.state = "active"), this._prevFrame = t2;
-    }
-  }
-}
-function p$1(l2, e) {
-  if (l2 === undefined || e.length === 0)
-    return 0;
-  const i = e.findIndex((s) => s.value === l2);
-  return i !== -1 ? i : 0;
-}
-function g(l2, e) {
-  return (e.label ?? String(e.value)).toLowerCase().includes(l2.toLowerCase());
-}
-function m(l2, e) {
-  if (e)
-    return l2 ? e : e[0];
-}
-function M(r2) {
-  return [...r2].map((t2) => _[t2]);
-}
-function P(r2) {
-  const i = new Intl.DateTimeFormat(r2, {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit"
-  }).formatToParts(new Date(2000, 0, 15)), s = [];
-  let n = "/";
-  for (const e of i)
-    e.type === "literal" ? n = e.value.trim() || e.value : (e.type === "year" || e.type === "month" || e.type === "day") && s.push({ type: e.type, len: e.type === "year" ? 4 : 2 });
-  return { segments: s, separator: n };
-}
-function p(r2) {
-  return Number.parseInt((r2 || "0").replace(/_/g, "0"), 10) || 0;
-}
-function f(r2) {
-  return {
-    year: p(r2.year),
-    month: p(r2.month),
-    day: p(r2.day)
-  };
-}
-function c(r2, t2) {
-  return new Date(r2 || 2001, t2 || 1, 0).getDate();
-}
-function b(r2) {
-  const { year: t2, month: i, day: s } = f(r2);
-  if (!t2 || t2 < 0 || t2 > 9999 || !i || i < 1 || i > 12 || !s || s < 1)
-    return;
-  const n = new Date(Date.UTC(t2, i - 1, s));
-  if (!(n.getUTCFullYear() !== t2 || n.getUTCMonth() !== i - 1 || n.getUTCDate() !== s))
-    return { year: t2, month: i, day: s };
-}
-function C(r2) {
-  const t2 = b(r2);
-  return t2 ? new Date(Date.UTC(t2.year, t2.month - 1, t2.day)) : undefined;
-}
-function T2(r2, t2, i, s) {
-  const n = i ? {
-    year: i.getUTCFullYear(),
-    month: i.getUTCMonth() + 1,
-    day: i.getUTCDate()
-  } : null, e = s ? {
-    year: s.getUTCFullYear(),
-    month: s.getUTCMonth() + 1,
-    day: s.getUTCDate()
-  } : null;
-  return r2 === "year" ? { min: n?.year ?? 1, max: e?.year ?? 9999 } : r2 === "month" ? {
-    min: n && t2.year === n.year ? n.month : 1,
-    max: e && t2.year === e.year ? e.month : 12
-  } : {
-    min: n && t2.year === n.year && t2.month === n.month ? n.day : 1,
-    max: e && t2.year === e.year && t2.month === e.month ? e.day : c(t2.year, t2.month)
-  };
-}
-var import_sisteransi, a$1, t, settings, R, CANCEL_SYMBOL, getColumns = (e) => ("columns" in e) && typeof e.columns == "number" ? e.columns : 80, getRows = (e) => ("rows" in e) && typeof e.rows == "number" ? e.rows : 20, T$1, r, _, U, u$2, o, h, a, u$1, n$1, u3, n2;
-var init_dist3 = __esm(() => {
-  init_main();
-  import_sisteransi = __toESM(require_src(), 1);
-  a$1 = ["up", "down", "left", "right", "space", "enter", "cancel"];
-  t = [
-    "January",
-    "February",
-    "March",
-    "April",
-    "May",
-    "June",
-    "July",
-    "August",
-    "September",
-    "October",
-    "November",
-    "December"
-  ];
-  settings = {
-    actions: new Set(a$1),
-    aliases: /* @__PURE__ */ new Map([
-      ["k", "up"],
-      ["j", "down"],
-      ["h", "left"],
-      ["l", "right"],
-      ["\x03", "cancel"],
-      ["escape", "cancel"]
-    ]),
-    messages: {
-      cancel: "Canceled",
-      error: "Something went wrong"
-    },
-    withGuide: true,
-    date: {
-      monthNames: [...t],
-      messages: {
-        required: "Please enter a valid date",
-        invalidMonth: "There are only 12 months in a year",
-        invalidDay: (n, e) => `There are only ${n} days in ${e}`,
-        afterMin: (n) => `Date must be on or after ${n.toISOString().slice(0, 10)}`,
-        beforeMax: (n) => `Date must be on or before ${n.toISOString().slice(0, 10)}`
-      }
-    }
-  };
-  R = globalThis.process.platform.startsWith("win");
-  CANCEL_SYMBOL = Symbol("clack:cancel");
-  T$1 = class T extends V {
-    filteredOptions;
-    multiple;
-    isNavigating = false;
-    selectedValues = [];
-    focusedValue;
-    #e = 0;
-    #s = "";
-    #t;
-    #i;
-    #n;
-    get cursor() {
-      return this.#e;
-    }
-    get userInputWithCursor() {
-      if (!this.userInput)
-        return styleText(["inverse", "hidden"], "_");
-      if (this._cursor >= this.userInput.length)
-        return `${this.userInput}█`;
-      const e = this.userInput.slice(0, this.cursor), t2 = this.userInput.slice(this.cursor, this.cursor + 1), i = this.userInput.slice(this.cursor + 1);
-      return `${e}${styleText("inverse", t2)}${i}`;
-    }
-    get options() {
-      return typeof this.#i == "function" ? this.#i() : this.#i;
-    }
-    constructor(e) {
-      super(e), this.#i = e.options, this.#n = e.placeholder;
-      const t2 = this.options;
-      this.filteredOptions = [...t2], this.multiple = e.multiple === true, this.#t = typeof e.options == "function" ? e.filter : e.filter ?? g;
-      let i;
-      if (e.initialValue && Array.isArray(e.initialValue) ? this.multiple ? i = e.initialValue : i = e.initialValue.slice(0, 1) : !this.multiple && this.options.length > 0 && (i = [this.options[0]?.value]), i)
-        for (const s of i) {
-          const n = t2.findIndex((o) => o.value === s);
-          n !== -1 && (this.toggleSelected(s), this.#e = n);
-        }
-      this.focusedValue = this.options[this.#e]?.value, this.on("key", (s, n) => this.#l(s, n)), this.on("userInput", (s) => this.#u(s));
-    }
-    _isActionKey(e, t2) {
-      return e === "\t" || this.multiple && this.isNavigating && t2.name === "space" && e !== undefined && e !== "";
-    }
-    #l(e, t2) {
-      const i = t2.name === "up", s = t2.name === "down", n = t2.name === "return", o = this.userInput === "" || this.userInput === "\t", u = this.#n, a = this.options, f = u !== undefined && u !== "" && a.some((r) => !r.disabled && (this.#t ? this.#t(u, r) : true));
-      if (t2.name === "tab" && o && f) {
-        this.userInput === "\t" && this._clearUserInput(), this._setUserInput(u, true), this.isNavigating = false;
-        return;
-      }
-      i || s ? (this.#e = findCursor(this.#e, i ? -1 : 1, this.filteredOptions), this.focusedValue = this.filteredOptions[this.#e]?.value, this.multiple || (this.selectedValues = [this.focusedValue]), this.isNavigating = true) : n ? this.value = m(this.multiple, this.selectedValues) : this.multiple ? this.focusedValue !== undefined && (t2.name === "tab" || this.isNavigating && t2.name === "space") ? this.toggleSelected(this.focusedValue) : this.isNavigating = false : (this.focusedValue && (this.selectedValues = [this.focusedValue]), this.isNavigating = false);
-    }
-    deselectAll() {
-      this.selectedValues = [];
-    }
-    toggleSelected(e) {
-      this.filteredOptions.length !== 0 && (this.multiple ? this.selectedValues.includes(e) ? this.selectedValues = this.selectedValues.filter((t2) => t2 !== e) : this.selectedValues = [...this.selectedValues, e] : this.selectedValues = [e]);
-    }
-    #u(e) {
-      if (e !== this.#s) {
-        this.#s = e;
-        const t2 = this.options;
-        e && this.#t ? this.filteredOptions = t2.filter((n) => this.#t?.(e, n)) : this.filteredOptions = [...t2];
-        const i = p$1(this.focusedValue, this.filteredOptions);
-        this.#e = findCursor(i, 0, this.filteredOptions);
-        const s = this.filteredOptions[this.#e];
-        s && !s.disabled ? this.focusedValue = s.value : this.focusedValue = undefined, this.multiple || (this.focusedValue !== undefined ? this.toggleSelected(this.focusedValue) : this.deselectAll());
-      }
-    }
-  };
-  r = class r extends V {
-    get cursor() {
-      return this.value ? 0 : 1;
-    }
-    get _value() {
-      return this.cursor === 0;
-    }
-    constructor(t2) {
-      super(t2, false), this.value = !!t2.initialValue, this.on("userInput", () => {
-        this.value = this._value;
-      }), this.on("confirm", (i) => {
-        this.output.write(import_sisteransi.cursor.move(0, -1)), this.value = i, this.state = "submit", this.close();
-      }), this.on("cursor", () => {
-        this.value = !this.value;
-      });
-    }
-  };
-  _ = {
-    Y: { type: "year", len: 4 },
-    M: { type: "month", len: 2 },
-    D: { type: "day", len: 2 }
-  };
-  U = class U extends V {
-    #i;
-    #o;
-    #t;
-    #h;
-    #u;
-    #e = { segmentIndex: 0, positionInSegment: 0 };
-    #n = true;
-    #s = null;
-    inlineError = "";
-    get segmentCursor() {
-      return { ...this.#e };
-    }
-    get segmentValues() {
-      return { ...this.#t };
-    }
-    get segments() {
-      return this.#i;
-    }
-    get separator() {
-      return this.#o;
-    }
-    get formattedValue() {
-      return this.#l(this.#t);
-    }
-    #l(t2) {
-      return this.#i.map((i) => t2[i.type]).join(this.#o);
-    }
-    #r() {
-      this._setUserInput(this.#l(this.#t)), this._setValue(C(this.#t) ?? undefined);
-    }
-    constructor(t2) {
-      const i = t2.format ? { segments: M(t2.format), separator: t2.separator ?? "/" } : P(t2.locale), s = t2.separator ?? i.separator, n = t2.format ? M(t2.format) : i.segments, e = t2.initialValue ?? t2.defaultValue, m2 = e ? {
-        year: String(e.getUTCFullYear()).padStart(4, "0"),
-        month: String(e.getUTCMonth() + 1).padStart(2, "0"),
-        day: String(e.getUTCDate()).padStart(2, "0")
-      } : { year: "____", month: "__", day: "__" }, o = n.map((a) => m2[a.type]).join(s);
-      super({ ...t2, initialUserInput: o }, false), this.#i = n, this.#o = s, this.#t = m2, this.#h = t2.minDate, this.#u = t2.maxDate, this.#r(), this.on("cursor", (a) => this.#f(a)), this.on("key", (a, u) => this.#y(a, u)), this.on("finalize", () => this.#p(t2));
-    }
-    #a() {
-      const t2 = Math.max(0, Math.min(this.#e.segmentIndex, this.#i.length - 1)), i = this.#i[t2];
-      if (i)
-        return this.#e.positionInSegment = Math.max(0, Math.min(this.#e.positionInSegment, i.len - 1)), { segment: i, index: t2 };
-    }
-    #m(t2) {
-      this.inlineError = "", this.#s = null;
-      const i = this.#a();
-      i && (this.#e.segmentIndex = Math.max(0, Math.min(this.#i.length - 1, i.index + t2)), this.#e.positionInSegment = 0, this.#n = true);
-    }
-    #d(t2) {
-      const i = this.#a();
-      if (!i)
-        return;
-      const { segment: s } = i, n = this.#t[s.type], e = !n || n.replace(/_/g, "") === "", m2 = Number.parseInt((n || "0").replace(/_/g, "0"), 10) || 0, o = T2(s.type, f(this.#t), this.#h, this.#u);
-      let a;
-      e ? a = t2 === 1 ? o.min : o.max : a = Math.max(Math.min(o.max, m2 + t2), o.min), this.#t = {
-        ...this.#t,
-        [s.type]: a.toString().padStart(s.len, "0")
-      }, this.#n = true, this.#s = null, this.#r();
-    }
-    #f(t2) {
-      if (t2)
-        switch (t2) {
-          case "right":
-            return this.#m(1);
-          case "left":
-            return this.#m(-1);
-          case "up":
-            return this.#d(1);
-          case "down":
-            return this.#d(-1);
-        }
-    }
-    #y(t2, i) {
-      if (i?.name === "backspace" || i?.sequence === "" || i?.sequence === "\b" || t2 === "" || t2 === "\b") {
-        this.inlineError = "";
-        const n = this.#a();
-        if (!n)
-          return;
-        if (!this.#t[n.segment.type].replace(/_/g, "")) {
-          this.#m(-1);
-          return;
-        }
-        this.#t[n.segment.type] = "_".repeat(n.segment.len), this.#n = true, this.#e.positionInSegment = 0, this.#r();
-        return;
-      }
-      if (i?.name === "tab") {
-        this.inlineError = "";
-        const n = this.#a();
-        if (!n)
-          return;
-        const e = i.shift ? -1 : 1, m2 = n.index + e;
-        m2 >= 0 && m2 < this.#i.length && (this.#e.segmentIndex = m2, this.#e.positionInSegment = 0, this.#n = true);
-        return;
-      }
-      if (t2 && /^[0-9]$/.test(t2)) {
-        const n = this.#a();
-        if (!n)
-          return;
-        const { segment: e } = n, m2 = !this.#t[e.type].replace(/_/g, "");
-        if (this.#n && this.#s !== null && !m2) {
-          const h = this.#s + t2, d = { ...this.#t, [e.type]: h }, g2 = this.#g(d, e);
-          if (g2) {
-            this.inlineError = g2, this.#s = null, this.#n = false;
-            return;
-          }
-          this.inlineError = "", this.#t[e.type] = h, this.#s = null, this.#n = false, this.#r(), n.index < this.#i.length - 1 && (this.#e.segmentIndex = n.index + 1, this.#e.positionInSegment = 0, this.#n = true);
-          return;
-        }
-        this.#n && !m2 && (this.#t[e.type] = "_".repeat(e.len), this.#e.positionInSegment = 0), this.#n = false, this.#s = null;
-        const o = this.#t[e.type], a = o.indexOf("_"), u = a >= 0 ? a : Math.min(this.#e.positionInSegment, e.len - 1);
-        if (u < 0 || u >= e.len)
-          return;
-        let l2 = o.slice(0, u) + t2 + o.slice(u + 1), D = false;
-        if (u === 0 && o === "__" && (e.type === "month" || e.type === "day")) {
-          const h = Number.parseInt(t2, 10);
-          l2 = `0${t2}`, D = h <= (e.type === "month" ? 1 : 2);
-        }
-        if (e.type === "year" && (l2 = (o.replace(/_/g, "") + t2).padStart(e.len, "_")), !l2.includes("_")) {
-          const h = { ...this.#t, [e.type]: l2 }, d = this.#g(h, e);
-          if (d) {
-            this.inlineError = d;
-            return;
-          }
-        }
-        this.inlineError = "", this.#t[e.type] = l2;
-        const y = l2.includes("_") ? undefined : b(this.#t);
-        if (y) {
-          const { year: h, month: d } = y, g2 = c(h, d);
-          this.#t = {
-            year: String(Math.max(0, Math.min(9999, h))).padStart(4, "0"),
-            month: String(Math.max(1, Math.min(12, d))).padStart(2, "0"),
-            day: String(Math.max(1, Math.min(g2, y.day))).padStart(2, "0")
-          };
-        }
-        this.#r();
-        const S = l2.indexOf("_");
-        D ? (this.#n = true, this.#s = t2) : S >= 0 ? this.#e.positionInSegment = S : a >= 0 && n.index < this.#i.length - 1 ? (this.#e.segmentIndex = n.index + 1, this.#e.positionInSegment = 0, this.#n = true) : this.#e.positionInSegment = Math.min(u + 1, e.len - 1);
-      }
-    }
-    #g(t2, i) {
-      const { month: s, day: n } = f(t2);
-      if (i.type === "month" && (s < 0 || s > 12))
-        return settings.date.messages.invalidMonth;
-      if (i.type === "day" && (n < 0 || n > 31))
-        return settings.date.messages.invalidDay(31, "any month");
-    }
-    #p(t2) {
-      const { year: i, month: s, day: n } = f(this.#t);
-      if (i && s && n) {
-        const e = c(i, s);
-        this.#t = {
-          ...this.#t,
-          day: String(Math.min(n, e)).padStart(2, "0")
-        };
-      }
-      this.value = C(this.#t) ?? t2.defaultValue ?? undefined;
-    }
-  };
-  u$2 = class u extends V {
-    options;
-    cursor = 0;
-    #t;
-    getGroupItems(t2) {
-      return this.options.filter((r2) => r2.group === t2);
-    }
-    isGroupSelected(t2) {
-      const r2 = this.getGroupItems(t2), e = this.value;
-      return e === undefined ? false : r2.every((s) => e.includes(s.value));
-    }
-    toggleValue() {
-      const t2 = this.options[this.cursor];
-      if (t2 !== undefined)
-        if (this.value === undefined && (this.value = []), t2.group === true) {
-          const r2 = t2.value, e = this.getGroupItems(r2);
-          this.isGroupSelected(r2) ? this.value = this.value.filter((s) => e.findIndex((i) => i.value === s) === -1) : this.value = [...this.value, ...e.map((s) => s.value)], this.value = Array.from(new Set(this.value));
-        } else {
-          const r2 = this.value.includes(t2.value);
-          this.value = r2 ? this.value.filter((e) => e !== t2.value) : [...this.value, t2.value];
-        }
-    }
-    constructor(t2) {
-      super(t2, false);
-      const { options: r2 } = t2;
-      this.#t = t2.selectableGroups !== false, this.options = Object.entries(r2).flatMap(([e, s]) => [
-        { value: e, group: true, label: e },
-        ...s.map((i) => ({ ...i, group: e }))
-      ]), this.value = [...t2.initialValues ?? []], this.cursor = Math.max(this.options.findIndex(({ value: e }) => e === t2.cursorAt), this.#t ? 0 : 1), this.on("cursor", (e) => {
-        switch (e) {
-          case "left":
-          case "up": {
-            this.cursor = this.cursor === 0 ? this.options.length - 1 : this.cursor - 1;
-            const s = this.options[this.cursor]?.group === true;
-            !this.#t && s && (this.cursor = this.cursor === 0 ? this.options.length - 1 : this.cursor - 1);
-            break;
-          }
-          case "down":
-          case "right": {
-            this.cursor = this.cursor === this.options.length - 1 ? 0 : this.cursor + 1;
-            const s = this.options[this.cursor]?.group === true;
-            !this.#t && s && (this.cursor = this.cursor === this.options.length - 1 ? 0 : this.cursor + 1);
-            break;
-          }
-          case "space":
-            this.toggleValue();
-            break;
-        }
-      });
-    }
-  };
-  o = /* @__PURE__ */ new Set(["up", "down", "left", "right"]);
-  h = class h extends V {
-    #t = false;
-    #s;
-    focused = "editor";
-    get userInputWithCursor() {
-      if (this.state === "submit")
-        return this.userInput;
-      const t2 = this.userInput;
-      if (this.cursor >= t2.length)
-        return `${t2}█`;
-      const s = t2.slice(0, this.cursor), r2 = t2.slice(this.cursor, this.cursor + 1), i = t2.slice(this.cursor + 1);
-      return r2 === `
-` ? `${s}█
-${i}` : `${s}${styleText("inverse", r2)}${i}`;
-    }
-    get cursor() {
-      return this._cursor;
-    }
-    #r(t2) {
-      if (this.userInput.length === 0) {
-        this._setUserInput(t2);
-        return;
-      }
-      this._setUserInput(this.userInput.slice(0, this.cursor) + t2 + this.userInput.slice(this.cursor));
-    }
-    #i(t2) {
-      const s = this.value ?? "";
-      switch (t2) {
-        case "up":
-          this._cursor = findTextCursor(this._cursor, 0, -1, s);
-          return;
-        case "down":
-          this._cursor = findTextCursor(this._cursor, 0, 1, s);
-          return;
-        case "left":
-          this._cursor = findTextCursor(this._cursor, -1, 0, s);
-          return;
-        case "right":
-          this._cursor = findTextCursor(this._cursor, 1, 0, s);
-          return;
-      }
-    }
-    _shouldSubmit(t2, s) {
-      if (this.#s)
-        return this.focused === "submit" ? true : (this.#r(`
-`), this._cursor++, false);
-      const r2 = this.#t;
-      return this.#t = true, r2 && this.cursor === this.userInput.length ? (this.userInput[this.cursor - 1] === `
-` && (this._setUserInput(this.userInput.slice(0, this.cursor - 1) + this.userInput.slice(this.cursor)), this._cursor--), true) : (this.#r(`
-`), this._cursor++, false);
-    }
-    constructor(t2) {
-      const s = t2.initialUserInput ?? t2.initialValue;
-      super({
-        ...t2,
-        initialUserInput: s
-      }, false), s !== undefined && (this._cursor = s.length), this.#s = t2.showSubmit ?? false, this.on("key", (r2, i) => {
-        if (i?.name && o.has(i.name)) {
-          this.#t = false, this.#i(i.name);
-          return;
-        }
-        if (r2 === "\t" && this.#s) {
-          this.focused = this.focused === "editor" ? "submit" : "editor";
-          return;
-        }
-        if (i?.name !== "return") {
-          if (this.#t = false, i?.name === "backspace" && this.cursor > 0) {
-            this._setUserInput(this.userInput.slice(0, this.cursor - 1) + this.userInput.slice(this.cursor)), this._cursor--;
-            return;
-          }
-          if (i?.name === "delete" && this.cursor < this.userInput.length) {
-            this._setUserInput(this.userInput.slice(0, this.cursor) + this.userInput.slice(this.cursor + 1));
-            return;
-          }
-          r2 && (this.#s && this.focused === "submit" && (this.focused = "editor"), this.#r(r2 ?? ""), this._cursor++);
-        }
-      }), this.on("userInput", (r2) => {
-        this._setValue(r2);
-      }), this.on("finalize", () => {
-        this.value || (this.value = t2.defaultValue), this.value === undefined && (this.value = "");
-      });
-    }
-  };
-  a = class a extends V {
-    options;
-    cursor = 0;
-    get _value() {
-      return this.options[this.cursor]?.value;
-    }
-    get _enabledOptions() {
-      return this.options.filter((e) => e.disabled !== true);
-    }
-    toggleAll() {
-      const e = this._enabledOptions, i = this.value !== undefined && this.value.length === e.length;
-      this.value = i ? [] : e.map((t2) => t2.value);
-    }
-    toggleInvert() {
-      const e = this.value;
-      if (!e)
-        return;
-      const i = this._enabledOptions.filter((t2) => !e.includes(t2.value));
-      this.value = i.map((t2) => t2.value);
-    }
-    toggleValue() {
-      this.value === undefined && (this.value = []);
-      const e = this.value.includes(this._value);
-      this.value = e ? this.value.filter((i) => i !== this._value) : [...this.value, this._value];
-    }
-    constructor(e) {
-      super(e, false), this.options = e.options, this.value = [...e.initialValues ?? []];
-      const i = Math.max(this.options.findIndex(({ value: t2 }) => t2 === e.cursorAt), 0);
-      this.cursor = this.options[i]?.disabled ? findCursor(i, 1, this.options) : i, this.on("key", (t2, l2) => {
-        l2.name === "a" && this.toggleAll(), l2.name === "i" && this.toggleInvert();
-      }), this.on("cursor", (t2) => {
-        switch (t2) {
-          case "left":
-          case "up":
-            this.cursor = findCursor(this.cursor, -1, this.options);
-            break;
-          case "down":
-          case "right":
-            this.cursor = findCursor(this.cursor, 1, this.options);
-            break;
-          case "space":
-            this.toggleValue();
-            break;
-        }
-      });
-    }
-  };
-  u$1 = class u2 extends V {
-    _mask = "•";
-    get cursor() {
-      return this._cursor;
-    }
-    get masked() {
-      return this.userInput.replaceAll(/./g, this._mask);
-    }
-    get userInputWithCursor() {
-      if (this.state === "submit" || this.state === "cancel")
-        return this.masked;
-      const t2 = this.userInput;
-      if (this.cursor >= t2.length)
-        return `${this.masked}${styleText(["inverse", "hidden"], "_")}`;
-      const s = this.masked, r2 = s.slice(0, this.cursor), i = s.slice(this.cursor, this.cursor + 1), o2 = s.slice(this.cursor + 1);
-      return `${r2}${styleText("inverse", i)}${o2}`;
-    }
-    clear() {
-      this._clearUserInput();
-    }
-    constructor({ mask: t2, ...s }) {
-      super(s), this._mask = t2 ?? "•", this.on("userInput", (r2) => {
-        this._setValue(r2);
-      }), this.on("finalize", () => {
-        this.value === undefined && (this.value = "");
-      });
-    }
-  };
-  n$1 = class n extends V {
-    options;
-    cursor = 0;
-    get _selectedValue() {
-      return this.options[this.cursor];
-    }
-    changeValue() {
-      const e = this._selectedValue;
-      this.value = e === undefined ? undefined : e.value;
-    }
-    constructor(e) {
-      super(e, false), this.options = e.options;
-      const o2 = this.options.findIndex(({ value: s }) => s === e.initialValue), t2 = o2 === -1 ? 0 : o2;
-      this.cursor = this.options[t2]?.disabled ? findCursor(t2, 1, this.options) : t2, this.changeValue(), this.on("cursor", (s) => {
-        switch (s) {
-          case "left":
-          case "up":
-            this.cursor = findCursor(this.cursor, -1, this.options);
-            break;
-          case "down":
-          case "right":
-            this.cursor = findCursor(this.cursor, 1, this.options);
-            break;
-        }
-        this.changeValue();
-      });
-    }
-  };
-  u3 = class u3 extends V {
-    options;
-    cursor = 0;
-    constructor(t2) {
-      super(t2, false), this.options = t2.options;
-      const s = t2.caseSensitive === true, i = this.options.map(({ value: [e] }) => s ? e : e?.toLowerCase());
-      this.cursor = Math.max(i.indexOf(t2.initialValue), 0), this.on("key", (e) => {
-        if (!e)
-          return;
-        const o2 = s ? e : e.toLowerCase();
-        if (!i.includes(o2))
-          return;
-        const n2 = this.options.find(({ value: [r2] }) => s ? r2 === o2 : r2?.toLowerCase() === o2);
-        n2 && (this.value = n2.value, this.state = "submit", this.emit("submit"));
-      });
-    }
-  };
-  n2 = class n2 extends V {
-    get userInputWithCursor() {
-      if (this.state === "submit")
-        return this.userInput;
-      const t2 = this.userInput;
-      if (this.cursor >= t2.length)
-        return `${this.userInput}█`;
-      const r2 = t2.slice(0, this.cursor), s = t2.slice(this.cursor, this.cursor + 1), e = t2.slice(this.cursor + 1);
-      return `${r2}${styleText("inverse", s)}${e}`;
-    }
-    get cursor() {
-      return this._cursor;
-    }
-    constructor(t2) {
-      super({
-        ...t2,
-        initialUserInput: t2.initialUserInput ?? t2.initialValue
-      }), this.on("userInput", (r2) => {
-        this._setValue(r2);
-      }), this.on("finalize", () => {
-        this.value || (this.value = t2.defaultValue), this.value === undefined && (this.value = "");
-      });
-    }
-  };
-});
-
-// node_modules/@clack/prompts/dist/index.mjs
-var exports_dist = {};
-__export(exports_dist, {
-  updateSettings: () => updateSettings,
-  unicodeOr: () => unicodeOr,
-  unicode: () => unicode,
-  text: () => text,
-  tasks: () => tasks,
-  taskLog: () => taskLog,
-  symbolBar: () => symbolBar,
-  symbol: () => symbol,
-  stream: () => stream,
-  spinner: () => spinner,
-  settings: () => settings,
-  selectKey: () => selectKey,
-  select: () => select,
-  progress: () => progress,
-  path: () => path,
-  password: () => password,
-  outro: () => outro,
-  note: () => note,
-  multiselect: () => multiselect,
-  multiline: () => multiline,
-  log: () => log,
-  limitOptions: () => limitOptions,
-  isTTY: () => isTTY,
-  isCancel: () => isCancel,
-  isCI: () => isCI,
-  intro: () => intro,
-  groupMultiselect: () => groupMultiselect,
-  group: () => group,
-  formatInstructionFooter: () => formatInstructionFooter,
-  date: () => date,
-  confirm: () => confirm,
-  cancel: () => cancel,
-  box: () => box,
-  autocompleteMultiselect: () => autocompleteMultiselect,
-  autocomplete: () => autocomplete,
-  S_WARN: () => S_WARN,
-  S_SUCCESS: () => S_SUCCESS,
-  S_STEP_SUBMIT: () => S_STEP_SUBMIT,
-  S_STEP_ERROR: () => S_STEP_ERROR,
-  S_STEP_CANCEL: () => S_STEP_CANCEL,
-  S_STEP_ACTIVE: () => S_STEP_ACTIVE,
-  S_RADIO_INACTIVE: () => S_RADIO_INACTIVE,
-  S_RADIO_ACTIVE: () => S_RADIO_ACTIVE,
-  S_PASSWORD_MASK: () => S_PASSWORD_MASK,
-  S_INFO: () => S_INFO,
-  S_ERROR: () => S_ERROR,
-  S_CORNER_TOP_RIGHT: () => S_CORNER_TOP_RIGHT,
-  S_CORNER_TOP_LEFT: () => S_CORNER_TOP_LEFT,
-  S_CORNER_BOTTOM_RIGHT: () => S_CORNER_BOTTOM_RIGHT,
-  S_CORNER_BOTTOM_LEFT: () => S_CORNER_BOTTOM_LEFT,
-  S_CONNECT_LEFT: () => S_CONNECT_LEFT,
-  S_CHECKBOX_SELECTED: () => S_CHECKBOX_SELECTED,
-  S_CHECKBOX_INACTIVE: () => S_CHECKBOX_INACTIVE,
-  S_CHECKBOX_ACTIVE: () => S_CHECKBOX_ACTIVE,
-  S_BAR_START_RIGHT: () => S_BAR_START_RIGHT,
-  S_BAR_START: () => S_BAR_START,
-  S_BAR_H: () => S_BAR_H,
-  S_BAR_END_RIGHT: () => S_BAR_END_RIGHT,
-  S_BAR_END: () => S_BAR_END,
-  S_BAR: () => S_BAR,
-  SELECT_INSTRUCTIONS: () => SELECT_INSTRUCTIONS,
-  MULTISELECT_INSTRUCTIONS: () => MULTISELECT_INSTRUCTIONS
-});
-import { styleText as styleText2, stripVTControlCharacters } from "node:util";
-import process$1 from "node:process";
-import { existsSync as existsSync17, lstatSync, readdirSync as readdirSync10 } from "node:fs";
-import { dirname as dirname8, join as join19 } from "node:path";
-function isUnicodeSupported() {
-  if (process$1.platform !== "win32") {
-    return process$1.env.TERM !== "linux";
-  }
-  return Boolean(process$1.env.CI) || Boolean(process$1.env.WT_SESSION) || Boolean(process$1.env.TERMINUS_SUBLIME) || process$1.env.ConEmuTask === "{cmd::Cmder}" || process$1.env.TERM_PROGRAM === "Terminus-Sublime" || process$1.env.TERM_PROGRAM === "vscode" || process$1.env.TERM === "xterm-256color" || process$1.env.TERM === "alacritty" || process$1.env.TERMINAL_EMULATOR === "JetBrains-JediTerm";
-}
-function formatInstructionFooter(o2, e) {
-  const r2 = [`${e ? `${styleText2("cyan", S_BAR)}  ` : ""}${o2.join(" • ")}`];
-  return e && r2.push(styleText2("cyan", S_BAR_END)), r2;
-}
-function P2(t2) {
-  return t2.label ?? String(t2.value ?? "");
-}
-function E(t2, c2) {
-  if (!t2)
-    return true;
-  const n3 = (c2.label ?? String(c2.value ?? "")).toLowerCase(), i = (c2.hint ?? "").toLowerCase(), l2 = String(c2.value).toLowerCase(), o2 = t2.toLowerCase();
-  return n3.includes(o2) || i.includes(o2) || l2.includes(o2);
-}
-function N(t2, c2) {
-  const n3 = [];
-  for (const i of c2)
-    t2.includes(i.value) && n3.push(i);
-  return n3;
-}
-function A$1(n3, e, t2, o2) {
-  let i = t2, f2 = t2;
-  return o2 === "center" ? i = Math.floor((e - n3) / 2) : o2 === "right" && (i = e - n3 - t2), f2 = e - i - n3, [i, f2];
-}
-function b2(e, r2) {
-  const { segmentValues: t2, segmentCursor: o2 } = e;
-  if (r2 === "submit" || r2 === "cancel")
-    return e.formattedValue;
-  const i = styleText2("gray", e.separator);
-  return e.segments.map((l2, d) => {
-    const c2 = d === o2.segmentIndex && !["submit", "cancel"].includes(r2), a2 = p2[l2.type];
-    return x(t2[l2.type], { isActive: c2, label: a2 });
-  }).join(i);
-}
-function x(e, r2) {
-  const t2 = !e || e.replace(/_/g, "") === "";
-  return r2.isActive ? styleText2("inverse", t2 ? r2.label : e.replace(/_/g, " ")) : t2 ? styleText2("dim", r2.label) : e.replace(/_/g, styleText2("dim", " "));
-}
-function progress({
-  style: o2 = "heavy",
-  max: d = 100,
-  size: v = 40,
-  ...x2
-} = {}) {
-  const r2 = spinner(x2);
-  let a2 = 0, n3 = "";
-  const c2 = Math.max(1, d), l2 = Math.max(1, v), S = (t2) => {
-    switch (t2) {
-      case "initial":
-      case "active":
-        return (e) => styleText2("magenta", e);
-      case "error":
-      case "cancel":
-        return (e) => styleText2("red", e);
-      case "submit":
-        return (e) => styleText2("green", e);
-      default:
-        return (e) => styleText2("magenta", e);
-    }
-  }, p3 = (t2, e) => {
-    const m3 = Math.floor(a2 / c2 * l2);
-    return `${S(t2)(u4[o2].repeat(m3))}${styleText2("dim", u4[o2].repeat(l2 - m3))} ${e}`;
-  }, h2 = (t2 = "") => {
-    n3 = t2, r2.start(p3("initial", t2));
-  }, g2 = (t2 = 1, e) => {
-    a2 = Math.min(c2, t2 + a2), r2.message(p3("active", e ?? n3)), n3 = e ?? n3;
-  };
-  return {
-    start: h2,
-    stop: r2.stop,
-    cancel: r2.cancel,
-    error: r2.error,
-    clear: r2.clear,
-    advance: g2,
-    isCancelled: r2.isCancelled,
-    message: (t2) => g2(0, t2)
-  };
-}
-var import_sisteransi2, unicode, isCI = () => process.env.CI === "true", isTTY = (o2) => o2.isTTY === true, unicodeOr = (o2, e) => unicode ? o2 : e, S_STEP_ACTIVE, S_STEP_CANCEL, S_STEP_ERROR, S_STEP_SUBMIT, S_BAR_START, S_BAR, S_BAR_END, S_BAR_START_RIGHT, S_BAR_END_RIGHT, S_RADIO_ACTIVE, S_RADIO_INACTIVE, S_CHECKBOX_ACTIVE, S_CHECKBOX_SELECTED, S_CHECKBOX_INACTIVE, S_PASSWORD_MASK, S_BAR_H, S_CORNER_TOP_RIGHT, S_CONNECT_LEFT, S_CORNER_BOTTOM_RIGHT, S_CORNER_BOTTOM_LEFT, S_CORNER_TOP_LEFT, S_INFO, S_SUCCESS, S_WARN, S_ERROR, symbol = (o2) => {
-  switch (o2) {
-    case "initial":
-    case "active":
-      return styleText2("cyan", S_STEP_ACTIVE);
-    case "cancel":
-      return styleText2("red", S_STEP_CANCEL);
-    case "error":
-      return styleText2("yellow", S_STEP_ERROR);
-    case "submit":
-      return styleText2("green", S_STEP_SUBMIT);
-  }
-}, symbolBar = (o2) => {
-  switch (o2) {
-    case "initial":
-    case "active":
-      return styleText2("cyan", S_BAR);
-    case "cancel":
-      return styleText2("red", S_BAR);
-    case "error":
-      return styleText2("yellow", S_BAR);
-    case "submit":
-      return styleText2("green", S_BAR);
-  }
-}, I = (l2, e, w, p2, b2, C2 = false) => {
-  let r2 = e, O = 0;
-  if (C2)
-    for (let i = p2 - 1;i >= w; i--) {
-      const m2 = l2[i];
-      if (m2 && (r2 -= m2.length), O++, r2 <= b2)
-        break;
-    }
-  else
-    for (let i = w;i < p2; i++) {
-      const m2 = l2[i];
-      if (m2 && (r2 -= m2.length), O++, r2 <= b2)
-        break;
-    }
-  return { lineCount: r2, removals: O };
-}, limitOptions = ({
-  cursor: l2,
-  options: e,
-  style: w,
-  output: p2 = process.stdout,
-  maxItems: b2 = Number.POSITIVE_INFINITY,
-  columnPadding: C2 = 0,
-  rowPadding: r2 = 4
-}) => {
-  const i = getColumns(p2) - C2, m2 = getRows(p2), M2 = styleText2("dim", "..."), v = Math.max(m2 - r2, 0), a2 = Math.max(Math.min(b2, v), 5);
-  let f2 = 0;
-  l2 >= a2 - 3 && (f2 = Math.max(Math.min(l2 - a2 + 3, e.length - a2), 0));
-  let d = a2 < e.length && f2 > 0, c2 = a2 < e.length && f2 + a2 < e.length;
-  const W = Math.min(f2 + a2, e.length), s = [];
-  let g2 = 0;
-  d && g2++, c2 && g2++;
-  const T3 = f2 + (d ? 1 : 0), y = W - (c2 ? 1 : 0);
-  for (let t2 = T3;t2 < y; t2++) {
-    const n3 = e[t2], o2 = n3 ? w(n3, t2 === l2) : "", h2 = wrapAnsi(o2, i, {
-      hard: true,
-      trim: false
-    }).split(`
-`);
-    s.push(h2), g2 += h2.length;
-  }
-  if (g2 > v) {
-    let t2 = 0, n3 = 0, o2 = g2;
-    const h2 = l2 - T3;
-    let u4 = v;
-    const L = () => I(s, o2, 0, h2, u4), E = () => I(s, o2, h2 + 1, s.length, u4, true);
-    d ? ({ lineCount: o2, removals: t2 } = L(), o2 > u4 && (c2 || (u4 -= 1), { lineCount: o2, removals: n3 } = E())) : (c2 || (u4 -= 1), { lineCount: o2, removals: n3 } = E(), o2 > u4 && (u4 -= 1, { lineCount: o2, removals: t2 } = L())), t2 > 0 && (d = true, s.splice(0, t2)), n3 > 0 && (c2 = true, s.splice(s.length - n3, n3));
-  }
-  const x = [];
-  d && x.push(M2);
-  for (const t2 of s)
-    for (const n3 of t2)
-      x.push(n3);
-  return c2 && x.push(M2), x;
-}, autocomplete = (t2) => new T$1({
-  options: t2.options,
-  initialValue: t2.initialValue ? [t2.initialValue] : undefined,
-  initialUserInput: t2.initialUserInput,
-  placeholder: t2.placeholder,
-  filter: t2.filter ?? ((n3, i) => E(n3, i)),
-  signal: t2.signal,
-  input: t2.input,
-  output: t2.output,
-  validate: t2.validate,
-  render() {
-    const n3 = t2.withGuide ?? settings.withGuide, i = n3 ? [`${styleText2("gray", S_BAR)}`, `${symbol(this.state)}  ${t2.message}`] : [`${symbol(this.state)}  ${t2.message}`], l2 = this.userInput, o2 = this.options, m2 = t2.placeholder, p2 = l2 === "" && m2 !== undefined, $ = (r2, s) => {
-      const a2 = P2(r2), u4 = r2.hint && r2.value === this.focusedValue ? styleText2("dim", ` (${r2.hint})`) : "";
-      switch (s) {
-        case "active":
-          return `${styleText2("green", S_RADIO_ACTIVE)} ${a2}${u4}`;
-        case "inactive":
-          return `${styleText2("dim", S_RADIO_INACTIVE)} ${styleText2("dim", a2)}`;
-        case "disabled":
-          return `${styleText2("gray", S_RADIO_INACTIVE)} ${styleText2(["strikethrough", "gray"], a2)}`;
-      }
-    };
-    switch (this.state) {
-      case "submit": {
-        const r2 = N(this.selectedValues, o2), s = r2.length > 0 ? `  ${styleText2("dim", r2.map(P2).join(", "))}` : "", a2 = n3 ? styleText2("gray", S_BAR) : "";
-        return `${i.join(`
-`)}
-${a2}${s}`;
-      }
-      case "cancel": {
-        const r2 = l2 ? `  ${styleText2(["strikethrough", "dim"], l2)}` : "", s = n3 ? styleText2("gray", S_BAR) : "";
-        return `${i.join(`
-`)}
-${s}${r2}`;
-      }
-      default: {
-        const r2 = this.state === "error" ? "yellow" : "cyan", s = n3 ? `${styleText2(r2, S_BAR)}  ` : "", a2 = n3 ? styleText2(r2, S_BAR_END) : "";
-        let u4 = "";
-        if (this.isNavigating || p2) {
-          const d = p2 ? m2 : l2;
-          u4 = d !== "" ? ` ${styleText2("dim", d)}` : "";
-        } else
-          u4 = ` ${this.userInputWithCursor}`;
-        const V2 = this.filteredOptions.length !== o2.length ? styleText2("dim", ` (${this.filteredOptions.length} match${this.filteredOptions.length === 1 ? "" : "es"})`) : "", y = this.filteredOptions.length === 0 && l2 ? [`${s}${styleText2("yellow", "No matches found")}`] : [], b2 = this.state === "error" ? [`${s}${styleText2("yellow", this.error)}`] : [];
-        n3 && i.push(`${s.trimEnd()}`), i.push(`${s}${styleText2("dim", "Search:")}${u4}${V2}`, ...y, ...b2);
-        const v = [
-          `${styleText2("dim", "↑/↓")} to select`,
-          `${styleText2("dim", "Enter:")} confirm`,
-          `${styleText2("dim", "Type:")} to search`
-        ], g2 = [`${s}${v.join(" • ")}`, a2], O = this.filteredOptions.length === 0 ? [] : limitOptions({
-          cursor: this.cursor,
-          options: this.filteredOptions,
-          columnPadding: n3 ? 3 : 0,
-          rowPadding: i.length + g2.length,
-          style: (d, f2) => $(d, d.disabled ? "disabled" : f2 ? "active" : "inactive"),
-          maxItems: t2.maxItems,
-          output: t2.output
-        });
-        return [
-          ...i,
-          ...O.map((d) => `${s}${d}`),
-          ...g2
-        ].join(`
-`);
-      }
-    }
-  }
-}).prompt(), autocompleteMultiselect = (t2) => {
-  const c2 = (i, l2, o2, m2) => {
-    const p2 = o2.includes(i.value), $ = i.label ?? String(i.value ?? ""), r2 = i.hint && m2 !== undefined && i.value === m2 ? styleText2("dim", ` (${i.hint})`) : "", s = p2 ? styleText2("green", S_CHECKBOX_SELECTED) : styleText2("dim", S_CHECKBOX_INACTIVE);
-    return i.disabled ? `${styleText2("gray", S_CHECKBOX_INACTIVE)} ${styleText2(["strikethrough", "gray"], $)}` : l2 ? `${s} ${$}${r2}` : `${s} ${styleText2("dim", $)}`;
-  }, n3 = new T$1({
-    options: t2.options,
-    multiple: true,
-    placeholder: t2.placeholder,
-    filter: t2.filter ?? ((i, l2) => E(i, l2)),
-    validate: () => {
-      if (t2.required && n3.selectedValues.length === 0)
-        return "Please select at least one item";
-    },
-    initialValue: t2.initialValues,
-    signal: t2.signal,
-    input: t2.input,
-    output: t2.output,
-    render() {
-      const i = t2.withGuide ?? settings.withGuide, l2 = `${i ? `${styleText2("gray", S_BAR)}
-` : ""}${symbol(this.state)}  ${t2.message}
-`, o2 = this.userInput, m2 = t2.placeholder, p2 = o2 === "" && m2 !== undefined, $ = this.isNavigating || p2 ? styleText2("dim", p2 ? m2 : o2) : this.userInputWithCursor, r2 = this.options, s = this.filteredOptions.length !== r2.length ? styleText2("dim", ` (${this.filteredOptions.length} match${this.filteredOptions.length === 1 ? "" : "es"})`) : "";
-      switch (this.state) {
-        case "submit":
-          return `${l2}${i ? `${styleText2("gray", S_BAR)}  ` : ""}${styleText2("dim", `${this.selectedValues.length} items selected`)}`;
-        case "cancel":
-          return `${l2}${i ? `${styleText2("gray", S_BAR)}  ` : ""}${styleText2(["strikethrough", "dim"], o2)}`;
-        default: {
-          const a2 = this.state === "error" ? "yellow" : "cyan", u4 = i ? `${styleText2(a2, S_BAR)}  ` : "", V2 = i ? styleText2(a2, S_BAR_END) : "", y = [
-            `${styleText2("dim", "↑/↓")} to navigate`,
-            `${styleText2("dim", this.isNavigating ? "Space/Tab:" : "Tab:")} select`,
-            `${styleText2("dim", "Enter:")} confirm`,
-            `${styleText2("dim", "Type:")} to search`
-          ], b2 = this.filteredOptions.length === 0 && o2 ? [`${u4}${styleText2("yellow", "No matches found")}`] : [], v = this.state === "error" ? [`${u4}${styleText2("yellow", this.error)}`] : [], g2 = [
-            ...`${l2}${i ? styleText2(a2, S_BAR) : ""}`.split(`
-`),
-            `${u4}${styleText2("dim", "Search:")} ${$}${s}`,
-            ...b2,
-            ...v
-          ], O = [`${u4}${y.join(" • ")}`, V2], d = limitOptions({
-            cursor: this.cursor,
-            options: this.filteredOptions,
-            style: (f2, _2) => c2(f2, _2, this.selectedValues, this.focusedValue),
-            maxItems: t2.maxItems,
-            output: t2.output,
-            rowPadding: g2.length + O.length
-          });
-          return [
-            ...g2,
-            ...d.map((f2) => `${u4}${f2}`),
-            ...O
-          ].join(`
-`);
-        }
-      }
-    }
-  });
-  return n3.prompt();
-}, J, K, Q = (n3) => n3, box = (n3 = "", e = "", t2) => {
-  const o2 = t2?.output ?? process.stdout, i = getColumns(o2), R2 = 1 * 2, u4 = t2?.titlePadding ?? 1, h2 = t2?.contentPadding ?? 2, w = t2?.width === undefined || t2.width === "auto" ? 1 : Math.min(1, t2.width), m2 = t2?.withGuide ?? settings.withGuide ? `${S_BAR} ` : "", b2 = t2?.formatBorder ?? Q, a2 = ((t2?.rounded) ? J : K).map(b2), _2 = b2(S_BAR_H), B = b2(S_BAR), p2 = dist_default2(m2), x = dist_default2(e), O = i - p2;
-  let r2 = Math.floor(i * w) - p2;
-  if (t2?.width === "auto") {
-    const c2 = n3.split(`
-`);
-    let s = x + u4 * 2;
-    for (const G of c2) {
-      const P3 = dist_default2(G) + h2 * 2;
-      P3 > s && (s = P3);
-    }
-    const g2 = s + R2;
-    g2 < r2 && (r2 = g2);
-  }
-  r2 % 2 !== 0 && (r2 < O ? r2++ : r2--);
-  const d = r2 - R2, S = d - u4 * 2, T3 = x > S ? `${e.slice(0, S - 3)}...` : e, [y, W] = A$1(dist_default2(T3), d, u4, t2?.titleAlign), L = wrapAnsi(n3, d - h2 * 2, {
-    hard: true,
-    trim: false
-  });
-  o2.write(`${m2}${a2[0]}${_2.repeat(y)}${T3}${_2.repeat(W)}${a2[1]}
-`);
-  const E2 = L.split(`
-`);
-  for (const c2 of E2) {
-    const [s, g2] = A$1(dist_default2(c2), d, h2, t2?.contentAlign);
-    o2.write(`${m2}${B}${" ".repeat(s)}${c2}${" ".repeat(g2)}${B}
-`);
-  }
-  o2.write(`${m2}${a2[2]}${_2.repeat(d)}${a2[3]}
-`);
-}, confirm = (i) => {
-  const a2 = i.active ?? "Yes", s = i.inactive ?? "No";
-  return new r({
-    active: a2,
-    inactive: s,
-    signal: i.signal,
-    input: i.input,
-    output: i.output,
-    initialValue: i.initialValue ?? true,
-    render() {
-      const e = i.withGuide ?? settings.withGuide, u4 = `${symbol(this.state)}  `, l2 = e ? `${styleText2("gray", S_BAR)}  ` : "", f2 = wrapTextWithPrefix(i.output, i.message, l2, u4), o2 = `${e ? `${styleText2("gray", S_BAR)}
-` : ""}${f2}
-`, c2 = this.value ? a2 : s;
-      switch (this.state) {
-        case "submit": {
-          const r2 = e ? `${styleText2("gray", S_BAR)}  ` : "";
-          return `${o2}${r2}${styleText2("dim", c2)}`;
-        }
-        case "cancel": {
-          const r2 = e ? `${styleText2("gray", S_BAR)}  ` : "";
-          return `${o2}${r2}${styleText2(["strikethrough", "dim"], c2)}${e ? `
-${styleText2("gray", S_BAR)}` : ""}`;
-        }
-        default: {
-          const r2 = e ? `${styleText2("cyan", S_BAR)}  ` : "", g2 = e ? styleText2("cyan", S_BAR_END) : "";
-          return `${o2}${r2}${this.value ? `${styleText2("green", S_RADIO_ACTIVE)} ${a2}` : `${styleText2("dim", S_RADIO_INACTIVE)} ${styleText2("dim", a2)}`}${i.vertical ? e ? `
-${styleText2("cyan", S_BAR)}  ` : `
-` : ` ${styleText2("dim", "/")} `}${this.value ? `${styleText2("dim", S_RADIO_INACTIVE)} ${styleText2("dim", s)}` : `${styleText2("green", S_RADIO_ACTIVE)} ${s}`}
-${g2}
-`;
-        }
-      }
-    }
-  }).prompt();
-}, date = (e) => {
-  const r2 = e.validate;
-  return new U({
-    ...e,
-    validate(t2) {
-      if (t2 === undefined)
-        return e.defaultValue !== undefined ? undefined : r2 ? runValidation(r2, t2) : settings.date.messages.required;
-      const o2 = (i) => i.toISOString().slice(0, 10);
-      if (e.minDate && o2(t2) < o2(e.minDate))
-        return settings.date.messages.afterMin(e.minDate);
-      if (e.maxDate && o2(t2) > o2(e.maxDate))
-        return settings.date.messages.beforeMax(e.maxDate);
-      if (r2)
-        return runValidation(r2, t2);
-    },
-    render() {
-      const t2 = (e?.withGuide ?? settings.withGuide) !== false, i = `${`${t2 ? `${styleText2("gray", S_BAR)}
-` : ""}${symbol(this.state)}  `}${e.message}
-`, l2 = this.state !== "initial" ? this.state : "active", d = b2(this, l2), c2 = this.value instanceof Date ? this.formattedValue : "";
-      switch (this.state) {
-        case "error": {
-          const a2 = this.error ? `  ${styleText2("yellow", this.error)}` : "", s = t2 ? `${styleText2("yellow", S_BAR)}  ` : "", f2 = t2 ? styleText2("yellow", S_BAR_END) : "";
-          return `${i.trim()}
-${s}${d}
-${f2}${a2}
-`;
-        }
-        case "submit": {
-          const a2 = c2 ? `  ${styleText2("dim", c2)}` : "", s = t2 ? styleText2("gray", S_BAR) : "";
-          return `${i}${s}${a2}`;
-        }
-        case "cancel": {
-          const a2 = c2 ? `  ${styleText2(["strikethrough", "dim"], c2)}` : "", s = t2 ? styleText2("gray", S_BAR) : "";
-          return `${i}${s}${a2}${c2.trim() ? `
-${s}` : ""}`;
-        }
-        default: {
-          const a2 = t2 ? `${styleText2("cyan", S_BAR)}  ` : "", s = t2 ? styleText2("cyan", S_BAR_END) : "", f2 = t2 ? `${styleText2("cyan", S_BAR)}  ` : "", g2 = this.inlineError ? `
-${f2}${styleText2("yellow", this.inlineError)}` : "";
-          return `${i}${a2}${d}${g2}
-${s}
-`;
-        }
-      }
-    }
-  }).prompt();
-}, p2, group = async (o2, r2) => {
-  const t2 = {}, p3 = Object.keys(o2);
-  for (const e of p3) {
-    const i = o2[e], n3 = await i({ results: t2 })?.catch((a2) => {
-      throw a2;
-    });
-    if (typeof r2?.onCancel == "function" && isCancel(n3)) {
-      t2[e] = "canceled", r2.onCancel({ results: t2 });
-      continue;
-    }
-    t2[e] = n3;
-  }
-  return t2;
-}, MULTISELECT_INSTRUCTIONS, m2 = (i, u4) => i.split(`
-`).map((d) => u4(d)).join(`
-`), multiselect = (i) => {
-  const u4 = (t2, a2) => {
-    const r2 = t2.label ?? String(t2.value);
-    return a2 === "disabled" ? `${styleText2("gray", S_CHECKBOX_INACTIVE)} ${m2(r2, (o2) => styleText2(["strikethrough", "gray"], o2))}${t2.hint ? ` ${styleText2("dim", `(${t2.hint ?? "disabled"})`)}` : ""}` : a2 === "active" ? `${styleText2("cyan", S_CHECKBOX_ACTIVE)} ${r2}${t2.hint ? ` ${styleText2("dim", `(${t2.hint})`)}` : ""}` : a2 === "selected" ? `${styleText2("green", S_CHECKBOX_SELECTED)} ${m2(r2, (o2) => styleText2("dim", o2))}${t2.hint ? ` ${styleText2("dim", `(${t2.hint})`)}` : ""}` : a2 === "cancelled" ? `${m2(r2, (o2) => styleText2(["strikethrough", "dim"], o2))}` : a2 === "active-selected" ? `${styleText2("green", S_CHECKBOX_SELECTED)} ${r2}${t2.hint ? ` ${styleText2("dim", `(${t2.hint})`)}` : ""}` : a2 === "submitted" ? `${m2(r2, (o2) => styleText2("dim", o2))}` : `${styleText2("dim", S_CHECKBOX_INACTIVE)} ${m2(r2, (o2) => styleText2("dim", o2))}`;
-  }, d = i.required ?? true, v = i.showInstructions ?? true;
-  return new a({
-    options: i.options,
-    signal: i.signal,
-    input: i.input,
-    output: i.output,
-    initialValues: i.initialValues,
-    required: d,
-    cursorAt: i.cursorAt,
-    validate(t2) {
-      if (d && (t2 === undefined || t2.length === 0))
-        return `Please select at least one option.
-${styleText2("reset", styleText2("dim", `Press ${styleText2(["gray", "bgWhite", "inverse"], " space ")} to select, ${styleText2("gray", styleText2("bgWhite", styleText2("inverse", " enter ")))} to submit`))}`;
-    },
-    render() {
-      const t2 = i.withGuide ?? settings.withGuide, a2 = wrapTextWithPrefix(i.output, i.message, t2 ? `${symbolBar(this.state)}  ` : "", `${symbol(this.state)}  `), r2 = `${t2 ? `${styleText2("gray", S_BAR)}
-` : ""}${a2}
-`, o2 = this.value ?? [], p3 = (n3, l2) => {
-        if (n3.disabled)
-          return u4(n3, "disabled");
-        const s = o2.includes(n3.value);
-        return l2 && s ? u4(n3, "active-selected") : s ? u4(n3, "selected") : u4(n3, l2 ? "active" : "inactive");
-      };
-      switch (this.state) {
-        case "submit": {
-          const n3 = this.options.filter(({ value: s }) => o2.includes(s)).map((s) => u4(s, "submitted")).join(styleText2("dim", ", ")) || styleText2("dim", "none"), l2 = wrapTextWithPrefix(i.output, n3, t2 ? `${styleText2("gray", S_BAR)}  ` : "");
-          return `${r2}${l2}`;
-        }
-        case "cancel": {
-          const n3 = this.options.filter(({ value: s }) => o2.includes(s)).map((s) => u4(s, "cancelled")).join(styleText2("dim", ", "));
-          if (n3.trim() === "")
-            return `${r2}${styleText2("gray", S_BAR)}`;
-          const l2 = wrapTextWithPrefix(i.output, n3, t2 ? `${styleText2("gray", S_BAR)}  ` : "");
-          return `${r2}${l2}${t2 ? `
-${styleText2("gray", S_BAR)}` : ""}`;
-        }
-        case "error": {
-          const n3 = t2 ? `${styleText2("yellow", S_BAR)}  ` : "", l2 = this.error.split(`
-`).map(($, C2) => C2 === 0 ? `${t2 ? `${styleText2("yellow", S_BAR_END)}  ` : ""}${styleText2("yellow", $)}` : `   ${$}`).join(`
-`), s = r2.split(`
-`).length, h2 = l2.split(`
-`).length + 1;
-          return `${r2}${n3}${limitOptions({
-            output: i.output,
-            options: this.options,
-            cursor: this.cursor,
-            maxItems: i.maxItems,
-            columnPadding: n3.length,
-            rowPadding: s + h2,
-            style: p3
-          }).join(`
-${n3}`)}
-${l2}
-`;
-        }
-        default: {
-          const n3 = t2 ? `${styleText2("cyan", S_BAR)}  ` : "", l2 = r2.split(`
-`).length, s = v ? formatInstructionFooter(MULTISELECT_INSTRUCTIONS, t2) : t2 ? [styleText2("cyan", S_BAR_END)] : [], h2 = s.join(`
-`), $ = s.length + 1;
-          return `${r2}${n3}${limitOptions({
-            output: i.output,
-            options: this.options,
-            cursor: this.cursor,
-            maxItems: i.maxItems,
-            columnPadding: n3.length,
-            rowPadding: l2 + $,
-            style: p3
-          }).join(`
-${n3}`)}
-${h2}
-`;
-        }
-      }
-    }
-  }).prompt();
-}, groupMultiselect = (o2) => {
-  const { selectableGroups: h2 = true, groupSpacing: x2 = 0 } = o2, m3 = (n3, l2, g2 = []) => {
-    const a2 = n3.label ?? String(n3.value), t2 = typeof n3.group == "string", s = t2 && (g2[g2.indexOf(n3) + 1] ?? { group: true }), u4 = t2 && s && s.group === true;
-    let r2 = "", c2 = "";
-    t2 && (h2 ? (r2 = u4 ? `${S_BAR_END} ` : `${S_BAR} `, c2 = u4 ? "  " : `${S_BAR} `) : r2 = "  ");
-    let i = "";
-    if (x2 > 0 && !t2 && (i = `
-`.repeat(x2)), l2 === "active")
-      return wrapTextWithPrefix(o2.output, `${a2}${n3.hint ? ` ${styleText2("dim", `(${n3.hint})`)}` : ""}`, `${i}${styleText2("dim", r2)} `, `${i}${styleText2("dim", r2)}${styleText2("cyan", S_CHECKBOX_ACTIVE)} `, `${i}${styleText2("dim", c2)} `);
-    if (l2 === "group-active")
-      return wrapTextWithPrefix(o2.output, a2, `${i}${r2} `, `${i}${r2}${styleText2("cyan", S_CHECKBOX_ACTIVE)} `, `${i}${c2} `, (d) => styleText2("dim", d));
-    if (l2 === "group-active-selected")
-      return wrapTextWithPrefix(o2.output, a2, `${i}${r2} `, `${i}${r2}${styleText2("green", S_CHECKBOX_SELECTED)} `, `${i}${c2} `, (d) => styleText2("dim", d));
-    if (l2 === "selected") {
-      const d = t2 || h2 ? styleText2("green", S_CHECKBOX_SELECTED) : "";
-      return wrapTextWithPrefix(o2.output, `${a2}${n3.hint ? ` (${n3.hint})` : ""}`, `${i}${styleText2("dim", r2)} `, `${i}${styleText2("dim", r2)}${d} `, `${i}${styleText2("dim", c2)} `, (S) => styleText2("dim", S));
-    }
-    if (l2 === "cancelled")
-      return `${styleText2(["strikethrough", "dim"], a2)}`;
-    if (l2 === "active-selected")
-      return wrapTextWithPrefix(o2.output, `${a2}${n3.hint ? ` ${styleText2("dim", `(${n3.hint})`)}` : ""}`, `${i}${styleText2("dim", r2)} `, `${i}${styleText2("dim", r2)}${styleText2("green", S_CHECKBOX_SELECTED)} `, `${i}${styleText2("dim", c2)} `);
-    if (l2 === "submitted")
-      return `${styleText2("dim", a2)}`;
-    const f2 = t2 || h2 ? styleText2("dim", S_CHECKBOX_INACTIVE) : "";
-    return wrapTextWithPrefix(o2.output, a2, `${i}${styleText2("dim", r2)} `, `${i}${styleText2("dim", r2)}${f2} `, `${i}${styleText2("dim", c2)} `, (d) => styleText2("dim", d));
-  }, y = o2.required ?? true, I2 = o2.showInstructions ?? true;
-  return new u$2({
-    options: o2.options,
-    signal: o2.signal,
-    input: o2.input,
-    output: o2.output,
-    initialValues: o2.initialValues,
-    required: y,
-    cursorAt: o2.cursorAt,
-    selectableGroups: h2,
-    validate(n3) {
-      if (y && (n3 === undefined || n3.length === 0))
-        return `Please select at least one option.
-${styleText2("reset", styleText2("dim", `Press ${styleText2(["gray", "bgWhite", "inverse"], " space ")} to select, ${styleText2("gray", styleText2(["bgWhite", "inverse"], " enter "))} to submit`))}`;
-    },
-    render() {
-      const n3 = o2.withGuide ?? settings.withGuide, l2 = `${n3 ? `${styleText2("gray", S_BAR)}
-` : ""}${symbol(this.state)}  ${o2.message}
-`, g2 = this.value ?? [], a2 = (t2, s) => {
-        const u4 = this.options, r2 = g2.includes(t2.value) || t2.group === true && this.isGroupSelected(`${t2.value}`);
-        return !s && typeof t2.group == "string" && this.options[this.cursor]?.value === t2.group ? m3(t2, r2 ? "group-active-selected" : "group-active", u4) : s && r2 ? m3(t2, "active-selected", u4) : r2 ? m3(t2, "selected", u4) : m3(t2, s ? "active" : "inactive", u4);
-      };
-      switch (this.state) {
-        case "submit": {
-          const t2 = this.options.filter(({ value: u4 }) => g2.includes(u4)).map((u4) => m3(u4, "submitted")), s = t2.length === 0 ? "" : `  ${t2.join(styleText2("dim", ", "))}`;
-          return `${l2}${n3 ? styleText2("gray", S_BAR) : ""}${s}`;
-        }
-        case "cancel": {
-          const t2 = this.options.filter(({ value: s }) => g2.includes(s)).map((s) => m3(s, "cancelled")).join(styleText2("dim", ", "));
-          return `${l2}${n3 ? `${styleText2("gray", S_BAR)}  ` : ""}${t2.trim() ? `${t2}${n3 ? `
-${styleText2("gray", S_BAR)}` : ""}` : ""}`;
-        }
-        case "error": {
-          const t2 = n3 ? `${styleText2("yellow", S_BAR)}  ` : "", s = this.error.split(`
-`).map((i, f2) => f2 === 0 ? `${n3 ? `${styleText2("yellow", S_BAR_END)}  ` : ""}${styleText2("yellow", i)}` : `   ${i}`).join(`
-`), u4 = l2.split(`
-`).length, r2 = s.split(`
-`).length + 1, c2 = limitOptions({
-            output: o2.output,
-            options: this.options,
-            cursor: this.cursor,
-            maxItems: o2.maxItems,
-            columnPadding: t2.length,
-            rowPadding: u4 + r2,
-            style: a2
-          }).join(`
-${t2}`);
-          return `${l2}${t2}${c2}
-${s}
-`;
-        }
-        default: {
-          const t2 = n3 ? `${styleText2("cyan", S_BAR)}  ` : "", s = l2.split(`
-`).length, u4 = I2 ? formatInstructionFooter(MULTISELECT_INSTRUCTIONS, n3) : n3 ? [styleText2("cyan", S_BAR_END)] : [], r2 = u4.join(`
-`), c2 = u4.length + 1, i = limitOptions({
-            output: o2.output,
-            options: this.options,
-            cursor: this.cursor,
-            maxItems: o2.maxItems,
-            columnPadding: t2.length,
-            rowPadding: s + c2,
-            style: a2
-          }).join(`
-${t2}`);
-          return `${l2}${t2}${i}
-${r2}
-`;
-        }
-      }
-    }
-  }).prompt();
-}, log, cancel = (o2 = "", t2) => {
-  const i = t2?.output ?? process.stdout, e = t2?.withGuide ?? settings.withGuide ? `${styleText2("gray", S_BAR_END)}  ` : "";
-  i.write(`${e}${styleText2("red", o2)}
-
-`);
-}, intro = (o2 = "", t2) => {
-  const i = t2?.output ?? process.stdout, e = t2?.withGuide ?? settings.withGuide ? `${styleText2("gray", S_BAR_START)}  ` : "";
-  i.write(`${e}${o2}
-`);
-}, outro = (o2 = "", t2) => {
-  const i = t2?.output ?? process.stdout, e = t2?.withGuide ?? settings.withGuide ? `${styleText2("gray", S_BAR)}
-${styleText2("gray", S_BAR_END)}  ` : "";
-  i.write(`${e}${o2}
-
-`);
-}, multiline = (e) => new h({
-  validate: e.validate,
-  placeholder: e.placeholder,
-  defaultValue: e.defaultValue,
-  initialValue: e.initialValue,
-  showSubmit: e.showSubmit,
-  output: e.output,
-  signal: e.signal,
-  input: e.input,
-  render() {
-    const i = e?.withGuide ?? settings.withGuide, o2 = `${`${i ? `${styleText2("gray", S_BAR)}
-` : ""}${symbol(this.state)}  `}${e.message}
-`, m3 = e.placeholder && e.placeholder.length > 0 ? styleText2("inverse", e.placeholder[0]) + styleText2("dim", e.placeholder.slice(1)) : styleText2(["inverse", "hidden"], "_"), a2 = this.userInput ? this.userInputWithCursor : m3, l2 = this.value ?? "", c2 = e.showSubmit ? `
-  ${styleText2(this.focused === "submit" ? "cyan" : "dim", "[ submit ]")}` : "";
-    switch (this.state) {
-      case "error": {
-        const n3 = `${styleText2("yellow", S_BAR)}  `, r2 = i ? wrapTextWithPrefix(e.output, a2, n3, undefined) : a2, u4 = styleText2("yellow", S_BAR_END);
-        return `${o2}${r2}
-${u4}  ${styleText2("yellow", this.error)}${c2}
-`;
-      }
-      case "submit": {
-        const n3 = `${styleText2("gray", S_BAR)}  `, r2 = i ? wrapTextWithPrefix(e.output, l2, n3, undefined, undefined, (u4) => styleText2("dim", u4)) : l2 ? styleText2("dim", l2) : "";
-        return `${o2}${r2}`;
-      }
-      case "cancel": {
-        const n3 = `${styleText2("gray", S_BAR)}  `, r2 = i ? wrapTextWithPrefix(e.output, l2, n3, undefined, undefined, (u4) => styleText2(["strikethrough", "dim"], u4)) : l2 ? styleText2(["strikethrough", "dim"], l2) : "";
-        return `${o2}${r2}`;
-      }
-      default: {
-        const n3 = i ? `${styleText2("cyan", S_BAR)}  ` : "", r2 = i ? styleText2("cyan", S_BAR_END) : "", u4 = i ? wrapTextWithPrefix(e.output, a2, n3) : a2;
-        return `${o2}${u4}
-${r2}${c2}
-`;
-      }
-    }
-  }
-}).prompt(), W$1 = (o2) => o2, C2 = (o2, e, s) => {
-  const a2 = {
-    hard: true,
-    trim: false
-  }, i = wrapAnsi(o2, e, a2).split(`
-`), c2 = i.reduce((n3, t2) => Math.max(dist_default2(t2), n3), 0), u4 = i.map(s).reduce((n3, t2) => Math.max(dist_default2(t2), n3), 0), g2 = e - (u4 - c2);
-  return wrapAnsi(o2, g2, a2);
-}, note = (o2 = "", e = "", s) => {
-  const a2 = s?.output ?? process$1.stdout, i = s?.withGuide ?? settings.withGuide, c2 = s?.format ?? W$1, g2 = ["", ...C2(o2, getColumns(a2) - 6, c2).split(`
-`).map(c2), ""], n3 = dist_default2(e), t2 = Math.max(g2.reduce((m3, F) => {
-    const O = dist_default2(F);
-    return O > m3 ? O : m3;
-  }, 0), n3) + 2, h2 = g2.map((m3) => `${styleText2("gray", S_BAR)}  ${m3}${" ".repeat(t2 - dist_default2(m3))}${styleText2("gray", S_BAR)}`).join(`
-`), T3 = i ? `${styleText2("gray", S_BAR)}
-` : "", l$1 = i ? S_CONNECT_LEFT : S_CORNER_BOTTOM_LEFT;
-  a2.write(`${T3}${styleText2("green", S_STEP_SUBMIT)}  ${styleText2("reset", e)} ${styleText2("gray", S_BAR_H.repeat(Math.max(t2 - n3 - 1, 1)) + S_CORNER_TOP_RIGHT)}
-${h2}
-${styleText2("gray", l$1 + S_BAR_H.repeat(t2 + 2) + S_CORNER_BOTTOM_RIGHT)}
-`);
-}, password = (r2) => new u$1({
-  validate: r2.validate,
-  mask: r2.mask ?? S_PASSWORD_MASK,
-  signal: r2.signal,
-  input: r2.input,
-  output: r2.output,
-  render() {
-    const e = r2.withGuide ?? settings.withGuide, o2 = `${e ? `${styleText2("gray", S_BAR)}
-` : ""}${symbol(this.state)}  ${r2.message}
-`, c2 = this.userInputWithCursor, i = this.masked;
-    switch (this.state) {
-      case "error": {
-        const s = e ? `${styleText2("yellow", S_BAR)}  ` : "", n3 = e ? `${styleText2("yellow", S_BAR_END)}  ` : "", l2 = i ?? "";
-        return r2.clearOnError && this.clear(), `${o2.trim()}
-${s}${l2}
-${n3}${styleText2("yellow", this.error)}
-`;
-      }
-      case "submit": {
-        const s = e ? `${styleText2("gray", S_BAR)}  ` : "", n3 = i ? styleText2("dim", i) : "";
-        return `${o2}${s}${n3}`;
-      }
-      case "cancel": {
-        const s = e ? `${styleText2("gray", S_BAR)}  ` : "", n3 = i ? styleText2(["strikethrough", "dim"], i) : "";
-        return `${o2}${s}${n3}${i && e ? `
-${styleText2("gray", S_BAR)}` : ""}`;
-      }
-      default: {
-        const s = e ? `${styleText2("cyan", S_BAR)}  ` : "", n3 = e ? styleText2("cyan", S_BAR_END) : "";
-        return `${o2}${s}${c2}
-${n3}
-`;
-      }
-    }
-  }
-}).prompt(), path = (e) => {
-  const a2 = e.validate;
-  return autocomplete({
-    ...e,
-    initialUserInput: e.initialValue ?? e.root ?? process.cwd(),
-    maxItems: 5,
-    validate(t2) {
-      if (!Array.isArray(t2)) {
-        if (!t2)
-          return "Please select a path";
-        if (a2)
-          return runValidation(a2, t2);
-      }
-    },
-    options() {
-      const t2 = this.userInput;
-      if (t2 === "")
-        return [];
-      try {
-        let i;
-        existsSync17(t2) ? lstatSync(t2).isDirectory() && (!e.directory || t2.endsWith("/")) ? i = t2 : i = dirname8(t2) : i = dirname8(t2);
-        const c2 = t2.length > 1 && t2.endsWith("/") ? t2.slice(0, -1) : t2;
-        return readdirSync10(i).map((r2) => {
-          const n3 = join19(i, r2), m3 = lstatSync(n3);
-          return {
-            name: r2,
-            path: n3,
-            isDirectory: m3.isDirectory()
-          };
-        }).filter(({ path: r2, isDirectory: n3 }) => r2.startsWith(c2) && (n3 || !e.directory)).map((r2) => ({
-          value: r2.path
-        }));
-      } catch {
-        return [];
-      }
-    }
-  });
-}, W = (l2) => styleText2("magenta", l2), spinner = ({
-  indicator: l2 = "dots",
-  onCancel: h2,
-  output: n3 = process.stdout,
-  cancelMessage: G,
-  errorMessage: O,
-  frames: E2 = unicode ? ["◒", "◐", "◓", "◑"] : ["•", "o", "O", "0"],
-  delay: F = unicode ? 80 : 120,
-  signal: m3,
-  ...I2
-} = {}) => {
-  const u4 = isCI();
-  let M2, T3, d = false, S = false, s = "", p3, w = performance.now();
-  const x2 = getColumns(n3), k = I2?.styleFrame ?? W, g2 = (e) => {
-    const r2 = e > 1 ? O ?? settings.messages.error : G ?? settings.messages.cancel;
-    S = e === 1, d && (a2(r2, e), S && typeof h2 == "function" && h2());
-  }, f2 = () => g2(2), i = () => g2(1), A = () => {
-    process.on("uncaughtExceptionMonitor", f2), process.on("unhandledRejection", f2), process.on("SIGINT", i), process.on("SIGTERM", i), process.on("exit", g2), m3 && m3.addEventListener("abort", i);
-  }, H = () => {
-    process.removeListener("uncaughtExceptionMonitor", f2), process.removeListener("unhandledRejection", f2), process.removeListener("SIGINT", i), process.removeListener("SIGTERM", i), process.removeListener("exit", g2), m3 && m3.removeEventListener("abort", i);
-  }, y = () => {
-    if (p3 === undefined)
-      return;
-    u4 && n3.write(`
-`);
-    const r2 = wrapAnsi(p3, x2, {
-      hard: true,
-      trim: false
-    }).split(`
-`);
-    r2.length > 1 && n3.write(import_sisteransi2.cursor.up(r2.length - 1)), n3.write(import_sisteransi2.cursor.to(0)), n3.write(import_sisteransi2.erase.down());
-  }, C3 = (e) => e.replace(/\.+$/, ""), _2 = (e) => {
-    const r2 = (performance.now() - e) / 1000, t2 = Math.floor(r2 / 60), o2 = Math.floor(r2 % 60);
-    return t2 > 0 ? `[${t2}m ${o2}s]` : `[${o2}s]`;
-  }, N2 = I2.withGuide ?? settings.withGuide, P3 = (e = "") => {
-    d = true, M2 = block({ output: n3 }), s = C3(e), w = performance.now(), N2 && n3.write(`${styleText2("gray", S_BAR)}
-`);
-    let r2 = 0, t2 = 0;
-    A(), T3 = setInterval(() => {
-      if (u4 && s === p3)
-        return;
-      y(), p3 = s;
-      const o2 = k(E2[r2]);
-      let v;
-      if (u4)
-        v = `${o2}  ${s}...`;
-      else if (l2 === "timer")
-        v = `${o2}  ${s} ${_2(w)}`;
-      else {
-        const B = ".".repeat(Math.floor(t2)).slice(0, 3);
-        v = `${o2}  ${s}${B}`;
-      }
-      const j = wrapAnsi(v, x2, {
-        hard: true,
-        trim: false
-      });
-      n3.write(j), r2 = r2 + 1 < E2.length ? r2 + 1 : 0, t2 = t2 < 4 ? t2 + 0.125 : 0;
-    }, F);
-  }, a2 = (e = "", r2 = 0, t2 = false) => {
-    if (!d)
-      return;
-    d = false, clearInterval(T3), y();
-    const o2 = r2 === 0 ? styleText2("green", S_STEP_SUBMIT) : r2 === 1 ? styleText2("red", S_STEP_CANCEL) : styleText2("red", S_STEP_ERROR);
-    s = e ?? s, t2 || (l2 === "timer" ? n3.write(`${o2}  ${s} ${_2(w)}
-`) : n3.write(`${o2}  ${s}
-`)), H(), M2();
-  };
-  return {
-    start: P3,
-    stop: (e = "") => a2(e, 0),
-    message: (e = "") => {
-      s = C3(e ?? s);
-    },
-    cancel: (e = "") => a2(e, 1),
-    error: (e = "") => a2(e, 2),
-    clear: () => a2("", 0, true),
-    get isCancelled() {
-      return S;
-    }
-  };
-}, u4, SELECT_INSTRUCTIONS, c2 = (t2, o2) => t2.includes(`
-`) ? t2.split(`
-`).map((d) => o2(d)).join(`
-`) : o2(t2), select = (t2) => {
-  const o2 = (n3, m3) => {
-    if (n3 === undefined)
-      return "";
-    const s = n3.label ?? String(n3.value);
-    switch (m3) {
-      case "disabled":
-        return `${styleText2("gray", S_RADIO_INACTIVE)} ${c2(s, (i) => styleText2("gray", i))}${n3.hint ? ` ${styleText2("dim", `(${n3.hint ?? "disabled"})`)}` : ""}`;
-      case "selected":
-        return `${c2(s, (i) => styleText2("dim", i))}`;
-      case "active":
-        return `${styleText2("green", S_RADIO_ACTIVE)} ${s}${n3.hint ? ` ${styleText2("dim", `(${n3.hint})`)}` : ""}`;
-      case "cancelled":
-        return `${c2(s, (i) => styleText2(["strikethrough", "dim"], i))}`;
-      default:
-        return `${styleText2("dim", S_RADIO_INACTIVE)} ${c2(s, (i) => styleText2("dim", i))}`;
-    }
-  }, d = t2.showInstructions ?? true;
-  return new n$1({
-    options: t2.options,
-    signal: t2.signal,
-    input: t2.input,
-    output: t2.output,
-    initialValue: t2.initialValue,
-    render() {
-      const n3 = t2.withGuide ?? settings.withGuide, m3 = `${symbol(this.state)}  `, s = `${symbolBar(this.state)}  `, i = wrapTextWithPrefix(t2.output, t2.message, s, m3), u5 = `${n3 ? `${styleText2("gray", S_BAR)}
-` : ""}${i}
-`;
-      switch (this.state) {
-        case "submit": {
-          const r2 = n3 ? `${styleText2("gray", S_BAR)}  ` : "", a2 = wrapTextWithPrefix(t2.output, o2(this.options[this.cursor], "selected"), r2);
-          return `${u5}${a2}`;
-        }
-        case "cancel": {
-          const r2 = n3 ? `${styleText2("gray", S_BAR)}  ` : "", a2 = wrapTextWithPrefix(t2.output, o2(this.options[this.cursor], "cancelled"), r2);
-          return `${u5}${a2}${n3 ? `
-${styleText2("gray", S_BAR)}` : ""}`;
-        }
-        default: {
-          const r2 = n3 ? `${styleText2("cyan", S_BAR)}  ` : "", a2 = u5.split(`
-`).length, p3 = d ? formatInstructionFooter(SELECT_INSTRUCTIONS, n3) : n3 ? [styleText2("cyan", S_BAR_END)] : [], b3 = p3.join(`
-`), f2 = p3.length + 1;
-          return `${u5}${r2}${limitOptions({
-            output: t2.output,
-            cursor: this.cursor,
-            options: this.options,
-            maxItems: t2.maxItems,
-            columnPadding: r2.length,
-            rowPadding: a2 + f2,
-            style: (g2, x2) => o2(g2, g2.disabled ? "disabled" : x2 ? "active" : "inactive")
-          }).join(`
-${r2}`)}
-${b3}
-`;
-        }
-      }
-    }
-  }).prompt();
-}, selectKey = (t2) => {
-  const l2 = (e, a2 = "inactive") => {
-    if (e === undefined)
-      return "";
-    const n3 = e.label ?? String(e.value);
-    return a2 === "selected" ? `${styleText2("dim", n3)}` : a2 === "cancelled" ? `${styleText2(["strikethrough", "dim"], n3)}` : a2 === "active" ? `${styleText2(["bgCyan", "gray"], ` ${e.value} `)} ${n3}${e.hint ? ` ${styleText2("dim", `(${e.hint})`)}` : ""}` : `${styleText2(["gray", "bgWhite", "inverse"], ` ${e.value} `)} ${n3}${e.hint ? ` ${styleText2("dim", `(${e.hint})`)}` : ""}`;
-  };
-  return new u3({
-    options: t2.options,
-    signal: t2.signal,
-    input: t2.input,
-    output: t2.output,
-    initialValue: t2.initialValue,
-    caseSensitive: t2.caseSensitive,
-    render() {
-      const e = t2.withGuide ?? settings.withGuide, a2 = `${e ? `${styleText2("gray", S_BAR)}
-` : ""}${symbol(this.state)}  ${t2.message}
-`;
-      switch (this.state) {
-        case "submit": {
-          const n3 = e ? `${styleText2("gray", S_BAR)}  ` : "", s = this.options.find((u5) => u5.value === this.value) ?? t2.options[0], c3 = wrapTextWithPrefix(t2.output, l2(s, "selected"), n3);
-          return `${a2}${c3}`;
-        }
-        case "cancel": {
-          const n3 = e ? `${styleText2("gray", S_BAR)}  ` : "", s = wrapTextWithPrefix(t2.output, l2(this.options[0], "cancelled"), n3);
-          return `${a2}${s}${e ? `
-${styleText2("gray", S_BAR)}` : ""}`;
-        }
-        default: {
-          const n3 = e ? `${styleText2("cyan", S_BAR)}  ` : "", s = e ? styleText2("cyan", S_BAR_END) : "", c3 = this.options.map((u5, d) => wrapTextWithPrefix(t2.output, l2(u5, d === this.cursor ? "active" : "inactive"), n3)).join(`
-`);
-          return `${a2}${c3}
-${s}
-`;
-        }
-      }
-    }
-  }).prompt();
-}, i, stream, tasks = async (o2, e) => {
-  for (const t2 of o2) {
-    if (t2.enabled === false)
-      continue;
-    const s = spinner(e);
-    s.start(t2.title);
-    const n3 = await t2.task(s.message);
-    s.stop(n3 || t2.title);
-  }
-}, A = (l2) => l2.replace(/\x1b\[(?:\d+;)*\d*[ABCDEFGHfJKSTsu]|\x1b\[(s|u)/g, ""), taskLog = (l2) => {
-  const r2 = l2.output ?? process.stdout, O = getColumns(r2), i2 = styleText2("gray", S_BAR), p3 = l2.spacing ?? 1, k = 3, m3 = l2.retainLog === true, d = !isCI() && isTTY(r2);
-  r2.write(`${i2}
-`), r2.write(`${styleText2("green", S_STEP_SUBMIT)}  ${l2.title}
-`);
-  for (let e = 0;e < p3; e++)
-    r2.write(`${i2}
-`);
-  const n3 = [
-    {
-      value: "",
-      full: ""
-    }
-  ];
-  let v = false;
-  const f2 = (e) => {
-    if (n3.length === 0)
-      return;
-    let s = 0;
-    e && (s += p3 + 2);
-    for (const t2 of n3) {
-      const { value: o2, result: a2 } = t2;
-      let g2 = a2?.message ?? o2;
-      if (g2.length === 0)
-        continue;
-      a2 === undefined && t2.header !== undefined && t2.header !== "" && (g2 += `
-${t2.header}`);
-      const E2 = g2.split(`
-`).reduce((b3, w) => w === "" ? b3 + 1 : b3 + Math.ceil((w.length + k) / O), 0);
-      s += E2;
-    }
-    s > 0 && (s += 1, r2.write(import_sisteransi2.erase.lines(s)));
-  }, h2 = (e, s, t2) => {
-    const o2 = t2 ? `${e.full}
-${e.value}` : e.value;
-    e.header !== undefined && e.header !== "" && log.message(e.header.split(`
-`).map((a2) => styleText2("bold", a2)), {
-      output: r2,
-      secondarySymbol: i2,
-      symbol: i2,
-      spacing: 0
-    }), log.message(o2.split(`
-`).map((a2) => styleText2("dim", a2)), {
-      output: r2,
-      secondarySymbol: i2,
-      symbol: i2,
-      spacing: s ?? p3
-    });
-  }, T3 = () => {
-    for (const e of n3) {
-      const { header: s, value: t2, full: o2 } = e;
-      (s === undefined || s.length === 0) && t2.length === 0 || h2(e, undefined, m3 === true && o2.length > 0);
-    }
-  }, L = (e, s, t2) => {
-    if (f2(false), (t2?.raw !== true || !v) && e.value !== "" && (e.value += `
-`), e.value += A(s), v = t2?.raw === true, l2.limit !== undefined) {
-      const o2 = e.value.split(`
-`), a2 = o2.length - l2.limit;
-      if (a2 > 0) {
-        const g2 = o2.splice(0, a2);
-        m3 && (e.full += (e.full === "" ? "" : `
-`) + g2.join(`
-`));
-      }
-      e.value = o2.join(`
-`);
-    }
-    d && y();
-  }, y = () => {
-    for (const e of n3)
-      e.result ? e.result.status === "error" ? log.error(e.result.message, { output: r2, secondarySymbol: i2, spacing: 0 }) : log.success(e.result.message, { output: r2, secondarySymbol: i2, spacing: 0 }) : e.value !== "" && h2(e, 0);
-  }, B = (e, s) => {
-    f2(false), e.result = s, d && y();
-  };
-  return {
-    message(e, s) {
-      L(n3[0], e, s);
-    },
-    group(e) {
-      const s = {
-        header: e,
-        value: "",
-        full: ""
-      };
-      return n3.push(s), {
-        message(t2, o2) {
-          L(s, t2, o2);
-        },
-        error(t2) {
-          B(s, {
-            status: "error",
-            message: t2
-          });
-        },
-        success(t2) {
-          B(s, {
-            status: "success",
-            message: t2
-          });
-        }
-      };
-    },
-    error(e, s) {
-      f2(true), log.error(e, { output: r2, secondarySymbol: i2, spacing: 1 }), s?.showLog !== false && T3(), n3.splice(1, n3.length - 1), n3[0].value = "", n3[0].full = "";
-    },
-    success(e, s) {
-      f2(true), log.success(e, { output: r2, secondarySymbol: i2, spacing: 1 }), s?.showLog === true && T3(), n3.splice(1, n3.length - 1), n3[0].value = "", n3[0].full = "";
-    }
-  };
-}, text = (e) => new n2({
-  validate: e.validate,
-  placeholder: e.placeholder,
-  defaultValue: e.defaultValue,
-  initialValue: e.initialValue,
-  output: e.output,
-  signal: e.signal,
-  input: e.input,
-  render() {
-    const i2 = e?.withGuide ?? settings.withGuide, s = `${`${i2 ? `${styleText2("gray", S_BAR)}
-` : ""}${symbol(this.state)}  `}${e.message}
-`, c3 = e.placeholder && e.placeholder.length > 0 ? styleText2("inverse", e.placeholder[0]) + styleText2("dim", e.placeholder.slice(1)) : styleText2(["inverse", "hidden"], "_"), o2 = this.userInput ? this.userInputWithCursor : c3, l2 = this.value ?? "";
-    switch (this.state) {
-      case "error": {
-        const n3 = this.error ? `  ${styleText2("yellow", this.error)}` : "", r2 = i2 ? `${styleText2("yellow", S_BAR)}  ` : "", d = i2 ? styleText2("yellow", S_BAR_END) : "";
-        return `${s.trim()}
-${r2}${o2}
-${d}${n3}
-`;
-      }
-      case "submit": {
-        const n3 = l2 ? `  ${styleText2("dim", l2)}` : "", r2 = i2 ? styleText2("gray", S_BAR) : "";
-        return `${s}${r2}${n3}`;
-      }
-      case "cancel": {
-        const n3 = l2 ? `  ${styleText2(["strikethrough", "dim"], l2)}` : "", r2 = i2 ? styleText2("gray", S_BAR) : "";
-        return `${s}${r2}${n3}${l2.trim() ? `
-${r2}` : ""}`;
-      }
-      default: {
-        const n3 = i2 ? `${styleText2("cyan", S_BAR)}  ` : "", r2 = i2 ? styleText2("cyan", S_BAR_END) : "";
-        return `${s}${n3}${o2}
-${r2}
-`;
-      }
-    }
-  }
-}).prompt();
-var init_dist4 = __esm(() => {
-  init_dist3();
-  init_dist3();
-  init_main();
-  init_dist2();
-  import_sisteransi2 = __toESM(require_src(), 1);
-  unicode = isUnicodeSupported();
-  S_STEP_ACTIVE = unicodeOr("◆", "*");
-  S_STEP_CANCEL = unicodeOr("■", "x");
-  S_STEP_ERROR = unicodeOr("▲", "x");
-  S_STEP_SUBMIT = unicodeOr("◇", "o");
-  S_BAR_START = unicodeOr("┌", "T");
-  S_BAR = unicodeOr("│", "|");
-  S_BAR_END = unicodeOr("└", "—");
-  S_BAR_START_RIGHT = unicodeOr("┐", "T");
-  S_BAR_END_RIGHT = unicodeOr("┘", "—");
-  S_RADIO_ACTIVE = unicodeOr("●", ">");
-  S_RADIO_INACTIVE = unicodeOr("○", " ");
-  S_CHECKBOX_ACTIVE = unicodeOr("◻", "[•]");
-  S_CHECKBOX_SELECTED = unicodeOr("◼", "[+]");
-  S_CHECKBOX_INACTIVE = unicodeOr("◻", "[ ]");
-  S_PASSWORD_MASK = unicodeOr("▪", "•");
-  S_BAR_H = unicodeOr("─", "-");
-  S_CORNER_TOP_RIGHT = unicodeOr("╮", "+");
-  S_CONNECT_LEFT = unicodeOr("├", "+");
-  S_CORNER_BOTTOM_RIGHT = unicodeOr("╯", "+");
-  S_CORNER_BOTTOM_LEFT = unicodeOr("╰", "+");
-  S_CORNER_TOP_LEFT = unicodeOr("╭", "+");
-  S_INFO = unicodeOr("●", "•");
-  S_SUCCESS = unicodeOr("◆", "*");
-  S_WARN = unicodeOr("▲", "!");
-  S_ERROR = unicodeOr("■", "x");
-  J = [
-    S_CORNER_TOP_LEFT,
-    S_CORNER_TOP_RIGHT,
-    S_CORNER_BOTTOM_LEFT,
-    S_CORNER_BOTTOM_RIGHT
-  ];
-  K = [S_BAR_START, S_BAR_START_RIGHT, S_BAR_END, S_BAR_END_RIGHT];
-  p2 = {
-    year: "yyyy",
-    month: "mm",
-    day: "dd"
-  };
-  MULTISELECT_INSTRUCTIONS = [
-    `${styleText2("dim", "↑/↓")} to navigate`,
-    `${styleText2("dim", "Space:")} select`,
-    `${styleText2("dim", "Enter:")} confirm`
-  ];
-  log = {
-    message: (s = [], {
-      symbol: e = styleText2("gray", S_BAR),
-      secondarySymbol: r2 = styleText2("gray", S_BAR),
-      output: m3 = process.stdout,
-      spacing: l2 = 1,
-      withGuide: c2
-    } = {}) => {
-      const t2 = [], o2 = c2 ?? settings.withGuide, f2 = o2 ? r2 : "", O = o2 ? `${e}  ` : "", u4 = o2 ? `${r2}  ` : "";
-      for (let i = 0;i < l2; i++)
-        t2.push(f2);
-      const g2 = Array.isArray(s) ? s : s.split(`
-`);
-      if (g2.length > 0) {
-        const [i, ...y] = g2;
-        i.length > 0 ? t2.push(`${O}${i}`) : t2.push(o2 ? e : "");
-        for (const p3 of y)
-          p3.length > 0 ? t2.push(`${u4}${p3}`) : t2.push(o2 ? r2 : "");
-      }
-      m3.write(`${t2.join(`
-`)}
-`);
-    },
-    info: (s, e) => {
-      log.message(s, { ...e, symbol: styleText2("blue", S_INFO) });
-    },
-    success: (s, e) => {
-      log.message(s, { ...e, symbol: styleText2("green", S_SUCCESS) });
-    },
-    step: (s, e) => {
-      log.message(s, { ...e, symbol: styleText2("green", S_STEP_SUBMIT) });
-    },
-    warn: (s, e) => {
-      log.message(s, { ...e, symbol: styleText2("yellow", S_WARN) });
-    },
-    warning: (s, e) => {
-      log.warn(s, e);
-    },
-    error: (s, e) => {
-      log.message(s, { ...e, symbol: styleText2("red", S_ERROR) });
-    }
-  };
-  u4 = {
-    light: unicodeOr("─", "-"),
-    heavy: unicodeOr("━", "="),
-    block: unicodeOr("█", "#")
-  };
-  SELECT_INSTRUCTIONS = [
-    `${styleText2("dim", "↑/↓")} to navigate`,
-    `${styleText2("dim", "Enter:")} confirm`
-  ];
-  i = `${styleText2("gray", S_BAR)}  `;
-  stream = {
-    message: async (e, { symbol: l2 = styleText2("gray", S_BAR) } = {}) => {
-      process.stdout.write(`${styleText2("gray", S_BAR)}
-${l2}  `);
-      let s = 3;
-      for await (let r2 of e) {
-        r2 = r2.replace(/\n/g, `
-${i}`), r2.includes(`
-`) && (s = 3 + stripVTControlCharacters(r2.slice(r2.lastIndexOf(`
-`))).length);
-        const o2 = stripVTControlCharacters(r2).length;
-        s + o2 < process.stdout.columns ? (s += o2, process.stdout.write(r2)) : (process.stdout.write(`
-${i}${r2.trimStart()}`), s = 3 + stripVTControlCharacters(r2.trimStart()).length);
-      }
-      process.stdout.write(`
-`);
-    },
-    info: (e) => stream.message(e, { symbol: styleText2("blue", S_INFO) }),
-    success: (e) => stream.message(e, { symbol: styleText2("green", S_SUCCESS) }),
-    step: (e) => stream.message(e, { symbol: styleText2("green", S_STEP_SUBMIT) }),
-    warn: (e) => stream.message(e, { symbol: styleText2("yellow", S_WARN) }),
-    warning: (e) => stream.warn(e),
-    error: (e) => stream.message(e, { symbol: styleText2("red", S_ERROR) })
-  };
-});
-
 // src/cli.ts
-import { copyFileSync as copyFileSync2, existsSync as existsSync20, mkdirSync as mkdirSync11, readFileSync as readFileSync17, rmSync as rmSync5, writeFileSync as writeFileSync12 } from "node:fs";
-import { dirname as dirname9, isAbsolute as isAbsolute5, join as join22, relative as relative3, resolve as resolve4 } from "node:path";
+import { spawnSync as spawnSync17 } from "node:child_process";
+import { existsSync as existsSync22, readFileSync as readFileSync19 } from "node:fs";
+import { join as join26, relative as relative5, resolve as resolve6 } from "node:path";
 
 // src/audit.ts
-import { spawnSync as spawnSync5 } from "node:child_process";
-import { existsSync as existsSync5, readdirSync as readdirSync4, readFileSync as readFileSync5 } from "node:fs";
-import { join as join6 } from "node:path";
+import { spawnSync as spawnSync7 } from "node:child_process";
+import { existsSync as existsSync6, readdirSync as readdirSync5, readFileSync as readFileSync6 } from "node:fs";
+import { join as join8 } from "node:path";
 
 // src/lib/approval.ts
 import { existsSync as existsSync4, mkdirSync as mkdirSync4, readdirSync as readdirSync3, readFileSync as readFileSync4, writeFileSync as writeFileSync5 } from "node:fs";
-import { dirname, join as join5, resolve } from "node:path";
+import { join as join5 } from "node:path";
 
-// node_modules/yaml/dist/index.js
-var composer = require_composer();
-var Document = require_Document();
-var Schema = require_Schema();
-var errors = require_errors();
-var Alias = require_Alias();
-var identity = require_identity();
-var Pair = require_Pair();
-var Scalar = require_Scalar();
-var YAMLMap = require_YAMLMap();
-var YAMLSeq = require_YAMLSeq();
-var cst = require_cst();
-var lexer = require_lexer();
-var lineCounter = require_line_counter();
-var parser = require_parser();
-var publicApi = require_public_api();
-var visit = require_visit();
-var $Composer = composer.Composer;
-var $Document = Document.Document;
-var $Schema = Schema.Schema;
-var $YAMLError = errors.YAMLError;
-var $YAMLParseError = errors.YAMLParseError;
-var $YAMLWarning = errors.YAMLWarning;
-var $Alias = Alias.Alias;
-var $isAlias = identity.isAlias;
-var $isCollection = identity.isCollection;
-var $isDocument = identity.isDocument;
-var $isMap = identity.isMap;
-var $isNode = identity.isNode;
-var $isPair = identity.isPair;
-var $isScalar = identity.isScalar;
-var $isSeq = identity.isSeq;
-var $Pair = Pair.Pair;
-var $Scalar = Scalar.Scalar;
-var $YAMLMap = YAMLMap.YAMLMap;
-var $YAMLSeq = YAMLSeq.YAMLSeq;
-var $Lexer = lexer.Lexer;
-var $LineCounter = lineCounter.LineCounter;
-var $Parser = parser.Parser;
-var $parse = publicApi.parse;
-var $parseAllDocuments = publicApi.parseAllDocuments;
-var $parseDocument = publicApi.parseDocument;
-var $stringify = publicApi.stringify;
-var $visit = visit.visit;
-var $visitAsync = visit.visitAsync;
+// src/lib/receipt.ts
+import { spawnSync as spawnSync3 } from "node:child_process";
+import { createHash } from "node:crypto";
+import {
+  chmodSync,
+  existsSync as existsSync3,
+  mkdirSync as mkdirSync3,
+  readdirSync as readdirSync2,
+  readFileSync as readFileSync3,
+  writeFileSync as writeFileSync3
+} from "node:fs";
+import { join as join3 } from "node:path";
+
+// src/lib/goal.ts
+import { spawnSync as spawnSync2 } from "node:child_process";
+import { existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync, readFileSync as readFileSync2, rmSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { isAbsolute, join as join2 } from "node:path";
+
+// src/lib/task.ts
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve, sep } from "node:path";
+
+// src/lib/glob.ts
+function segmentToRegex(segment) {
+  let out = "";
+  for (const ch of segment) {
+    if (ch === "*")
+      out += "[^/]*";
+    else if (ch === "?")
+      out += "[^/]";
+    else
+      out += ch.replace(/[.+^${}()|[\]\\]/, "\\$&");
+  }
+  return out;
+}
+function globToRegExp(pattern) {
+  const segments = pattern.split("/");
+  let re = "^";
+  for (let i = 0;i < segments.length; i++) {
+    const last = i === segments.length - 1;
+    if (segments[i] === "**") {
+      re += last ? ".+" : "(?:[^/]+/)*";
+    } else {
+      re += segmentToRegex(segments[i]) + (last ? "" : "/");
+    }
+  }
+  return new RegExp(`${re}$`);
+}
+var globMatch = (pattern, path) => globToRegExp(pattern).test(path);
+
+// src/lib/classify.ts
+var BUILTIN_EXEMPT_GLOBS = [
+  ".sddx/**",
+  "docs/**",
+  "**/*.md",
+  "package.json",
+  "tsconfig.json",
+  ".github/**",
+  "openspec/**",
+  ".claude/**"
+];
+var BUILTIN_TEST_GLOBS = [
+  "**/*.test.*",
+  "**/*.spec.*",
+  "**/*_test.*",
+  "**/test_*.py",
+  "tests/**",
+  "test/**",
+  "__tests__/**",
+  "spec/**"
+];
+var splitGlobs = (value) => (value ?? "").split(/\s+/).filter((g) => g !== "");
+var normalizeRelPath = (path) => path.replace(/\\/g, "/").replace(/^(\.\/)+/, "");
+function classify(relPath, allow, config = {}) {
+  const path = normalizeRelPath(relPath);
+  for (const entry of allow) {
+    if (normalizeRelPath(entry) === path)
+      return { rule: "allow", pattern: entry };
+  }
+  for (const pattern of [...BUILTIN_EXEMPT_GLOBS, ...splitGlobs(config.exemptGlobs)]) {
+    if (globMatch(pattern, path))
+      return { rule: "exempt", pattern };
+  }
+  for (const pattern of [...BUILTIN_TEST_GLOBS, ...splitGlobs(config.testGlobs)]) {
+    if (globMatch(pattern, path))
+      return { rule: "test", pattern };
+  }
+  return { rule: "implementation", pattern: null };
+}
+
+// src/lib/task.ts
+var TASK_SCHEMA = 2;
+var TRANSITIONS = {
+  PLANNED: ["IN_PROGRESS", "ABANDONED"],
+  IN_PROGRESS: ["IN_REVIEW", "ABANDONED"],
+  IN_REVIEW: ["DONE", "IN_PROGRESS", "ABANDONED"],
+  DONE: [],
+  ABANDONED: []
+};
+var DEFAULT_RETRY = { max_attempts: 1, workspace: "fresh" };
+function dependsOnList(t) {
+  if (t.depends_on === undefined)
+    return [];
+  return Array.isArray(t.depends_on) ? t.depends_on : [t.depends_on];
+}
+function retryPolicyOf(t) {
+  return { ...DEFAULT_RETRY, ...t.retry ?? {} };
+}
+function failurePolicyOf(t) {
+  return t.on_dependency_failure ?? "skip";
+}
+var sddxDir = (cwd) => join(cwd, ".sddx");
+var taskPath = (cwd, id) => join(sddxDir(cwd), "tasks", `${id}.json`);
+function mainRootOf(cwd) {
+  const abs = resolve(cwd);
+  const marker = `${sep}.sddx-worktrees${sep}`;
+  const at = abs.indexOf(marker);
+  return at === -1 ? abs : abs.slice(0, at);
+}
+var TERMINAL_PHASES = new Set(["DONE", "ABANDONED"]);
+var isTerminal = (phase) => TERMINAL_PHASES.has(phase);
+var isStarted = (t) => t.workspace !== undefined;
+var isV6Task = (raw) => typeof raw === "object" && raw !== null && raw.schema === TASK_SCHEMA;
+function createPlannedTask(root, input) {
+  const now = new Date().toISOString();
+  const t = {
+    schema: TASK_SCHEMA,
+    id: input.id,
+    task: input.title,
+    goal_id: input.goal_id,
+    spec_path: input.spec_path,
+    phase: "PLANNED",
+    oracle: input.oracle,
+    scope: input.scope,
+    ...input.assumptions.length > 0 ? { assumptions: input.assumptions } : {},
+    ...input.depends_on.length > 0 ? { depends_on: input.depends_on } : {},
+    ...input.on_dependency_failure ? { on_dependency_failure: input.on_dependency_failure } : {},
+    ...input.retry ? { retry: input.retry } : {},
+    attempt_count: 1,
+    iterations: 0,
+    reviews: [],
+    allow: [],
+    history: [{ phase: "PLANNED", at: now }],
+    created_at: now,
+    updated_at: now
+  };
+  const path = taskPath(root, t.id);
+  if (existsSync(path))
+    throw new Error(`task ${t.id} already exists at ${path}`);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(t, null, 2)}
+`);
+  return t;
+}
+function readTask(cwd, id) {
+  const path = taskPath(cwd, id);
+  if (!existsSync(path))
+    throw new Error(`no such task: ${id} (${path})`);
+  return JSON.parse(readFileSync(path, "utf8"));
+}
+function writeTask(cwd, t) {
+  t.updated_at = new Date().toISOString();
+  mkdirSync(join(sddxDir(cwd), "tasks"), { recursive: true });
+  writeFileSync(taskPath(cwd, t.id), `${JSON.stringify(t, null, 2)}
+`);
+}
+function assertV6(t) {
+  if (!isV6Task(t)) {
+    throw new Error(`task ${t.id ?? "?"} was written by sddx 5 or earlier and cannot be advanced by this version. Run \`sddx migrate\`.`);
+  }
+}
+function transition(t, to, note) {
+  assertV6(t);
+  if (!TRANSITIONS[t.phase].includes(to)) {
+    throw new Error(`task ${t.id}: illegal transition ${t.phase} -> ${to}`);
+  }
+  t.phase = to;
+  t.history.push({ phase: to, at: new Date().toISOString(), ...note ? { note } : {} });
+  return t;
+}
+function allowPath(t, path) {
+  if (isTerminal(t.phase)) {
+    throw new Error(`task ${t.id} is ${t.phase}; allow-list is frozen on terminal tasks`);
+  }
+  const normalized = normalizeRelPath(path);
+  if (normalized === "" || normalized.startsWith("/") || normalized.split("/").includes("..")) {
+    throw new Error(`allow requires a repo-relative path, got: ${path}`);
+  }
+  if (!t.allow.includes(normalized))
+    t.allow.push(normalized);
+  return t;
+}
+function blockedOn(cwd, task) {
+  for (const parentId of dependsOnList(task)) {
+    if (parentId === task.id)
+      continue;
+    const parent = resolveTaskState(cwd, parentId);
+    if (parent?.phase !== "DONE")
+      return parentId;
+  }
+  return null;
+}
+function skippedOn(cwd, task, seen = new Set) {
+  if (failurePolicyOf(task) !== "skip")
+    return null;
+  if (seen.has(task.id))
+    return null;
+  seen.add(task.id);
+  for (const parentId of dependsOnList(task)) {
+    if (parentId === task.id)
+      continue;
+    const parent = resolveTaskState(cwd, parentId);
+    if (!parent)
+      continue;
+    if (parent.phase === "ABANDONED")
+      return parentId;
+    if (skippedOn(cwd, parent, seen))
+      return parentId;
+  }
+  return null;
+}
+function abandonOrRetry(t, reason) {
+  assertV6(t);
+  if (isTerminal(t.phase)) {
+    throw new Error(`task ${t.id}: illegal transition ${t.phase} -> ABANDONED`);
+  }
+  const policy = retryPolicyOf(t);
+  const attempts = t.attempt_count ?? 1;
+  const at = new Date().toISOString();
+  t.abandon_reason = reason;
+  if (t.phase !== "PLANNED" && attempts < policy.max_attempts) {
+    t.attempt_count = attempts + 1;
+    t.phase = "PLANNED";
+    t.iterations = 0;
+    t.verified = undefined;
+    t.last_failure = undefined;
+    t.stuck = undefined;
+    t.strict = undefined;
+    t.history.push({ phase: "PLANNED", at, note: `retry after: ${reason}` });
+    return { retried: true, attempt_count: t.attempt_count, max_attempts: policy.max_attempts };
+  }
+  t.phase = "ABANDONED";
+  t.history.push({ phase: "ABANDONED", at, note: reason });
+  return { retried: false, attempt_count: attempts, max_attempts: policy.max_attempts };
+}
+function readTaskFrom(dir, id) {
+  try {
+    return JSON.parse(readFileSync(taskPath(dir, id), "utf8"));
+  } catch {
+    return null;
+  }
+}
+function readTaskFromBranch(cwd, id) {
+  const r = spawnSync("git", ["show", `sddx/${id}:.sddx/tasks/${id}.json`], {
+    cwd,
+    encoding: "utf8"
+  });
+  if (r.status !== 0)
+    return null;
+  try {
+    return JSON.parse(r.stdout);
+  } catch {
+    return null;
+  }
+}
+function resolveTaskState(cwd, id) {
+  const root = mainRootOf(cwd);
+  return readTaskFrom(join(root, ".sddx-worktrees", id), id) ?? readTaskFrom(root, id) ?? readTaskFromBranch(root, id);
+}
+function taskHome(cwd, id) {
+  const root = mainRootOf(cwd);
+  const wt = join(root, ".sddx-worktrees", id);
+  if (existsSync(taskPath(wt, id)))
+    return wt;
+  if (existsSync(taskPath(root, id)))
+    return root;
+  return null;
+}
+
+// src/lib/goal.ts
+var goalsDir = (cwd) => join2(sddxDir(cwd), "goals");
+var goalPath = (cwd, id) => join2(goalsDir(cwd), `${id}.json`);
+var goalRef = (id) => `refs/sddx/goals/${id}`;
+var sh = (cwd, args, env) => spawnSync2("git", args, { cwd, encoding: "utf8", env: { ...process.env, ...env } });
+function mainRoot(cwd) {
+  const r = sh(cwd, ["rev-parse", "--git-common-dir"]);
+  if (r.status !== 0)
+    return cwd;
+  const dir = (r.stdout ?? "").trim();
+  const abs = isAbsolute(dir) ? dir : join2(cwd, dir);
+  return abs.replace(/\/\.git\/?$/, "").replace(/\/\.git$/, "") || cwd;
+}
+function writeGoalBlob(root, id, content, expected) {
+  const blob = spawnSync2("git", ["hash-object", "-w", "--stdin"], {
+    cwd: root,
+    input: content,
+    encoding: "utf8"
+  });
+  if (blob.status !== 0)
+    throw new Error(`git hash-object failed: ${blob.stderr}`);
+  const blobSha = (blob.stdout ?? "").trim();
+  const ref = goalRef(id);
+  const cas = expected ? sh(root, ["update-ref", ref, blobSha, expected]) : sh(root, ["update-ref", ref, blobSha, ""]);
+  if (cas.status !== 0) {
+    throw new Error(`goal ${id} was modified concurrently — re-read it and reapply the change ` + `(${(cas.stderr ?? "").trim()})`);
+  }
+}
+var isGitRepo = (root) => sh(root, ["rev-parse", "--git-dir"]).status === 0;
+function goalBlobSha(root, id) {
+  const r = sh(root, ["rev-parse", "--verify", "--quiet", goalRef(id)]);
+  return r.status === 0 ? (r.stdout ?? "").trim() : null;
+}
+function pushGoalRef(cwd, id) {
+  const root = mainRoot(cwd);
+  const ref = goalRef(id);
+  return sh(root, ["push", "origin", `${ref}:${ref}`]).status === 0;
+}
+function readGoalFromBranch(root, id) {
+  const r = sh(root, ["cat-file", "-p", goalRef(id)]);
+  if (r.status !== 0)
+    return null;
+  try {
+    return JSON.parse(r.stdout ?? "");
+  } catch {
+    return null;
+  }
+}
+var goalIdFromSpec = (specPath) => (specPath.split(/[\\/]/).pop() ?? specPath).replace(/\.md$/, "");
+var runBranchName = (id) => `sddx/run-${id}`;
+function createGoal(cwd, goalSentence, taskIds, opts) {
+  if (taskIds.length === 0) {
+    throw new Error("a goal requires at least one task id");
+  }
+  const now = new Date().toISOString();
+  const id = opts.id;
+  const root = mainRoot(cwd);
+  const path = goalPath(root, id);
+  if (existsSync2(path))
+    throw new Error(`goal ${id} already exists at ${path}`);
+  if (goalBlobSha(root, id) !== null) {
+    throw new Error(`goal ${id} already exists at ${goalRef(id)}`);
+  }
+  for (const tid of taskIds) {
+    if (!resolveTaskState(cwd, tid)) {
+      throw new Error(`task ${tid} does not exist — cannot register it in a goal`);
+    }
+  }
+  const g = {
+    id,
+    goal: goalSentence,
+    spec_path: opts.specPath,
+    task_ids: taskIds,
+    ...opts.deps && Object.keys(opts.deps).length > 0 ? { deps: opts.deps } : {},
+    run_branch: opts.runBranch,
+    base_sha: opts.baseSha,
+    merges: [],
+    ...opts.approval ? { approval: { amendments: [], ...opts.approval } } : {},
+    created_at: now,
+    updated_at: now
+  };
+  if (isGitRepo(root)) {
+    writeGoalBlob(root, id, `${JSON.stringify(g, null, 2)}
+`, null);
+  } else {
+    mkdirSync2(goalsDir(root), { recursive: true });
+    writeFileSync2(path, `${JSON.stringify(g, null, 2)}
+`);
+  }
+  return g;
+}
+function readGoal(cwd, id) {
+  const root = mainRoot(cwd);
+  const path = goalPath(root, id);
+  const g = readGoalFromBranch(root, id) ?? (existsSync2(path) ? JSON.parse(readFileSync2(path, "utf8")) : null);
+  if (!g)
+    throw new Error(`no such goal: ${id} (${goalRef(id)} or ${path})`);
+  if (typeof g.run_branch !== "string" || typeof g.base_sha !== "string" || !g.merges) {
+    throw new Error(`goal ${id} (${path}) is missing run_branch/base_sha/merges — written by an ` + "incompatible sddx version; recreate it with the current graph/goal create");
+  }
+  return g;
+}
+function goalExists(cwd, id) {
+  const root = mainRoot(cwd);
+  return goalBlobSha(root, id) !== null || existsSync2(goalPath(root, id));
+}
+function deleteCreatedGoal(cwd, created) {
+  const root = mainRoot(cwd);
+  const current = goalBlobSha(root, created.id);
+  if (current !== null) {
+    const r = sh(root, ["update-ref", "-d", goalRef(created.id), current]);
+    if (r.status !== 0)
+      throw new Error(`git update-ref -d failed: ${(r.stderr ?? "").trim()}`);
+    return;
+  }
+  rmSync(goalPath(root, created.id), { force: true });
+}
+function writeGoal(cwd, g) {
+  const root = mainRoot(cwd);
+  g.updated_at = new Date().toISOString();
+  const content = `${JSON.stringify(g, null, 2)}
+`;
+  const current = goalBlobSha(root, g.id);
+  if (current === null) {
+    const legacy = goalPath(root, g.id);
+    if (existsSync2(legacy)) {
+      writeFileSync2(legacy, content);
+      return;
+    }
+    throw new Error(`no such goal: ${g.id} (${goalRef(g.id)})`);
+  }
+  writeGoalBlob(root, g.id, content, current);
+}
+function findGoalForTask(cwd, id) {
+  const root = mainRoot(cwd);
+  const dir = goalsDir(root);
+  if (existsSync2(dir)) {
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith(".json"))
+        continue;
+      try {
+        const g = JSON.parse(readFileSync2(join2(dir, f), "utf8"));
+        if (g.task_ids.includes(id))
+          return g;
+      } catch {}
+    }
+  }
+  const refs = sh(root, ["for-each-ref", "--format=%(refname)", "refs/sddx/goals/"]);
+  for (const ref of (refs.stdout ?? "").split(`
+`).map((s) => s.trim())) {
+    if (!ref.startsWith("refs/sddx/goals/"))
+      continue;
+    const g = readGoalFromBranch(root, ref.slice("refs/sddx/goals/".length));
+    if (g?.task_ids.includes(id))
+      return g;
+  }
+  return null;
+}
+function currentlyMergedTaskIds(g) {
+  const latestByTask = new Map;
+  for (const entry of g.merges)
+    latestByTask.set(entry.task_id, entry);
+  return [...latestByTask.values()].filter((e) => e.result === "merged").map((e) => e.task_id);
+}
+function goalCounts(g) {
+  const merged = currentlyMergedTaskIds(g).length;
+  return { merged, outstanding: g.task_ids.length - merged, total: g.task_ids.length };
+}
+
+// src/lib/receipt.ts
+var sha256 = (data) => createHash("sha256").update(data).digest("hex");
+var receiptsDir = (cwd) => join3(cwd, ".sddx", "receipts");
+var receiptPath = (cwd, taskId) => join3(receiptsDir(cwd), `${taskId}.json`);
+function listReceipts(cwd) {
+  const dir = receiptsDir(cwd);
+  if (!existsSync3(dir))
+    return [];
+  return readdirSync2(dir).filter((f) => f.endsWith(".json")).map((f) => ({
+    file: join3(dir, f),
+    receipt: JSON.parse(readFileSync3(join3(dir, f), "utf8"))
+  })).sort((a, b) => a.receipt.seq - b.receipt.seq);
+}
+function chainHead(cwd) {
+  const receipts = listReceipts(cwd);
+  const last = receipts.at(-1);
+  if (!last)
+    return { seq: 0, prevHash: "genesis" };
+  return { seq: last.receipt.seq, prevHash: sha256(readFileSync3(last.file)) };
+}
+var HEX64 = /^[0-9a-f]{64}$/;
+var HEX40 = /^[0-9a-f]{40}$/;
+function validateReceipt(raw) {
+  const errors = [];
+  if (typeof raw !== "object" || raw === null)
+    return ["receipt must be an object"];
+  const r = raw;
+  const need = (field, ok) => {
+    if (!ok)
+      errors.push(`${field}: missing or invalid`);
+  };
+  need("version", [1, 2, 3, 4, 5].includes(r.version));
+  const version = typeof r.version === "number" ? r.version : 0;
+  if (version >= 2) {
+    need("allow", Array.isArray(r.allow) && r.allow.every((p) => typeof p === "string"));
+  } else {
+    need("allow", r.allow === undefined);
+  }
+  if (version >= 4) {
+    if (r.approval !== undefined) {
+      const a = r.approval;
+      need("approval", typeof a === "object" && a !== null && (a.mode === "human" || a.mode === "auto") && typeof a.plan_sha256 === "string" && HEX64.test(a.plan_sha256) && (a.requested_mode === undefined || a.requested_mode === "human" || a.requested_mode === "auto") && (a.authorization === undefined || a.authorization === "human-approval" || a.authorization === "auto") && Array.isArray(a.assumptions) && a.assumptions.every((x) => typeof x === "string") && Array.isArray(a.amendments) && a.amendments.length === 0 && (version >= 5 ? (a.binding === "signed" ? typeof a.signature === "string" && typeof a.signer === "string" : a.binding === "unsigned" && a.signature === undefined && a.signer === undefined) && (a.harness_reported === undefined || typeof a.harness_reported === "string") : a.binding === undefined && a.harness_reported === undefined));
+    }
+  } else {
+    need("approval", r.approval === undefined);
+  }
+  if (version >= 5)
+    validateV5(r, need);
+  else {
+    for (const k of ["spec", "boundary", "review", "profile", "strict_runs"]) {
+      need(k, r[k] === undefined);
+    }
+  }
+  if (version <= 2) {
+    need("exit_code", typeof r.exit_code === "number");
+    need("duration_ms", typeof r.duration_ms === "number" && r.duration_ms >= 0);
+    need("stdout_sha256", typeof r.stdout_sha256 === "string" && HEX64.test(r.stdout_sha256));
+    need("stderr_sha256", typeof r.stderr_sha256 === "string" && HEX64.test(r.stderr_sha256));
+    need("runs", r.runs === undefined);
+    need("env", r.env === undefined);
+    need("signature", r.signature === undefined && r.signer === undefined);
+  } else {
+    need("exit_code", r.exit_code === undefined);
+    need("duration_ms", r.duration_ms === undefined);
+    need("stdout_sha256", r.stdout_sha256 === undefined);
+    need("stderr_sha256", r.stderr_sha256 === undefined);
+    const runs = r.runs;
+    need("runs", Array.isArray(runs) && runs.length >= 1 && runs.every((run) => typeof run === "object" && run !== null && typeof run.exit_code === "number" && typeof run.duration_ms === "number" && run.duration_ms >= 0 && HEX64.test(String(run.stdout_sha256)) && HEX64.test(String(run.stderr_sha256))));
+    const env = r.env;
+    need("env", !!env && typeof env === "object" && typeof env.os === "string" && env.os !== "" && typeof env.arch === "string" && env.arch !== "" && (env.runtime === "bun" || env.runtime === "unknown" || env.runtime === "node") && typeof env.runtime_version === "string" && env.runtime_version !== "" && typeof env.dirty_tree === "boolean");
+    need("signature", r.signature === undefined && r.signer === undefined || typeof r.signature === "string" && r.signature !== "" && typeof r.signer === "string" && r.signer !== "");
+  }
+  need("task_id", typeof r.task_id === "string" && r.task_id !== "");
+  need("seq", typeof r.seq === "number" && Number.isInteger(r.seq) && r.seq >= 1);
+  need("prev", r.prev === "genesis" || typeof r.prev === "string" && HEX64.test(r.prev));
+  need("harness", typeof r.harness === "string" && r.harness !== "");
+  need("model", r.model === null || typeof r.model === "string");
+  need("plugin_version", typeof r.plugin_version === "string");
+  const o = r.oracle;
+  need("oracle", !!o && typeof o === "object" && typeof o.run === "string" && typeof o.expect === "string");
+  need("base_sha", typeof r.base_sha === "string" && HEX40.test(r.base_sha));
+  need("tree_sha", typeof r.tree_sha === "string" && HEX40.test(r.tree_sha));
+  need("verdict", r.verdict === "pass");
+  need("verified_at", typeof r.verified_at === "string" && !Number.isNaN(Date.parse(r.verified_at)));
+  return errors;
+}
+var isSha = (v, re) => typeof v === "string" && re.test(v);
+function validateV5(r, need) {
+  need("approval", typeof r.approval === "object" && r.approval !== null);
+  const spec = r.spec;
+  need("spec", !!spec && typeof spec === "object" && typeof spec.path === "string" && spec.path !== "" && typeof spec.goal_id === "string" && spec.goal_id !== "");
+  const b = r.boundary;
+  const red = b?.red;
+  need("boundary", !!b && typeof b === "object" && isSha(b.base_sha, HEX40) && isSha(b.tree_sha, HEX40) && Array.isArray(b.test_files) && b.test_files.every((f) => typeof f === "string") && !!red && typeof red.exit_code === "number" && isSha(red.stdout_sha256, HEX64) && isSha(red.stderr_sha256, HEX64));
+  const rv = r.review;
+  need("review", !!rv && typeof rv === "object" && rv.verdict === "pass" && isSha(rv.diff_sha256, HEX64) && (rv.reviewer === null || typeof rv.reviewer === "string") && (rv.findings_sha256 === undefined || isSha(rv.findings_sha256, HEX64)) && typeof rv.at === "string" && !Number.isNaN(Date.parse(rv.at)));
+  need("profile", r.profile === "default" || r.profile === "strict");
+  need("strict_runs", r.profile === "strict" ? Array.isArray(r.strict_runs) && r.strict_runs.every((x) => typeof x === "object" && x !== null && typeof x.test_exit === "number" && (x.source === "hook" || x.source === "manual") && typeof x.at === "string") : r.strict_runs === undefined);
+}
+function readReceiptRawFrom(dir, id) {
+  try {
+    return readFileSync3(receiptPath(dir, id));
+  } catch {
+    return null;
+  }
+}
+function readReceiptRawFromRef(cwd, ref, id) {
+  const r = spawnSync3("git", ["show", `${ref}:.sddx/receipts/${id}.json`], { cwd });
+  return r.status === 0 ? r.stdout : null;
+}
+function resolveReceiptRaw(cwd, id) {
+  const direct = readReceiptRawFrom(join3(cwd, ".sddx-worktrees", id), id) ?? readReceiptRawFrom(cwd, id) ?? readReceiptRawFromRef(cwd, `sddx/${id}`, id);
+  if (direct)
+    return direct;
+  const goal = findGoalForTask(cwd, id);
+  return goal ? readReceiptRawFromRef(cwd, goal.run_branch, id) : null;
+}
+function resolveReceiptPath(cwd, id) {
+  const wt = join3(cwd, ".sddx-worktrees", id, ".sddx", "receipts", `${id}.json`);
+  if (existsSync3(wt))
+    return wt;
+  const local = join3(cwd, ".sddx", "receipts", `${id}.json`);
+  if (existsSync3(local))
+    return local;
+  if (readReceiptRawFromRef(cwd, `sddx/${id}`, id)) {
+    return `sddx/${id}:.sddx/receipts/${id}.json`;
+  }
+  const goal = findGoalForTask(cwd, id);
+  if (goal && readReceiptRawFromRef(cwd, goal.run_branch, id)) {
+    return `${goal.run_branch}:.sddx/receipts/${id}.json`;
+  }
+  return null;
+}
+function resolveReceipt(cwd, id) {
+  const raw = resolveReceiptRaw(cwd, id);
+  if (!raw)
+    return null;
+  try {
+    return JSON.parse(raw.toString("utf8"));
+  } catch {
+    return null;
+  }
+}
+function verifyChain(cwd) {
+  const errors = [];
+  const receipts = listReceipts(cwd);
+  const seqByHash = new Map;
+  for (const { file, receipt } of receipts) {
+    seqByHash.set(sha256(readFileSync3(file)), receipt.seq);
+  }
+  for (const { file, receipt } of receipts) {
+    for (const e of validateReceipt(receipt))
+      errors.push(`${file}: ${e}`);
+    if (receipt.prev === "genesis") {
+      if (receipt.seq !== 1) {
+        errors.push(`${file}: genesis-linked receipt must have seq 1, got ${receipt.seq}`);
+      }
+      continue;
+    }
+    const parentSeq = seqByHash.get(receipt.prev);
+    if (parentSeq === undefined) {
+      errors.push(`${file}: prev hash matches no receipt — chain broken (tampered or deleted)`);
+    } else if (parentSeq >= receipt.seq) {
+      errors.push(`${file}: seq ${receipt.seq} must exceed parent seq ${parentSeq}`);
+    }
+  }
+  return errors;
+}
+
+// src/lib/sign.ts
+import { spawnSync as spawnSync4 } from "node:child_process";
+import { mkdtempSync, rmSync as rmSync2, writeFileSync as writeFileSync4 } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { join as join4 } from "node:path";
+var DEFAULT_NAMESPACE = "sddx-receipt";
+var gitConfigCache = new Map;
+function gitConfig(cwd, key) {
+  const cacheKey = `${cwd}\x00${key}`;
+  const cached = gitConfigCache.get(cacheKey);
+  if (cached !== undefined)
+    return cached;
+  const r = spawnSync4("git", ["config", "--get", key], { cwd, encoding: "utf8" });
+  const v = r.status === 0 ? (r.stdout ?? "").trim() : "";
+  const result = v === "" ? null : v;
+  gitConfigCache.set(cacheKey, result);
+  return result;
+}
+var expandHome = (p) => p.startsWith("~/") ? join4(homedir(), p.slice(2)) : p;
+function signPayload(cwd, payload, namespace = DEFAULT_NAMESPACE) {
+  if (gitConfig(cwd, "gpg.format") !== "ssh")
+    return null;
+  const key = gitConfig(cwd, "user.signingkey");
+  if (!key || key.startsWith("ssh-"))
+    return null;
+  const signer = gitConfig(cwd, "user.email");
+  if (!signer)
+    return null;
+  const r = spawnSync4("ssh-keygen", ["-Y", "sign", "-n", namespace, "-f", expandHome(key)], {
+    cwd,
+    input: payload,
+    encoding: "utf8"
+  });
+  if (r.status !== 0)
+    return null;
+  const signature = (r.stdout ?? "").trim();
+  return signature.startsWith("-----BEGIN SSH SIGNATURE-----") ? { signature, signer } : null;
+}
+function verifySignature(cwd, payload, sig, namespace = DEFAULT_NAMESPACE) {
+  const allowed = gitConfig(cwd, "gpg.ssh.allowedSignersFile");
+  if (!allowed)
+    return "unverifiable";
+  const tmp = mkdtempSync(join4(tmpdir(), "sddx-sig-"));
+  try {
+    const sigFile = join4(tmp, "receipt.sig");
+    writeFileSync4(sigFile, `${sig.signature}
+`);
+    const r = spawnSync4("ssh-keygen", ["-Y", "verify", "-f", expandHome(allowed), "-I", sig.signer, "-n", namespace, "-s", sigFile], { cwd, input: payload, encoding: "utf8" });
+    return r.status === 0 ? "valid" : "invalid";
+  } finally {
+    rmSync2(tmp, { recursive: true, force: true });
+  }
+}
+
+// src/lib/approval.ts
+var approvalsDir = (cwd) => join5(sddxDir(cwd), "approvals");
+var approvalPath = (cwd, hash) => join5(approvalsDir(cwd), `${hash}.json`);
+function planHash(specPath) {
+  try {
+    return { hash: sha256(readFileSync4(specPath)), errors: [] };
+  } catch (e) {
+    return { hash: "", errors: [`plan: ${specPath} unreadable: ${e.message}`] };
+  }
+}
+function writeApproval(cwd, input) {
+  const sig = signPayload(cwd, input.plan_sha256, "sddx-approval");
+  const approval = {
+    plan_sha256: input.plan_sha256,
+    mode: input.mode,
+    ...input.harness_reported ? { harness_reported: input.harness_reported } : {},
+    at: new Date().toISOString(),
+    ...sig ? { signature: sig.signature, signer: sig.signer } : {},
+    amendments: []
+  };
+  mkdirSync4(approvalsDir(cwd), { recursive: true });
+  writeFileSync5(approvalPath(cwd, input.plan_sha256), `${JSON.stringify(approval, null, 2)}
+`);
+  return approval;
+}
+function readApproval(cwd, hash) {
+  const path = approvalPath(cwd, hash);
+  if (!existsSync4(path))
+    return null;
+  try {
+    const parsed = JSON.parse(readFileSync4(path, "utf8"));
+    if (typeof parsed !== "object" || parsed === null)
+      return null;
+    const a = parsed;
+    if (a.plan_sha256 !== hash)
+      return null;
+    return a;
+  } catch {
+    return null;
+  }
+}
+function findApproval(cwd, specPath) {
+  const { hash, errors } = planHash(specPath);
+  if (hash === "")
+    return { ok: false, hash: "", reason: errors.join("; ") };
+  const approval = readApproval(cwd, hash);
+  if (!approval) {
+    return {
+      ok: false,
+      hash,
+      reason: `no approval on file for plan ${hash.slice(0, 12)}; approve it with: sddx plan approve ${specPath}`
+    };
+  }
+  return { ok: true, hash, approval };
+}
+function mergeAssumptions(goalLevel, nodeLevel) {
+  const out = [];
+  for (const a of [...goalLevel, ...nodeLevel])
+    if (!out.includes(a))
+      out.push(a);
+  return out;
+}
+var renderBlocker = (b) => `${b.node ? `node "${b.node}": ` : ""}${b.decision} — ${b.impact} ${b.next_step}`;
+var SELF_MODIFYING_GLOBS = [
+  "hooks/**",
+  "templates/**",
+  ".github/workflows/**",
+  "dist/**",
+  "bin/**",
+  ".claude/**"
+];
+var SENSITIVE_SEGMENTS = [
+  "auth",
+  "migrations",
+  "secrets",
+  "credentials",
+  "billing"
+];
+var SENSITIVE_GLOBS = ["infra/**", "terraform/**", "k8s/**"];
+var SENSITIVE_FILENAMES = [/^Dockerfile/i, /^\.env/i, /^docker-compose/i];
+function namesSensitiveArea(scope) {
+  for (const glob of scope) {
+    const segments = glob.replace(/\\/g, "/").split("/");
+    for (const seg of segments) {
+      for (const word of seg.toLowerCase().split(/[^a-z0-9]+/)) {
+        if (word && SENSITIVE_SEGMENTS.includes(word))
+          return word;
+      }
+    }
+    const last = segments[segments.length - 1] ?? "";
+    const literal = last.replace(/[*?]/g, "");
+    if (literal && SENSITIVE_FILENAMES.some((re) => re.test(literal)))
+      return last;
+  }
+  return;
+}
+var REMEDY = 'To review and run this plan yourself, set "interaction_mode": "human" in .sddx/config.json.';
+function decideGate(cwd, specPath, nodes, requestedMode, ceiling, overlaps, openDecisions) {
+  const { hash, errors } = planHash(specPath);
+  const base = { hash, requestedMode, nodeCount: nodes.length };
+  if (hash === "") {
+    return { ...base, ok: false, mode: "human", reason: errors.join("; ") || "plan unreadable" };
+  }
+  if (requestedMode === "auto") {
+    const blocker = autoRefusal(nodes, ceiling, overlaps, openDecisions);
+    if (blocker) {
+      return { ...base, ok: false, mode: "auto", refusal: renderBlocker(blocker), blocker };
+    }
+  }
+  const approval = readApproval(cwd, hash);
+  if (approval) {
+    return { ...base, ok: true, mode: approval.mode, hash };
+  }
+  if (requestedMode === "human") {
+    return {
+      ...base,
+      ok: false,
+      mode: "human",
+      reason: `no approval on file for plan ${hash.slice(0, 12)}; review it with: sddx plan check ${specPath}, then approve it with: sddx plan approve ${specPath}`
+    };
+  }
+  return { ...base, ok: true, mode: "auto" };
+}
+function autoRefusal(nodes, ceiling, overlaps, unresolved = []) {
+  const manual = nodes.find((n) => n.oracleType === "manual");
+  if (manual) {
+    return {
+      bound: "manual-oracle",
+      node: manual.alias,
+      decision: "declares oracle.type: manual",
+      impact: "an unattended run has nobody present to observe it, so completion could never be proven",
+      next_step: `Give it an executable oracle, or run it with a human watching. ${REMEDY}`
+    };
+  }
+  if (unresolved.length > 0) {
+    const list = unresolved.map((u) => `"${u}"`).join(", ");
+    return {
+      bound: "unresolved",
+      decision: `${unresolved.length} open decision${unresolved.length === 1 ? "" : "s"} in the spec: ${list}`,
+      impact: "the plan rests on a choice nobody has made, and an unattended run would make it by accident",
+      next_step: `Decide them, record the outcome in the spec's Design section, and empty Open decisions. ${REMEDY}`
+    };
+  }
+  const unconfined = nodes.find((n) => n.scope.length === 0);
+  if (unconfined) {
+    return {
+      bound: "unconfined-scope",
+      node: unconfined.alias,
+      decision: "declares no scope, so it is unconfined",
+      impact: `it may write sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")}) or protected paths (${SENSITIVE_SEGMENTS.join(", ")}, ${SENSITIVE_GLOBS.join(", ")})`,
+      next_step: `Declare the smallest scope that covers the work, or run in human mode. ${REMEDY}`
+    };
+  }
+  const selfModifying = nodes.find((n) => overlaps(n.scope, [...SELF_MODIFYING_GLOBS]));
+  if (selfModifying) {
+    return {
+      bound: "self-modifying",
+      node: selfModifying.alias,
+      decision: `declares a scope reaching sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")})`,
+      impact: "a plan that edits the machinery enforcing the plan cannot be bounded by it",
+      next_step: `Narrow the scope, or run it with a human reviewing. ${REMEDY}`
+    };
+  }
+  const PROTECTED_IMPACT = "a security, data, billing, or deployment decision is not one an unattended run may take";
+  for (const n of nodes) {
+    const named = namesSensitiveArea(n.scope);
+    if (named) {
+      return {
+        bound: "protected-path",
+        node: n.alias,
+        decision: `declares a scope naming the protected area "${named}"`,
+        impact: PROTECTED_IMPACT,
+        next_step: `Move that work into its own task and run it with a human reviewing. ${REMEDY}`
+      };
+    }
+  }
+  const sensitive = nodes.find((n) => overlaps(n.scope, [...SENSITIVE_GLOBS]));
+  if (sensitive) {
+    return {
+      bound: "protected-path",
+      node: sensitive.alias,
+      decision: `declares a scope reaching protected paths (${SENSITIVE_GLOBS.join(", ")})`,
+      impact: PROTECTED_IMPACT,
+      next_step: `Move that work into its own task and run it with a human reviewing. ${REMEDY}`
+    };
+  }
+  if (nodes.length > ceiling) {
+    return {
+      bound: "task-ceiling",
+      decision: `plan has ${nodes.length} nodes, over the auto_max_tasks ceiling of ${ceiling}`,
+      impact: "the blast radius of one unattended run is capped deliberately, and this plan exceeds it",
+      next_step: `Split the goal into smaller runs, raise auto_max_tasks in reviewed configuration, or run in human mode. ${REMEDY}`
+    };
+  }
+  return;
+}
+
+// src/lib/worktree.ts
+import { spawnSync as spawnSync6 } from "node:child_process";
+import {
+  appendFileSync,
+  existsSync as existsSync5,
+  mkdirSync as mkdirSync6,
+  readdirSync as readdirSync4,
+  readFileSync as readFileSync5,
+  realpathSync,
+  rmdirSync,
+  rmSync as rmSync4,
+  statSync,
+  writeFileSync as writeFileSync7
+} from "node:fs";
+import { hostname } from "node:os";
+import { basename, dirname as dirname3, isAbsolute as isAbsolute2, join as join7, relative } from "node:path";
+
+// src/lib/git.ts
+import { spawnSync as spawnSync5 } from "node:child_process";
+import { chmodSync as chmodSync2, mkdirSync as mkdirSync5, mkdtempSync as mkdtempSync2, rmSync as rmSync3, writeFileSync as writeFileSync6 } from "node:fs";
+import { tmpdir as tmpdir2 } from "node:os";
+import { dirname as dirname2, join as join6 } from "node:path";
+function git(cwd, ...args) {
+  const r = spawnSync5("git", args, { cwd, encoding: "utf8" });
+  if (r.error)
+    throw new Error(`git not runnable: ${r.error.message}`);
+  if (r.status !== 0) {
+    throw new Error(`git ${args.join(" ")} failed: ${(r.stderr ?? "").trim()}`);
+  }
+  return (r.stdout ?? "").trim();
+}
+var headSha = (cwd) => git(cwd, "rev-parse", "HEAD");
+var currentBranch = (cwd) => git(cwd, "rev-parse", "--abbrev-ref", "HEAD");
+var createBranchAt = (cwd, name, sha) => {
+  git(cwd, "branch", name, sha);
+};
+function branchExists(cwd, name) {
+  const r = spawnSync5("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${name}`], {
+    cwd
+  });
+  return r.status === 0;
+}
+function isMerged(cwd, branch) {
+  return git(cwd, "branch", "--merged", "HEAD", "--format=%(refname:short)").split(`
+`).includes(branch);
+}
+var deleteBranch = (cwd, name) => {
+  git(cwd, "branch", "-d", name);
+};
+var forceDeleteBranch = (cwd, name) => {
+  git(cwd, "branch", "-D", name);
+};
+function remoteUrl(cwd, remote) {
+  const r = spawnSync5("git", ["remote", "get-url", remote], { cwd, encoding: "utf8" });
+  return r.status === 0 ? r.stdout.trim() : null;
+}
+function defaultBranch(cwd) {
+  const r = spawnSync5("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], {
+    cwd,
+    encoding: "utf8"
+  });
+  if (r.status === 0) {
+    const m = /^refs\/remotes\/origin\/(.+)$/.exec(r.stdout.trim());
+    if (m?.[1])
+      return m[1];
+  }
+  return branchExists(cwd, "main") ? "main" : "master";
+}
+var push = (cwd, branch) => {
+  git(cwd, "push", "-u", "origin", branch);
+};
+var stageAll = (cwd) => {
+  git(cwd, "add", "-A", "--", ".", ":!.sddx/goals");
+};
+function commit(cwd, message) {
+  git(cwd, "commit", "-m", message);
+  return headSha(cwd);
+}
+function treeWith(cwd, base, files) {
+  const dir = mkdtempSync2(join6(tmpdir2(), "sddx-index-"));
+  const env = { ...process.env, GIT_INDEX_FILE: join6(dir, "index") };
+  const run = (args, input) => {
+    const r = spawnSync5("git", args, { cwd, env, input, encoding: "utf8" });
+    if (r.status !== 0)
+      throw new Error(`git ${args[0]} failed: ${(r.stderr ?? "").trim()}`);
+    return (r.stdout ?? "").trim();
+  };
+  try {
+    run(["read-tree", base]);
+    for (const [path, content] of Object.entries(files)) {
+      const blob = run(["hash-object", "-w", "--stdin"], content);
+      run(["update-index", "--add", "--cacheinfo", `100644,${blob},${path}`]);
+    }
+    return run(["write-tree"]);
+  } finally {
+    rmSync3(dir, { recursive: true, force: true });
+  }
+}
+function commitOnBranch(opts) {
+  const { worktree, branch } = opts;
+  const ref = `refs/heads/${branch}`;
+  const head = spawnSync5("git", ["symbolic-ref", "-q", "HEAD"], {
+    cwd: worktree,
+    encoding: "utf8"
+  });
+  if ((head.stdout ?? "").trim() !== ref) {
+    throw new Error(`${worktree} is not on its branch ${branch}`);
+  }
+  const parent = git(worktree, "rev-parse", ref);
+  const tree = treeWith(worktree, opts.baseTree, opts.files);
+  const sign = spawnSync5("git", ["config", "--type=bool", "--get", "commit.gpgsign"], {
+    cwd: worktree,
+    encoding: "utf8"
+  });
+  const signArgs = (sign.stdout ?? "").trim() === "true" ? ["-S"] : [];
+  const commitSha = git(worktree, "commit-tree", tree, "-p", parent, ...signArgs, "-m", opts.message);
+  git(worktree, "update-ref", "-m", opts.message, ref, commitSha, parent);
+  for (const [path, content] of Object.entries(opts.files)) {
+    const abs = join6(worktree, path);
+    mkdirSync5(dirname2(abs), { recursive: true });
+    rmSync3(abs, { force: true });
+    writeFileSync6(abs, content);
+    if (opts.readOnly?.includes(path))
+      chmodSync2(abs, 292);
+  }
+  git(worktree, "reset", "-q");
+  return commitSha;
+}
+function checkedOutAt(cwd, branch) {
+  const out = git(cwd, "worktree", "list", "--porcelain");
+  let path = null;
+  for (const line of out.split(`
+`)) {
+    if (line.startsWith("worktree "))
+      path = line.slice("worktree ".length);
+    if (line === `branch refs/heads/${branch}`)
+      return path;
+  }
+  return null;
+}
 
 // src/lib/glob-overlap.ts
 function segments(glob) {
@@ -9690,1170 +8037,395 @@ function scopesOverlap(a, b) {
   return false;
 }
 
-// src/lib/graph.ts
-var ALIAS_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-var INTERACTION_MODES = ["human", "auto"];
-function stringList(key, value, errors2) {
-  if (value === undefined)
-    return [];
-  if (!Array.isArray(value) || value.length === 0 || !value.every((s) => typeof s === "string" && s.trim() !== "")) {
-    errors2.push(`${key}: when present, must be a non-empty list of non-empty strings`);
-    return [];
-  }
-  return value.map((s) => s.trim());
-}
-function entryField(key, i, entry, field, errors2) {
-  const v = entry[field];
-  if (typeof v !== "string" || v.trim() === "") {
-    errors2.push(`${key}[${i}]: missing "${field}"`);
-    return "";
-  }
-  return v.trim();
-}
-function parseAnswers(value, errors2) {
-  if (value === undefined)
-    return [];
-  if (!Array.isArray(value) || value.length === 0) {
-    errors2.push("answers: when present, must be a non-empty list of {id, question, answer}");
-    return [];
-  }
-  const out = [];
-  for (let i = 0;i < value.length; i++) {
-    const e = value[i];
-    if (typeof e !== "object" || e === null || Array.isArray(e)) {
-      errors2.push(`answers[${i}]: must be a mapping with id, question and answer`);
-      continue;
-    }
-    const r = e;
-    out.push({
-      id: entryField("answers", i, r, "id", errors2),
-      question: entryField("answers", i, r, "question", errors2),
-      answer: entryField("answers", i, r, "answer", errors2)
-    });
-  }
-  return out;
-}
-function parseAssumptions(value, errors2) {
-  if (value === undefined)
-    return [];
-  if (!Array.isArray(value) || value.length === 0) {
-    errors2.push("assumptions: when present, must be a non-empty list of non-empty values");
-    return [];
-  }
-  const out = [];
-  for (let i = 0;i < value.length; i++) {
-    const e = value[i];
-    if (typeof e === "string") {
-      if (e.trim() === "")
-        errors2.push(`assumptions[${i}]: must not be empty`);
-      else
-        out.push(e.trim());
-      continue;
-    }
-    if (typeof e !== "object" || e === null || Array.isArray(e)) {
-      errors2.push(`assumptions[${i}]: must be a string or a mapping with id, value and rationale`);
-      continue;
-    }
-    const r = e;
-    entryField("assumptions", i, r, "id", errors2);
-    const v = entryField("assumptions", i, r, "value", errors2);
-    const rationale = entryField("assumptions", i, r, "rationale", errors2);
-    if (v !== "" && rationale !== "")
-      out.push(`${v} — ${rationale}`);
-  }
-  return out;
-}
-function parseGraph(yamlText) {
-  let raw;
-  try {
-    raw = $parse(yamlText);
-  } catch (e) {
-    return { errors: [`invalid YAML: ${e.message}`] };
-  }
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    return { errors: ["graph must be a YAML mapping"] };
-  }
-  const r = raw;
-  const errors2 = [];
-  if (typeof r.goal !== "string" || r.goal.trim() === "") {
-    errors2.push("goal: one-sentence description required");
-  }
-  if (!Array.isArray(r.tasks) || r.tasks.length === 0) {
-    errors2.push("tasks: non-empty list of task nodes required");
-    return { errors: errors2 };
-  }
-  const schemaVersion = typeof r.schema_version === "string" || typeof r.schema_version === "number" ? String(r.schema_version).trim() : "";
-  if (schemaVersion === "") {
-    errors2.push("schema_version: required in the Goal Brief header of a planned graph");
-  }
-  const mode = typeof r.interaction_mode === "string" ? r.interaction_mode.trim() : "";
-  if (!INTERACTION_MODES.includes(mode)) {
-    errors2.push(`interaction_mode: required in the Goal Brief header, one of ${INTERACTION_MODES.join("|")}`);
-  }
-  const answers = parseAnswers(r.answers, errors2);
-  const assumptions = parseAssumptions(r.assumptions, errors2);
-  const constraints = stringList("constraints", r.constraints, errors2);
-  const acceptanceCriteria = stringList("acceptance_criteria", r.acceptance_criteria, errors2);
-  const outOfScope = stringList("out_of_scope", r.out_of_scope, errors2);
-  const unresolved = stringList("unresolved", r.unresolved, errors2);
-  const nodes = [];
-  const seen = new Set;
-  for (let i = 0;i < r.tasks.length; i++) {
-    const n = r.tasks[i];
-    if (typeof n !== "object" || n === null || Array.isArray(n)) {
-      errors2.push(`tasks[${i}]: must be a mapping`);
-      continue;
-    }
-    const nr = n;
-    const alias = typeof nr.alias === "string" ? nr.alias.trim() : "";
-    if (!ALIAS_RE.test(alias)) {
-      errors2.push(`tasks[${i}].alias: lowercase-hyphen identifier required`);
-    } else if (seen.has(alias)) {
-      errors2.push(`tasks[${i}].alias: duplicate alias "${alias}"`);
-    } else {
-      seen.add(alias);
-    }
-    if (typeof nr.spec !== "string" || nr.spec.trim() === "") {
-      errors2.push(`tasks[${i}] (${alias || i}).spec: path to the node's spec YAML required`);
-    }
-    const rawDeps = nr.depends_on === undefined || nr.depends_on === null ? [] : Array.isArray(nr.depends_on) ? nr.depends_on : [nr.depends_on];
-    const deps = rawDeps.map((d) => String(d).trim()).filter((d) => d !== "");
-    if (deps.includes(alias)) {
-      errors2.push(`tasks[${i}] (${alias}): a node cannot depend on itself`);
-    }
-    nodes.push({
-      alias,
-      spec: typeof nr.spec === "string" ? nr.spec.trim() : "",
-      depends_on: deps.filter((d) => d !== alias)
-    });
-  }
-  for (const n of nodes) {
-    for (const dep of n.depends_on) {
-      if (!seen.has(dep)) {
-        errors2.push(`${n.alias}: depends_on names unknown alias "${dep}"`);
-      }
-    }
-  }
-  if (errors2.length > 0)
-    return { errors: errors2 };
-  return {
-    errors: [],
-    graph: {
-      goal: r.goal.trim(),
-      tasks: nodes,
-      assumptions,
-      schema_version: schemaVersion,
-      interaction_mode: mode,
-      answers,
-      constraints,
-      acceptance_criteria: acceptanceCriteria,
-      unresolved,
-      out_of_scope: outOfScope
-    }
-  };
-}
-var TOP_LEVEL_KEY = /^[^\s#-][^:]*:/;
-function truncateToHeader(yamlText) {
-  const lines = yamlText.split(`
-`);
-  const out = [];
-  let dropping = false;
-  for (const line of lines) {
-    if (dropping) {
-      if (TOP_LEVEL_KEY.test(line))
-        dropping = false;
-      else
-        continue;
-    }
-    if (/^tasks:/.test(line)) {
-      dropping = true;
-      continue;
-    }
-    out.push(line);
-  }
-  const text = out.join(`
-`);
-  return yamlText.endsWith(`
-`) && text !== "" && !text.endsWith(`
-`) ? `${text}
-` : text;
-}
-function briefAssumptions(graph) {
-  return [
-    ...graph.assumptions,
-    ...graph.answers.map((a) => `answered: ${a.question} → ${a.answer}`)
-  ];
-}
-function ancestors(id, parents, guard = new Set([id])) {
-  const out = new Set;
-  for (const p of parents.get(id) ?? []) {
-    if (guard.has(p))
-      continue;
-    guard.add(p);
-    out.add(p);
-    for (const a of ancestors(p, parents, guard))
-      out.add(a);
-  }
-  return out;
-}
-function validateSchedule(nodes) {
-  const errors2 = [];
-  const parents = new Map;
-  for (const n of nodes)
-    parents.set(n.id, n.dependsOn);
-  const WHITE = 0;
-  const GRAY = 1;
-  const BLACK = 2;
-  const color = new Map;
-  for (const n of nodes)
-    color.set(n.id, WHITE);
-  const visit2 = (id) => {
-    color.set(id, GRAY);
-    for (const p of parents.get(id) ?? []) {
-      const c = color.get(p);
-      if (c === GRAY)
-        return p;
-      if (c === WHITE) {
-        const found = visit2(p);
-        if (found)
-          return found;
-      }
-    }
-    color.set(id, BLACK);
-    return null;
-  };
-  for (const n of nodes) {
-    if (color.get(n.id) !== WHITE)
-      continue;
-    const cyclic = visit2(n.id);
-    if (cyclic)
-      errors2.push(`dependency cycle involving "${cyclic}"`);
-  }
-  if (errors2.length > 0)
-    return dedupe(errors2);
-  for (let i = 0;i < nodes.length; i++) {
-    for (let j = i + 1;j < nodes.length; j++) {
-      const a = nodes[i];
-      const b = nodes[j];
-      const ordered = ancestors(a.id, parents).has(b.id) || ancestors(b.id, parents).has(a.id);
-      if (!ordered && scopesOverlap(a.scope, b.scope)) {
-        errors2.push(`scope overlap between concurrent tasks "${a.id}" and "${b.id}" — order one after the other or make their scopes disjoint`);
-      }
-    }
-  }
-  return dedupe(errors2);
-}
-var dedupe = (xs) => [...new Set(xs)];
-
-// src/lib/receipt.ts
-import { spawnSync as spawnSync3 } from "node:child_process";
-import { createHash } from "node:crypto";
-import {
-  chmodSync,
-  existsSync as existsSync3,
-  mkdirSync as mkdirSync3,
-  readdirSync as readdirSync2,
-  readFileSync as readFileSync3,
-  writeFileSync as writeFileSync3
-} from "node:fs";
-import { join as join3 } from "node:path";
-
-// src/lib/goal.ts
-import { spawnSync as spawnSync2 } from "node:child_process";
-import { existsSync as existsSync2, mkdirSync as mkdirSync2, readdirSync, readFileSync as readFileSync2, writeFileSync as writeFileSync2 } from "node:fs";
-import { isAbsolute, join as join2 } from "node:path";
-
-// src/lib/task.ts
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-
-// src/lib/glob.ts
-function segmentToRegex(segment) {
-  let out = "";
-  for (const ch of segment) {
-    if (ch === "*")
-      out += "[^/]*";
-    else if (ch === "?")
-      out += "[^/]";
-    else
-      out += ch.replace(/[.+^${}()|[\]\\]/, "\\$&");
-  }
-  return out;
-}
-function globToRegExp(pattern) {
-  const segments2 = pattern.split("/");
-  let re = "^";
-  for (let i = 0;i < segments2.length; i++) {
-    const last = i === segments2.length - 1;
-    if (segments2[i] === "**") {
-      re += last ? ".+" : "(?:[^/]+/)*";
-    } else {
-      re += segmentToRegex(segments2[i]) + (last ? "" : "/");
-    }
-  }
-  return new RegExp(`${re}$`);
-}
-var globMatch = (pattern, path) => globToRegExp(pattern).test(path);
-
-// src/lib/classify.ts
-var BUILTIN_EXEMPT_GLOBS = [
-  ".sddx/**",
-  "docs/**",
-  "**/*.md",
-  "package.json",
-  "tsconfig.json",
-  ".github/**",
-  "openspec/**",
-  ".claude/**"
-];
-var BUILTIN_TEST_GLOBS = [
-  "**/*.test.*",
-  "**/*.spec.*",
-  "**/*_test.*",
-  "**/test_*.py",
-  "tests/**",
-  "test/**",
-  "__tests__/**",
-  "spec/**"
-];
-var splitGlobs = (value) => (value ?? "").split(/\s+/).filter((g) => g !== "");
-var normalizeRelPath = (path) => path.replace(/\\/g, "/").replace(/^(\.\/)+/, "");
-function classify(relPath, allow, config = {}) {
-  const path = normalizeRelPath(relPath);
-  for (const entry of allow) {
-    if (normalizeRelPath(entry) === path)
-      return { rule: "allow", pattern: entry };
-  }
-  for (const pattern of [...BUILTIN_EXEMPT_GLOBS, ...splitGlobs(config.exemptGlobs)]) {
-    if (globMatch(pattern, path))
-      return { rule: "exempt", pattern };
-  }
-  for (const pattern of [...BUILTIN_TEST_GLOBS, ...splitGlobs(config.testGlobs)]) {
-    if (globMatch(pattern, path))
-      return { rule: "test", pattern };
-  }
-  return { rule: "implementation", pattern: null };
-}
-
-// src/lib/task.ts
-var TRANSITIONS = {
-  PLAN: ["RED", "ABANDONED"],
-  RED: ["GREEN", "ABANDONED"],
-  GREEN: ["REFACTOR", "VERIFY", "ABANDONED"],
-  REFACTOR: ["GREEN", "VERIFY", "ABANDONED"],
-  VERIFY: ["DONE", "ABANDONED"],
-  DONE: [],
-  ABANDONED: []
-};
-var isDeferred = (t) => {
-  const w = t.workspace;
-  if (!w || typeof w !== "object")
-    return false;
-  return w.mode === "deferred" || typeof w.base_sha === "string" && w.base_sha.startsWith("pending:");
-};
-var DEFAULT_RETRY = { max_attempts: 1, workspace: "fresh" };
-function dependsOnList(t) {
-  const d = t.depends_on;
-  if (d === undefined)
-    return [];
-  return Array.isArray(d) ? d : [d];
-}
-function retryPolicyOf(t) {
-  return { ...DEFAULT_RETRY, ...t.retry };
-}
-function failurePolicyOf(t) {
-  return t.on_dependency_failure ?? "skip";
-}
-var sddxDir = (cwd) => join(cwd, ".sddx");
-var taskPath = (cwd, id) => join(sddxDir(cwd), "tasks", `${id}.json`);
-function taskId(sentence, date = new Date) {
-  const slug = sentence.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40).replace(/-+$/g, "");
-  const ymd = date.toISOString().slice(0, 10).replace(/-/g, "");
-  return `${ymd}-${slug}`;
-}
-function createTask(cwd, spec, specPath, workspace, opts = {}) {
-  const now = new Date().toISOString();
-  const dependsOn = opts.dependsOn === undefined ? [] : dependsOnList({ depends_on: opts.dependsOn });
-  const t = {
-    id: taskId(spec.task),
-    task: spec.task,
-    phase: "PLAN",
-    spec_path: specPath,
-    oracle: spec.oracle,
-    workspace,
-    scope: spec.scope,
-    ...spec.assumptions.length > 0 ? { assumptions: spec.assumptions } : {},
-    ...dependsOn.length > 0 ? { depends_on: dependsOn } : {},
-    ...spec.on_dependency_failure ? { on_dependency_failure: spec.on_dependency_failure } : {},
-    ...spec.retry ? { retry: spec.retry } : {},
-    attempt_count: 1,
-    allow: [],
-    iterations: 0,
-    evidence: {},
-    history: [{ phase: "PLAN", at: now }],
-    created_at: now,
-    updated_at: now
-  };
-  const path = taskPath(cwd, t.id);
-  if (existsSync(path))
-    throw new Error(`task ${t.id} already exists at ${path}`);
-  mkdirSync(join(sddxDir(cwd), "tasks"), { recursive: true });
-  writeFileSync(path, `${JSON.stringify(t, null, 2)}
-`);
-  return t;
-}
-function readTask(cwd, id) {
-  const path = taskPath(cwd, id);
-  if (!existsSync(path))
-    throw new Error(`no such task: ${id} (${path})`);
-  return JSON.parse(readFileSync(path, "utf8"));
-}
-function writeTask(cwd, t) {
-  t.updated_at = new Date().toISOString();
-  writeFileSync(taskPath(cwd, t.id), `${JSON.stringify(t, null, 2)}
-`);
-}
-var LEGACY_WORKSPACE_MODES = new Set(["branch", "none"]);
-function legacyWorkspaceOf(t) {
-  const w = t.workspace;
-  if (!w || typeof w !== "object")
-    return null;
-  for (const candidate of [w.mode, w.materialize_as]) {
-    if (typeof candidate === "string" && LEGACY_WORKSPACE_MODES.has(candidate))
-      return candidate;
-  }
-  return null;
-}
-function assertAdvanceable(t) {
-  const mode = legacyWorkspaceOf(t);
-  if (mode === null || isTerminal(t.phase))
-    return;
-  throw new Error(`task ${t.id} records the "${mode}" workspace mode, which was removed in sddx 4.0, and is unfinished (phase ${t.phase}). ` + "It cannot be advanced by this version. Either complete it with a compatible older sddx (3.x), " + `or close it out with \`sddx task phase ${t.id} ABANDONED\` and recreate the work as a canonical run with \`sddx graph create\`. ` + "Its state has not been modified.");
-}
-function transition(t, to, opts = {}) {
-  assertAdvanceable(t);
-  if (!TRANSITIONS[t.phase].includes(to)) {
-    throw new Error(`illegal transition ${t.phase} → ${to}`);
-  }
-  const at = new Date().toISOString();
-  const source = opts.source ?? "manual";
-  if (to === "RED") {
-    if (opts.testExit === undefined || opts.testExit === 0) {
-      throw new Error("RED requires evidence of a failing test: --test-exit <nonzero exit code>");
-    }
-    t.evidence.red = { test_exit: opts.testExit, at, source };
-  }
-  if (to === "GREEN") {
-    if (opts.testExit !== 0) {
-      throw new Error("GREEN requires evidence of a passing test: --test-exit 0");
-    }
-    t.evidence.green = { test_exit: 0, at, source };
-  }
-  if (to === "DONE" && !opts.internal) {
-    throw new Error("DONE is set by the verifier, not by phase transitions");
-  }
-  t.phase = to;
-  t.history.push({ phase: to, at });
-  return t;
-}
-var TERMINAL_PHASES = new Set(["DONE", "ABANDONED"]);
-var isTerminal = (phase) => TERMINAL_PHASES.has(phase);
-function allowPath(t, path) {
-  if (isTerminal(t.phase)) {
-    throw new Error(`task ${t.id} is ${t.phase}; allow-list is frozen on terminal tasks`);
-  }
-  assertAdvanceable(t);
-  const normalized = normalizeRelPath(path);
-  if (normalized === "" || normalized.startsWith("/") || normalized.split("/").includes("..")) {
-    throw new Error(`allow requires a repo-relative path, got: ${path}`);
-  }
-  if (!t.allow.includes(normalized))
-    t.allow.push(normalized);
-  return t;
-}
-function blockedOn(cwd, task) {
-  for (const parentId of dependsOnList(task)) {
-    if (parentId === task.id)
-      continue;
-    const parent = resolveTaskState(cwd, parentId);
-    if (parent?.phase !== "DONE")
-      return parentId;
-  }
-  return null;
-}
-function skippedOn(cwd, task, seen = new Set) {
-  if (failurePolicyOf(task) !== "skip")
-    return null;
-  if (seen.has(task.id))
-    return null;
-  seen.add(task.id);
-  for (const parentId of dependsOnList(task)) {
-    if (parentId === task.id)
-      continue;
-    const parent = resolveTaskState(cwd, parentId);
-    if (!parent)
-      continue;
-    if (parent.phase === "ABANDONED")
-      return parentId;
-    if (skippedOn(cwd, parent, seen))
-      return parentId;
-  }
-  return null;
-}
-function abandonOrRetry(t) {
-  if (isTerminal(t.phase)) {
-    throw new Error(`illegal transition ${t.phase} → ABANDONED`);
-  }
-  const policy = retryPolicyOf(t);
-  const attempts = t.attempt_count ?? 1;
-  const at = new Date().toISOString();
-  const legacy = legacyWorkspaceOf(t);
-  if (attempts < policy.max_attempts && legacy !== null) {
-    t.phase = "ABANDONED";
-    t.history.push({ phase: "ABANDONED", at });
-    return { retried: false, attempt_count: attempts, max_attempts: policy.max_attempts };
-  }
-  if (attempts < policy.max_attempts) {
-    t.attempt_count = attempts + 1;
-    t.phase = "PLAN";
-    t.iterations = 0;
-    t.evidence = {};
-    t.stuck = undefined;
-    t.history.push({ phase: "PLAN", at });
-    return { retried: true, attempt_count: t.attempt_count, max_attempts: policy.max_attempts };
-  }
-  t.phase = "ABANDONED";
-  t.history.push({ phase: "ABANDONED", at });
-  return { retried: false, attempt_count: attempts, max_attempts: policy.max_attempts };
-}
-function readTaskFrom(dir, id) {
-  try {
-    return JSON.parse(readFileSync(taskPath(dir, id), "utf8"));
-  } catch {
-    return null;
-  }
-}
-function readTaskFromBranch(cwd, id) {
-  const r = spawnSync("git", ["show", `sddx/${id}:.sddx/tasks/${id}.json`], {
+// src/lib/worktree.ts
+var worktreesDir = (cwd) => join7(cwd, ".sddx-worktrees");
+var PROOF_SUFFIX = "--proof";
+function tryRev(cwd, ref) {
+  const r = spawnSync6("git", ["rev-parse", "--verify", "--quiet", ref], {
     cwd,
     encoding: "utf8"
   });
-  if (r.status !== 0)
-    return null;
-  try {
-    return JSON.parse(r.stdout);
-  } catch {
-    return null;
-  }
+  return r.status === 0 ? r.stdout.trim() : null;
 }
-function resolveTaskState(cwd, id) {
-  return readTaskFrom(join(cwd, ".sddx-worktrees", id), id) ?? readTaskFrom(cwd, id) ?? readTaskFromBranch(cwd, id);
-}
-
-// src/lib/goal.ts
-var goalsDir = (cwd) => join2(sddxDir(cwd), "goals");
-var goalPath = (cwd, id) => join2(goalsDir(cwd), `${id}.json`);
-var goalRef = (id) => `refs/sddx/goals/${id}`;
-var sh = (cwd, args, env) => spawnSync2("git", args, { cwd, encoding: "utf8", env: { ...process.env, ...env } });
-function mainRoot(cwd) {
-  const r = sh(cwd, ["rev-parse", "--git-common-dir"]);
-  if (r.status !== 0)
-    return cwd;
-  const dir = (r.stdout ?? "").trim();
-  const abs = isAbsolute(dir) ? dir : join2(cwd, dir);
-  return abs.replace(/\/\.git\/?$/, "").replace(/\/\.git$/, "") || cwd;
-}
-function writeGoalBlob(root, id, content, expected) {
-  const blob = spawnSync2("git", ["hash-object", "-w", "--stdin"], {
-    cwd: root,
-    input: content,
+function resolveBaseRef(cwd) {
+  const symref = spawnSync6("git", ["symbolic-ref", "-q", "refs/remotes/origin/HEAD"], {
+    cwd,
     encoding: "utf8"
   });
-  if (blob.status !== 0)
-    throw new Error(`git hash-object failed: ${blob.stderr}`);
-  const blobSha = (blob.stdout ?? "").trim();
-  const ref = goalRef(id);
-  const cas = expected ? sh(root, ["update-ref", ref, blobSha, expected]) : sh(root, ["update-ref", ref, blobSha, ""]);
-  if (cas.status !== 0) {
-    throw new Error(`goal ${id} was modified concurrently — re-read it and reapply the change ` + `(${(cas.stderr ?? "").trim()})`);
+  if (symref.status === 0) {
+    const sha = tryRev(cwd, symref.stdout.trim());
+    if (sha)
+      return { sha, source: "origin/HEAD" };
   }
-}
-var isGitRepo = (root) => sh(root, ["rev-parse", "--git-dir"]).status === 0;
-function goalBlobSha(root, id) {
-  const r = sh(root, ["rev-parse", "--verify", "--quiet", goalRef(id)]);
-  return r.status === 0 ? (r.stdout ?? "").trim() : null;
-}
-function pushGoalRef(cwd, id) {
-  const root = mainRoot(cwd);
-  const ref = goalRef(id);
-  return sh(root, ["push", "origin", `${ref}:${ref}`]).status === 0;
-}
-function readGoalFromBranch(root, id) {
-  const r = sh(root, ["cat-file", "-p", goalRef(id)]);
-  if (r.status !== 0)
-    return null;
-  try {
-    return JSON.parse(r.stdout ?? "");
-  } catch {
-    return null;
+  for (const [ref, source] of [
+    ["refs/remotes/origin/main", "origin/main"],
+    ["refs/remotes/origin/master", "origin/master"]
+  ]) {
+    const sha = tryRev(cwd, ref);
+    if (sha)
+      return { sha, source };
   }
+  return { sha: git(cwd, "rev-parse", "HEAD"), source: "HEAD" };
 }
-var goalId = (sentence, date = new Date) => taskId(sentence, date);
-var runBranchName = (id) => `sddx/run-${id}`;
-function createGoal(cwd, goalSentence, taskIds, opts) {
-  if (taskIds.length === 0) {
-    throw new Error("a goal requires at least one task id");
-  }
-  const now = new Date().toISOString();
-  const id = opts.id ?? goalId(goalSentence);
-  const root = mainRoot(cwd);
-  const path = goalPath(root, id);
-  if (existsSync2(path))
-    throw new Error(`goal ${id} already exists at ${path}`);
-  if (goalBlobSha(root, id) !== null) {
-    throw new Error(`goal ${id} already exists at ${goalRef(id)}`);
-  }
-  for (const tid of taskIds) {
-    if (!resolveTaskState(cwd, tid)) {
-      throw new Error(`task ${tid} does not exist — cannot register it in a goal`);
-    }
-  }
-  const g = {
-    id,
-    goal: goalSentence,
-    task_ids: taskIds,
-    ...opts.deps && Object.keys(opts.deps).length > 0 ? { deps: opts.deps } : {},
-    run_branch: opts.runBranch,
-    base_sha: opts.baseSha,
-    merges: [],
-    ...opts.approval ? { approval: { amendments: [], ...opts.approval } } : {},
-    created_at: now,
-    updated_at: now
-  };
-  if (isGitRepo(root)) {
-    writeGoalBlob(root, id, `${JSON.stringify(g, null, 2)}
-`, null);
-  } else {
-    mkdirSync2(goalsDir(root), { recursive: true });
-    writeFileSync2(path, `${JSON.stringify(g, null, 2)}
-`);
-  }
-  return g;
+var gitCommonDir = (cwd) => {
+  const dir = git(cwd, "rev-parse", "--git-common-dir");
+  return isAbsolute2(dir) ? dir : join7(cwd, dir);
+};
+function resolveMainRepoRoot(cwd) {
+  const r = spawnSync6("git", ["worktree", "list", "--porcelain"], { cwd, encoding: "utf8" });
+  const first = (r.stdout ?? "").split(`
+`).find((l) => l.startsWith("worktree "));
+  if (r.status === 0 && first)
+    return first.slice("worktree ".length).trim();
+  const top = spawnSync6("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8" });
+  if (top.status === 0 && (top.stdout ?? "").trim())
+    return (top.stdout ?? "").trim();
+  return dirname3(gitCommonDir(cwd));
 }
-function readGoal(cwd, id) {
-  const root = mainRoot(cwd);
-  const path = goalPath(root, id);
-  const g = readGoalFromBranch(root, id) ?? (existsSync2(path) ? JSON.parse(readFileSync2(path, "utf8")) : null);
-  if (!g)
-    throw new Error(`no such goal: ${id} (${goalRef(id)} or ${path})`);
-  if (typeof g.run_branch !== "string" || typeof g.base_sha !== "string" || !g.merges) {
-    throw new Error(`goal ${id} (${path}) is missing run_branch/base_sha/merges — written by an ` + "incompatible sddx version; recreate it with the current graph/goal create");
-  }
-  return g;
-}
-function goalExists(cwd, id) {
-  const root = mainRoot(cwd);
-  return goalBlobSha(root, id) !== null || existsSync2(goalPath(root, id));
-}
-function writeGoal(cwd, g) {
-  const root = mainRoot(cwd);
-  g.updated_at = new Date().toISOString();
-  const content = `${JSON.stringify(g, null, 2)}
+var EXCLUDE_LINE = ".sddx-worktrees/";
+function ensureExcluded(cwd) {
+  const infoDir = join7(gitCommonDir(cwd), "info");
+  mkdirSync6(infoDir, { recursive: true });
+  const exclude = join7(infoDir, "exclude");
+  const current = existsSync5(exclude) ? readFileSync5(exclude, "utf8") : "";
+  if (current.split(`
+`).includes(EXCLUDE_LINE))
+    return;
+  const sep2 = current === "" || current.endsWith(`
+`) ? "" : `
 `;
-  const current = goalBlobSha(root, g.id);
-  if (current === null) {
-    const legacy = goalPath(root, g.id);
-    if (existsSync2(legacy)) {
-      writeFileSync2(legacy, content);
-      return;
-    }
-    throw new Error(`no such goal: ${g.id} (${goalRef(g.id)})`);
-  }
-  writeGoalBlob(root, g.id, content, current);
-}
-function findGoalForTask(cwd, id) {
-  const root = mainRoot(cwd);
-  const dir = goalsDir(root);
-  if (existsSync2(dir)) {
-    for (const f of readdirSync(dir)) {
-      if (!f.endsWith(".json"))
-        continue;
-      try {
-        const g = JSON.parse(readFileSync2(join2(dir, f), "utf8"));
-        if (g.task_ids.includes(id))
-          return g;
-      } catch {}
-    }
-  }
-  const refs = sh(root, ["for-each-ref", "--format=%(refname)", "refs/sddx/goals/"]);
-  for (const ref of (refs.stdout ?? "").split(`
-`).map((s) => s.trim())) {
-    if (!ref.startsWith("refs/sddx/goals/"))
-      continue;
-    const g = readGoalFromBranch(root, ref.slice("refs/sddx/goals/".length));
-    if (g?.task_ids.includes(id))
-      return g;
-  }
-  return null;
-}
-function currentlyMergedTaskIds(g) {
-  const latestByTask = new Map;
-  for (const entry of g.merges)
-    latestByTask.set(entry.task_id, entry);
-  return [...latestByTask.values()].filter((e) => e.result === "merged").map((e) => e.task_id);
-}
-function goalCounts(g) {
-  const merged = currentlyMergedTaskIds(g).length;
-  return { merged, outstanding: g.task_ids.length - merged, total: g.task_ids.length };
-}
-
-// src/lib/receipt.ts
-var sha256 = (data) => createHash("sha256").update(data).digest("hex");
-var receiptsDir = (cwd) => join3(cwd, ".sddx", "receipts");
-var receiptPath = (cwd, taskId2) => join3(receiptsDir(cwd), `${taskId2}.json`);
-function listReceipts(cwd) {
-  const dir = receiptsDir(cwd);
-  if (!existsSync3(dir))
-    return [];
-  return readdirSync2(dir).filter((f) => f.endsWith(".json")).map((f) => ({
-    file: join3(dir, f),
-    receipt: JSON.parse(readFileSync3(join3(dir, f), "utf8"))
-  })).sort((a, b) => a.receipt.seq - b.receipt.seq);
-}
-function chainHead(cwd) {
-  const receipts = listReceipts(cwd);
-  const last = receipts.at(-1);
-  if (!last)
-    return { seq: 0, prevHash: "genesis" };
-  return { seq: last.receipt.seq, prevHash: sha256(readFileSync3(last.file)) };
-}
-function writeReceipt(cwd, r) {
-  const schemaErrors = validateReceipt(r);
-  if (schemaErrors.length > 0) {
-    throw new Error(`refusing to write invalid receipt: ${schemaErrors.join("; ")}`);
-  }
-  const path = receiptPath(cwd, r.task_id);
-  if (existsSync3(path)) {
-    throw new Error(`receipt for ${r.task_id} already exists — receipts are immutable`);
-  }
-  mkdirSync3(receiptsDir(cwd), { recursive: true });
-  writeFileSync3(path, `${JSON.stringify(r, null, 2)}
+  appendFileSync(exclude, `${sep2}${EXCLUDE_LINE}
 `);
-  chmodSync(path, 292);
+}
+function worktreeAvailable(cwd) {
+  let root;
+  try {
+    root = resolveMainRepoRoot(cwd);
+  } catch {
+    return false;
+  }
+  return spawnSync6("git", ["worktree", "list"], { cwd: root }).status === 0;
+}
+function createWorktree(cwd, id, baseSha) {
+  const root = resolveMainRepoRoot(cwd);
+  ensureExcluded(root);
+  mkdirSync6(worktreesDir(root), { recursive: true });
+  const path = join7(worktreesDir(root), id);
+  git(root, "worktree", "add", "-q", path, "-b", `sddx/${id}`, baseSha);
   return path;
 }
-var HEX64 = /^[0-9a-f]{64}$/;
-var HEX40 = /^[0-9a-f]{40}$/;
-function validateReceipt(raw) {
-  const errors2 = [];
-  if (typeof raw !== "object" || raw === null)
-    return ["receipt must be an object"];
-  const r = raw;
-  const need = (field, ok) => {
-    if (!ok)
-      errors2.push(`${field}: missing or invalid`);
-  };
-  need("version", r.version === 1 || r.version === 2 || r.version === 3 || r.version === 4);
-  const version = typeof r.version === "number" ? r.version : 0;
-  if (version >= 2) {
-    need("allow", Array.isArray(r.allow) && r.allow.every((p) => typeof p === "string"));
-  } else {
-    need("allow", r.allow === undefined);
-  }
-  if (version >= 4) {
-    if (r.approval !== undefined) {
-      const a = r.approval;
-      need("approval", typeof a === "object" && a !== null && (a.mode === "human" || a.mode === "auto") && typeof a.plan_sha256 === "string" && HEX64.test(a.plan_sha256) && (a.requested_mode === undefined || a.requested_mode === "human" || a.requested_mode === "auto") && (a.authorization === undefined || a.authorization === "human-approval" || a.authorization === "auto") && Array.isArray(a.assumptions) && a.assumptions.every((x) => typeof x === "string") && Array.isArray(a.amendments) && a.amendments.length === 0);
+function mergeParentsSequential(worktreePath, remaining) {
+  for (const sha of remaining) {
+    const r = spawnSync6("git", ["merge", "--no-ff", "-m", `sddx: merge dependency ${sha}`, sha], {
+      cwd: worktreePath,
+      encoding: "utf8"
+    });
+    if (r.status !== 0) {
+      spawnSync6("git", ["merge", "--abort"], { cwd: worktreePath });
+      throw new Error(`merge of ${sha} failed: ${(r.stderr ?? r.stdout ?? "").trim()}`);
     }
+  }
+  return git(worktreePath, "rev-parse", "HEAD");
+}
+function startTaskWorkspace(root, task, runBranch) {
+  const id = task.id;
+  const branch = `sddx/${id}`;
+  const existing = join7(worktreesDir(root), id);
+  if (existsSync5(existing) && branchExists(root, branch)) {
+    const base = task.workspace?.base_sha ?? git(existing, "rev-parse", "HEAD");
+    return { path: existing, baseSha: base, reused: true };
+  }
+  const parents = dependsOnList(task);
+  let forkSha;
+  let rest = [];
+  if (parents.length === 0) {
+    const sha = tryRev(root, `refs/heads/${runBranch}`);
+    if (!sha)
+      throw new Error(`cannot start ${id}: run branch ${runBranch} does not exist`);
+    forkSha = sha;
   } else {
-    need("approval", r.approval === undefined);
+    const shas = [];
+    for (const parentId of parents) {
+      const sha = tryRev(root, `refs/heads/sddx/${parentId}`);
+      if (!sha)
+        throw new Error(`cannot start ${id}: parent ${parentId}'s commit is unresolvable`);
+      shas.push(sha);
+    }
+    forkSha = shas[0];
+    rest = shas.slice(1);
   }
-  if (version <= 2) {
-    need("exit_code", typeof r.exit_code === "number");
-    need("duration_ms", typeof r.duration_ms === "number" && r.duration_ms >= 0);
-    need("stdout_sha256", typeof r.stdout_sha256 === "string" && HEX64.test(r.stdout_sha256));
-    need("stderr_sha256", typeof r.stderr_sha256 === "string" && HEX64.test(r.stderr_sha256));
-    need("runs", r.runs === undefined);
-    need("env", r.env === undefined);
-    need("signature", r.signature === undefined && r.signer === undefined);
-  } else {
-    need("exit_code", r.exit_code === undefined);
-    need("duration_ms", r.duration_ms === undefined);
-    need("stdout_sha256", r.stdout_sha256 === undefined);
-    need("stderr_sha256", r.stderr_sha256 === undefined);
-    const runs = r.runs;
-    need("runs", Array.isArray(runs) && runs.length >= 1 && runs.every((run) => typeof run === "object" && run !== null && typeof run.exit_code === "number" && typeof run.duration_ms === "number" && run.duration_ms >= 0 && HEX64.test(String(run.stdout_sha256)) && HEX64.test(String(run.stderr_sha256))));
-    const env = r.env;
-    need("env", !!env && typeof env === "object" && typeof env.os === "string" && env.os !== "" && typeof env.arch === "string" && env.arch !== "" && (env.runtime === "bun" || env.runtime === "unknown" || env.runtime === "node") && typeof env.runtime_version === "string" && env.runtime_version !== "" && typeof env.dirty_tree === "boolean");
-    need("signature", r.signature === undefined && r.signer === undefined || typeof r.signature === "string" && r.signature !== "" && typeof r.signer === "string" && r.signer !== "");
+  const path = createWorktree(root, id, forkSha);
+  let baseSha = forkSha;
+  if (rest.length > 0) {
+    try {
+      baseSha = mergeParentsSequential(path, rest);
+    } catch (e) {
+      removeWorktreeForced(root, path);
+      if (branchExists(root, branch))
+        forceDeleteBranch(root, branch);
+      throw new Error(`cannot start ${id}: merging parents [${parents.join(", ")}] conflicted: ${e.message}`);
+    }
   }
-  need("task_id", typeof r.task_id === "string" && r.task_id !== "");
-  need("seq", typeof r.seq === "number" && Number.isInteger(r.seq) && r.seq >= 1);
-  need("prev", r.prev === "genesis" || typeof r.prev === "string" && HEX64.test(r.prev));
-  need("harness", typeof r.harness === "string" && r.harness !== "");
-  need("model", r.model === null || typeof r.model === "string");
-  need("plugin_version", typeof r.plugin_version === "string");
-  const o = r.oracle;
-  need("oracle", !!o && typeof o === "object" && typeof o.run === "string" && typeof o.expect === "string");
-  need("base_sha", typeof r.base_sha === "string" && HEX40.test(r.base_sha));
-  need("tree_sha", typeof r.tree_sha === "string" && HEX40.test(r.tree_sha));
-  need("verdict", r.verdict === "pass");
-  need("verified_at", typeof r.verified_at === "string" && !Number.isNaN(Date.parse(r.verified_at)));
-  return errors2;
+  return { path, baseSha, reused: false };
 }
-function readReceiptRawFrom(dir, id) {
-  try {
-    return readFileSync3(receiptPath(dir, id));
-  } catch {
-    return null;
-  }
+function releaseForRetry(root, task) {
+  if (retryPolicyOf(task).workspace === "reuse")
+    return;
+  const branch = `sddx/${task.id}`;
+  const abs = join7(worktreesDir(root), task.id);
+  if (existsSync5(abs))
+    removeWorktreeForced(root, abs);
+  if (branchExists(root, branch))
+    forceDeleteBranch(root, branch);
+  task.workspace = undefined;
+  mkdirSync6(join7(sddxDir(root), "tasks"), { recursive: true });
 }
-function readReceiptRawFromRef(cwd, ref, id) {
-  const r = spawnSync3("git", ["show", `${ref}:.sddx/receipts/${id}.json`], { cwd });
-  return r.status === 0 ? r.stdout : null;
-}
-function resolveReceiptRaw(cwd, id) {
-  const direct = readReceiptRawFrom(join3(cwd, ".sddx-worktrees", id), id) ?? readReceiptRawFrom(cwd, id) ?? readReceiptRawFromRef(cwd, `sddx/${id}`, id);
-  if (direct)
-    return direct;
-  const goal = findGoalForTask(cwd, id);
-  return goal ? readReceiptRawFromRef(cwd, goal.run_branch, id) : null;
-}
-function resolveReceiptPath(cwd, id) {
-  const wt = join3(cwd, ".sddx-worktrees", id, ".sddx", "receipts", `${id}.json`);
-  if (existsSync3(wt))
-    return wt;
-  const local = join3(cwd, ".sddx", "receipts", `${id}.json`);
-  if (existsSync3(local))
-    return local;
-  if (readReceiptRawFromRef(cwd, `sddx/${id}`, id)) {
-    return `sddx/${id}:.sddx/receipts/${id}.json`;
+var isDirty = (worktreePath) => git(worktreePath, "status", "--porcelain", "--untracked-files=all") !== "";
+function removeWorktree(cwd, path) {
+  if (isDirty(path)) {
+    throw new Error(`worktree ${path} has uncommitted changes`);
   }
-  const goal = findGoalForTask(cwd, id);
-  if (goal && readReceiptRawFromRef(cwd, goal.run_branch, id)) {
-    return `${goal.run_branch}:.sddx/receipts/${id}.json`;
-  }
-  return null;
+  git(cwd, "worktree", "remove", path);
+  git(cwd, "worktree", "prune");
 }
-function resolveReceipt(cwd, id) {
-  const raw = resolveReceiptRaw(cwd, id);
-  if (!raw)
-    return null;
-  try {
-    return JSON.parse(raw.toString("utf8"));
-  } catch {
-    return null;
-  }
+function removeWorktreeForced(cwd, path) {
+  git(cwd, "worktree", "remove", "--force", path);
+  git(cwd, "worktree", "prune");
 }
-function verifyChain(cwd) {
-  const errors2 = [];
-  const receipts = listReceipts(cwd);
-  const seqByHash = new Map;
-  for (const { file, receipt } of receipts) {
-    seqByHash.set(sha256(readFileSync3(file)), receipt.seq);
-  }
-  for (const { file, receipt } of receipts) {
-    for (const e of validateReceipt(receipt))
-      errors2.push(`${file}: ${e}`);
-    if (receipt.prev === "genesis") {
-      if (receipt.seq !== 1) {
-        errors2.push(`${file}: genesis-linked receipt must have seq 1, got ${receipt.seq}`);
+function listSddxWorktrees(cwd) {
+  const dir = worktreesDir(cwd);
+  if (!existsSync5(dir))
+    return [];
+  const realPrefix = `${realpathSync(dir)}/`;
+  const prefix = `${dir}/`;
+  const out = git(cwd, "worktree", "list", "--porcelain");
+  const entries = [];
+  let current = {};
+  for (const line of `${out}
+`.split(`
+`)) {
+    if (line.startsWith("worktree ")) {
+      current = { path: line.slice("worktree ".length), branch: null, head: null, locked: null };
+    } else if (line === "locked" || line.startsWith("locked ")) {
+      current.locked = line.slice("locked ".length);
+    } else if (line.startsWith("HEAD ")) {
+      current.head = line.slice("HEAD ".length);
+    } else if (line.startsWith("branch ")) {
+      current.branch = line.slice("branch ".length).replace(/^refs\/heads\//, "");
+    } else if (line === "" && current.path) {
+      if (current.path.startsWith(realPrefix)) {
+        current.path = prefix + current.path.slice(realPrefix.length);
+        entries.push(current);
       }
+      current = {};
+    }
+  }
+  return entries;
+}
+function submodulePaths(cwd, baseSha) {
+  const r = spawnSync6("git", ["show", `${baseSha}:.gitmodules`], { cwd, encoding: "utf8" });
+  if (r.status !== 0 || typeof r.stdout !== "string")
+    return [];
+  const paths = [];
+  for (const line of r.stdout.split(`
+`)) {
+    const m = /^\s*path\s*=\s*(.+?)\s*$/.exec(line);
+    if (m?.[1])
+      paths.push(m[1].replace(/\\/g, "/").replace(/\/+$/, ""));
+  }
+  return paths;
+}
+function submoduleScopeConflicts(cwd, baseSha, nodes) {
+  const submodules = submodulePaths(cwd, baseSha);
+  if (submodules.length === 0)
+    return [];
+  const conflicts = [];
+  for (const node of nodes) {
+    if (node.scope.length === 0) {
+      conflicts.push({ alias: node.alias, submodule: submodules[0] });
       continue;
     }
-    const parentSeq = seqByHash.get(receipt.prev);
-    if (parentSeq === undefined) {
-      errors2.push(`${file}: prev hash matches no receipt — chain broken (tampered or deleted)`);
-    } else if (parentSeq >= receipt.seq) {
-      errors2.push(`${file}: seq ${receipt.seq} must exceed parent seq ${parentSeq}`);
-    }
-  }
-  return errors2;
-}
-
-// src/lib/sign.ts
-import { spawnSync as spawnSync4 } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync as writeFileSync4 } from "node:fs";
-import { homedir, tmpdir } from "node:os";
-import { join as join4 } from "node:path";
-var DEFAULT_NAMESPACE = "sddx-receipt";
-var gitConfigCache = new Map;
-function gitConfig(cwd, key) {
-  const cacheKey = `${cwd}\x00${key}`;
-  const cached = gitConfigCache.get(cacheKey);
-  if (cached !== undefined)
-    return cached;
-  const r = spawnSync4("git", ["config", "--get", key], { cwd, encoding: "utf8" });
-  const v = r.status === 0 ? (r.stdout ?? "").trim() : "";
-  const result = v === "" ? null : v;
-  gitConfigCache.set(cacheKey, result);
-  return result;
-}
-var expandHome = (p) => p.startsWith("~/") ? join4(homedir(), p.slice(2)) : p;
-function signPayload(cwd, payload, namespace = DEFAULT_NAMESPACE) {
-  if (gitConfig(cwd, "gpg.format") !== "ssh")
-    return null;
-  const key = gitConfig(cwd, "user.signingkey");
-  if (!key || key.startsWith("ssh-"))
-    return null;
-  const signer = gitConfig(cwd, "user.email");
-  if (!signer)
-    return null;
-  const r = spawnSync4("ssh-keygen", ["-Y", "sign", "-n", namespace, "-f", expandHome(key)], {
-    cwd,
-    input: payload,
-    encoding: "utf8"
-  });
-  if (r.status !== 0)
-    return null;
-  const signature = (r.stdout ?? "").trim();
-  return signature.startsWith("-----BEGIN SSH SIGNATURE-----") ? { signature, signer } : null;
-}
-function verifySignature(cwd, payload, sig, namespace = DEFAULT_NAMESPACE) {
-  const allowed = gitConfig(cwd, "gpg.ssh.allowedSignersFile");
-  if (!allowed)
-    return "unverifiable";
-  const tmp = mkdtempSync(join4(tmpdir(), "sddx-sig-"));
-  try {
-    const sigFile = join4(tmp, "receipt.sig");
-    writeFileSync4(sigFile, `${sig.signature}
-`);
-    const r = spawnSync4("ssh-keygen", ["-Y", "verify", "-f", expandHome(allowed), "-I", sig.signer, "-n", namespace, "-s", sigFile], { cwd, input: payload, encoding: "utf8" });
-    return r.status === 0 ? "valid" : "invalid";
-  } finally {
-    rmSync(tmp, { recursive: true, force: true });
-  }
-}
-
-// src/lib/approval.ts
-var WORKSPACE = "worktree";
-var approvalsDir = (cwd) => join5(sddxDir(cwd), "approvals");
-var approvalPath = (cwd, hash) => join5(approvalsDir(cwd), `${hash}.json`);
-function planHash(graphPath) {
-  const files = [];
-  if (!existsSync4(graphPath)) {
-    return { hash: "", files, errors: [`plan: ${graphPath} not found`] };
-  }
-  let graphText;
-  try {
-    graphText = readFileSync4(graphPath, "utf8");
-  } catch (e) {
-    return { hash: "", files, errors: [`plan: ${graphPath} unreadable: ${e.message}`] };
-  }
-  const { graph, errors: errors2 } = parseGraph(graphText);
-  if (!graph)
-    return { hash: "", files, errors: errors2 };
-  const graphDir = dirname(graphPath);
-  const parts = [`graph\x00${sha256(graphText)}`];
-  files.push(graphPath);
-  const nodes = [...graph.tasks].sort((a, b) => a.alias < b.alias ? -1 : a.alias > b.alias ? 1 : 0);
-  const specErrors = [];
-  for (const node of nodes) {
-    const specPath = resolve(graphDir, node.spec);
-    try {
-      parts.push(`spec\x00${node.alias}\x00${sha256(readFileSync4(specPath, "utf8"))}`);
-      files.push(specPath);
-    } catch {
-      specErrors.push(`plan: node "${node.alias}" spec ${node.spec} is missing or unreadable`);
-    }
-  }
-  if (specErrors.length > 0)
-    return { hash: "", files, errors: specErrors };
-  return { hash: sha256(parts.join(`
-`)), files, errors: [] };
-}
-function writeApproval(cwd, input) {
-  const sig = signPayload(cwd, input.plan_sha256, "sddx-approval");
-  const approval = {
-    plan_sha256: input.plan_sha256,
-    mode: input.mode,
-    ...input.workspace_mode ? { workspace_mode: input.workspace_mode } : {},
-    at: new Date().toISOString(),
-    ...sig ? { signature: sig.signature, signer: sig.signer } : {},
-    amendments: []
-  };
-  mkdirSync4(approvalsDir(cwd), { recursive: true });
-  writeFileSync5(approvalPath(cwd, input.plan_sha256), `${JSON.stringify(approval, null, 2)}
-`);
-  return approval;
-}
-function readApproval(cwd, hash) {
-  const path = approvalPath(cwd, hash);
-  if (!existsSync4(path))
-    return null;
-  try {
-    const parsed = JSON.parse(readFileSync4(path, "utf8"));
-    if (typeof parsed !== "object" || parsed === null)
-      return null;
-    const a = parsed;
-    if (a.plan_sha256 !== hash)
-      return null;
-    return a;
-  } catch {
-    return null;
-  }
-}
-function mergeAssumptions(goalLevel, nodeLevel) {
-  const out = [];
-  for (const a of [...goalLevel, ...nodeLevel])
-    if (!out.includes(a))
-      out.push(a);
-  return out;
-}
-var renderBlocker = (b) => `${b.node ? `node "${b.node}": ` : ""}${b.decision} — ${b.impact} ${b.next_step}`;
-var SELF_MODIFYING_GLOBS = [
-  "hooks/**",
-  "templates/**",
-  ".github/workflows/**",
-  "dist/**",
-  "bin/**",
-  ".claude/**"
-];
-var SENSITIVE_SEGMENTS = [
-  "auth",
-  "migrations",
-  "secrets",
-  "credentials",
-  "billing"
-];
-var SENSITIVE_GLOBS = ["infra/**", "terraform/**", "k8s/**"];
-var SENSITIVE_FILENAMES = [/^Dockerfile/i, /^\.env/i, /^docker-compose/i];
-function namesSensitiveArea(scope) {
-  for (const glob of scope) {
-    const segments2 = glob.replace(/\\/g, "/").split("/");
-    for (const seg of segments2) {
-      for (const word of seg.toLowerCase().split(/[^a-z0-9]+/)) {
-        if (word && SENSITIVE_SEGMENTS.includes(word))
-          return word;
+    for (const sub of submodules) {
+      const hit = node.scope.find((s) => scopesOverlap([s], [`${sub}/**`]) || s === sub);
+      if (hit) {
+        conflicts.push({ alias: node.alias, submodule: sub, scope: hit });
+        break;
       }
     }
-    const last = segments2[segments2.length - 1] ?? "";
-    const literal = last.replace(/[*?]/g, "");
-    if (literal && SENSITIVE_FILENAMES.some((re) => re.test(literal)))
-      return last;
   }
-  return;
+  return conflicts;
 }
-var REMEDY = 'To review and run this plan yourself, set "interaction_mode": "human" in .sddx/config.json.';
-function decideGate(cwd, graphPath, nodes, requestedMode, ceiling, overlaps2) {
-  const { hash, errors: errors2 } = planHash(graphPath);
-  const base = { hash, requestedMode, nodeCount: nodes.length };
-  if (hash === "") {
-    return { ...base, ok: false, mode: "human", reason: errors2.join("; ") || "plan unreadable" };
-  }
-  if (requestedMode === "auto") {
-    const blocker = autoRefusal(nodes, ceiling, overlaps2, unresolvedOf(graphPath));
-    if (blocker) {
-      return { ...base, ok: false, mode: "auto", refusal: renderBlocker(blocker), blocker };
-    }
-  }
-  const approval = readApproval(cwd, hash);
-  if (approval) {
-    if (approval.workspace_mode !== undefined && approval.workspace_mode !== WORKSPACE) {
-      return {
-        ...base,
-        ok: false,
-        mode: "human",
-        reason: `plan ${hash.slice(0, 12)} was approved for workspace "${approval.workspace_mode}", which is no longer supported — re-render and re-approve this plan`
-      };
-    }
-    return { ...base, ok: true, mode: approval.mode, hash };
-  }
-  if (requestedMode === "human") {
-    return {
-      ...base,
-      ok: false,
-      mode: "human",
-      reason: `no approval on file for plan ${hash.slice(0, 12)} — review it with: sddx graph create --graph <path> --dry-run, then approve with: sddx graph approve --graph <path>`
-    };
-  }
-  return { ...base, ok: true, mode: "auto" };
-}
-function autoRefusal(nodes, ceiling, overlaps2, unresolved = []) {
-  const manual = nodes.find((n) => n.oracleType === "manual");
-  if (manual) {
-    return {
-      bound: "manual-oracle",
-      node: manual.alias,
-      decision: "declares oracle.type: manual",
-      impact: "an unattended run has nobody present to observe it, so completion could never be proven",
-      next_step: `Give it an executable oracle, or run it with a human watching. ${REMEDY}`
-    };
-  }
-  if (unresolved.length > 0) {
-    const list = unresolved.map((u) => `"${u}"`).join(", ");
-    return {
-      bound: "unresolved",
-      decision: `${unresolved.length} decision${unresolved.length === 1 ? "" : "s"} intake could not safely take: ${list}`,
-      impact: "the plan rests on a choice nobody has made, and an unattended run would make it by accident",
-      next_step: `Decide them and record them as answers in the Goal Brief header, or run in human mode. ${REMEDY}`
-    };
-  }
-  const unconfined = nodes.find((n) => n.scope.length === 0);
-  if (unconfined) {
-    return {
-      bound: "unconfined-scope",
-      node: unconfined.alias,
-      decision: "declares no scope, so it is unconfined",
-      impact: `it may write sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")}) or protected paths (${SENSITIVE_SEGMENTS.join(", ")}, ${SENSITIVE_GLOBS.join(", ")})`,
-      next_step: `Declare the smallest scope that covers the work, or run in human mode. ${REMEDY}`
-    };
-  }
-  const selfModifying = nodes.find((n) => overlaps2(n.scope, [...SELF_MODIFYING_GLOBS]));
-  if (selfModifying) {
-    return {
-      bound: "self-modifying",
-      node: selfModifying.alias,
-      decision: `declares a scope reaching sddx's own enforcement paths (${SELF_MODIFYING_GLOBS.join(", ")})`,
-      impact: "a plan that edits the machinery enforcing the plan cannot be bounded by it",
-      next_step: `Narrow the scope, or run it with a human reviewing. ${REMEDY}`
-    };
-  }
-  const PROTECTED_IMPACT = "a security, data, billing, or deployment decision is not one an unattended run may take";
-  for (const n of nodes) {
-    const named = namesSensitiveArea(n.scope);
-    if (named) {
-      return {
-        bound: "protected-path",
-        node: n.alias,
-        decision: `declares a scope naming the protected area "${named}"`,
-        impact: PROTECTED_IMPACT,
-        next_step: `Move that work into its own task and run it with a human reviewing. ${REMEDY}`
-      };
-    }
-  }
-  const sensitive = nodes.find((n) => overlaps2(n.scope, [...SENSITIVE_GLOBS]));
-  if (sensitive) {
-    return {
-      bound: "protected-path",
-      node: sensitive.alias,
-      decision: `declares a scope reaching protected paths (${SENSITIVE_GLOBS.join(", ")})`,
-      impact: PROTECTED_IMPACT,
-      next_step: `Move that work into its own task and run it with a human reviewing. ${REMEDY}`
-    };
-  }
-  if (nodes.length > ceiling) {
-    return {
-      bound: "task-ceiling",
-      decision: `plan has ${nodes.length} nodes, over the auto_max_tasks ceiling of ${ceiling}`,
-      impact: "the blast radius of one unattended run is capped deliberately, and this plan exceeds it",
-      next_step: `Split the goal into smaller runs, raise auto_max_tasks in reviewed configuration, or run in human mode. ${REMEDY}`
-    };
-  }
-  return;
-}
-function unresolvedOf(graphPath) {
+var proofLockReason = () => `sddx verify pid ${process.pid} on ${hostname()}`;
+function proofOwner(locked) {
+  if (locked === null)
+    return { alive: false };
+  const m = /^sddx verify pid (\d+) on (.+)$/.exec(locked);
+  if (!m)
+    return { alive: true };
+  const pid = Number(m[1]);
+  if (m[2] !== hostname())
+    return { alive: true, pid };
   try {
-    return parseGraph(readFileSync4(graphPath, "utf8")).graph?.unresolved ?? [];
-  } catch {
-    return [];
+    process.kill(pid, 0);
+    return { alive: true, pid };
+  } catch (e) {
+    return { alive: e.code === "EPERM", pid };
   }
 }
+function removeScratchWorktree(root, path) {
+  if (listSddxWorktrees(root).some((w) => w.path === path)) {
+    git(root, "worktree", "remove", "--force", "--force", path);
+  }
+  rmSync4(path, { recursive: true, force: true });
+  git(root, "worktree", "prune");
+}
+var isRunBranchScratch = (path) => basename(dirname3(path)) === ".sddx-worktrees" && /^(integrate|revert)-/.test(basename(path));
+var PROOF_DIR_GRACE_MS = 60000;
+var LOCK_STALE_MS = 10 * 60000;
+function acquireLock(lockPath, now) {
+  try {
+    mkdirSync6(lockPath);
+    return true;
+  } catch {
+    let age = 0;
+    try {
+      age = now - statSync(lockPath).mtimeMs;
+    } catch {
+      try {
+        mkdirSync6(lockPath);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    if (age <= LOCK_STALE_MS)
+      return false;
+    try {
+      rmdirSync(lockPath);
+      mkdirSync6(lockPath);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}
+var DISPOSABLE = new Set(["DONE", "ABANDONED"]);
+function writeSweepState(cwd, skipped) {
+  const entries = skipped.map((s) => ({ path: relative(cwd, s.path), reason: s.reason })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+  mkdirSync6(join7(cwd, ".sddx"), { recursive: true });
+  writeFileSync7(join7(cwd, ".sddx", "sweep.json"), `${JSON.stringify({ skipped: entries }, null, 2)}
+`);
+}
+function sweep(cwd, opts = {}) {
+  const now = opts.now ?? Date.now();
+  const lockPath = join7(gitCommonDir(cwd), "sddx-sweep.lock");
+  if (!acquireLock(lockPath, now)) {
+    return { removed: [], skipped: [], locked: true };
+  }
+  const removed = [];
+  const skipped = [];
+  try {
+    const listed = listSddxWorktrees(cwd);
+    for (const wt of listed) {
+      if (wt.branch === null && wt.path.endsWith(PROOF_SUFFIX)) {
+        const owner = proofOwner(wt.locked);
+        if (owner.alive) {
+          skipped.push({
+            path: wt.path,
+            reason: owner.pid ? `verify running (pid ${owner.pid})` : "locked"
+          });
+          continue;
+        }
+        try {
+          removeScratchWorktree(cwd, wt.path);
+          removed.push(wt.path);
+        } catch (e) {
+          skipped.push({ path: wt.path, reason: `remove failed: ${e.message}` });
+        }
+        continue;
+      }
+      const id = wt.branch?.replace(/^sddx\//, "");
+      if (!id) {
+        skipped.push({ path: wt.path, reason: "no sddx branch" });
+        continue;
+      }
+      const task = resolveTaskState(cwd, id);
+      if (!task) {
+        skipped.push({ path: wt.path, reason: "no readable task state" });
+        continue;
+      }
+      if (!DISPOSABLE.has(task.phase)) {
+        skipped.push({ path: wt.path, reason: `phase ${task.phase}` });
+        continue;
+      }
+      if (isDirty(wt.path)) {
+        skipped.push({ path: wt.path, reason: "dirty" });
+        continue;
+      }
+      if (task.phase === "DONE" && !existsSync5(join7(wt.path, ".sddx", "receipts", `${id}.json`))) {
+        skipped.push({ path: wt.path, reason: "DONE without receipt" });
+        continue;
+      }
+      try {
+        removeWorktree(cwd, wt.path);
+        removed.push(wt.path);
+      } catch (e) {
+        skipped.push({ path: wt.path, reason: `remove failed: ${e.message}` });
+      }
+    }
+    const tracked = new Set(listed.map((w) => w.path));
+    for (const name of worktreeIds(cwd)) {
+      const path = join7(worktreesDir(cwd), name);
+      if (!name.endsWith(PROOF_SUFFIX) || tracked.has(path))
+        continue;
+      try {
+        if (now - statSync(path).mtimeMs < PROOF_DIR_GRACE_MS)
+          continue;
+        removeScratchWorktree(cwd, path);
+        removed.push(path);
+      } catch (e) {
+        skipped.push({ path, reason: `remove failed: ${e.message}` });
+      }
+    }
+    writeSweepState(cwd, skipped);
+  } finally {
+    try {
+      rmdirSync(lockPath);
+    } catch {}
+  }
+  return { removed, skipped, locked: false };
+}
+var worktreeIds = (cwd) => existsSync5(worktreesDir(cwd)) ? readdirSync4(worktreesDir(cwd)) : [];
 
 // src/audit.ts
+function v5Claims(root, rel, r, findings, notes) {
+  const a = r.approval;
+  if (a) {
+    const harness = typeof a.harness_reported === "string" ? `; harness ${a.harness_reported} (reported, not verified)` : "";
+    if (a.mode === "auto") {
+      notes.push(`${rel}: ran in auto mode; no person approved this plan${harness}`);
+    } else if (a.binding === "signed") {
+      const signer = typeof a.signer === "string" ? a.signer : null;
+      const verdict = signer && typeof a.signature === "string" ? verifySignature(root, String(a.plan_sha256), { signature: a.signature, signer }, "sddx-approval") : "invalid";
+      if (verdict === "valid") {
+        notes.push(`${rel}: human approval provable, signed by ${signer}${harness}`);
+      } else if (verdict === "unverifiable") {
+        notes.push(`${rel}: signed approval cannot be checked here: set gpg.ssh.allowedSignersFile to verify ${signer}'s signature; until then human approval is not provable${harness}`);
+      } else {
+        findings.push(`${rel}: receipt claims a signed approval, but the signature it carries does not verify${harness}`);
+      }
+    } else {
+      notes.push(`${rel}: human approval not provable (approval was not signed)${harness}`);
+    }
+  }
+  const rv = r.review;
+  if (rv) {
+    const who = rv.reviewer === null ? "an unnamed reviewer" : `reported reviewer ${String(rv.reviewer)}`;
+    notes.push(`${rel}: review recorded by ${who} for diff ${String(rv.diff_sha256).slice(0, 12)} (a recorded review, not a verified one)`);
+  }
+}
 function gitLines(cwd, ...args) {
-  const r = spawnSync5("git", args, { cwd, encoding: "utf8" });
+  const r = spawnSync7("git", args, { cwd, encoding: "utf8" });
   if (r.status !== 0)
     return { ok: false, lines: [], err: (r.stderr ?? "").trim() };
   return { ok: true, lines: (r.stdout ?? "").split(`
@@ -10861,15 +8433,17 @@ function gitLines(cwd, ...args) {
 }
 function auditApprovals(cwd, findings, notes) {
   const receipts = receiptsDir(cwd);
-  if (existsSync5(receipts)) {
-    for (const file of readdirSync4(receipts).filter((f) => f.endsWith(".json"))) {
-      const rel = join6(".sddx", "receipts", file);
+  if (existsSync6(receipts)) {
+    for (const file of readdirSync5(receipts).filter((f) => f.endsWith(".json"))) {
+      const rel = join8(".sddx", "receipts", file);
       let r;
       try {
-        r = JSON.parse(readFileSync5(join6(receipts, file), "utf8"));
+        r = JSON.parse(readFileSync6(join8(receipts, file), "utf8"));
       } catch {
         continue;
       }
+      if (r.version === 5)
+        v5Claims(mainRoot2(cwd), rel, r, findings, notes);
       const a = r.approval;
       if (!a)
         continue;
@@ -10893,10 +8467,10 @@ function auditApprovals(cwd, findings, notes) {
     }
   }
   const tokens = approvalsDir(cwd);
-  if (!existsSync5(tokens))
+  if (!existsSync6(tokens))
     return;
-  for (const file of readdirSync4(tokens).filter((f) => f.endsWith(".json"))) {
-    const rel = join6(".sddx", "approvals", file);
+  for (const file of readdirSync5(tokens).filter((f) => f.endsWith(".json"))) {
+    const rel = join8(".sddx", "approvals", file);
     const hash = file.slice(0, -".json".length);
     const token = readApproval(cwd, hash);
     if (!token) {
@@ -10915,26 +8489,33 @@ function auditApprovals(cwd, findings, notes) {
     }
   }
 }
+function mainRoot2(cwd) {
+  try {
+    return resolveMainRepoRoot(cwd);
+  } catch {
+    return cwd;
+  }
+}
 function auditReceipts(cwd, opts = {}) {
   const findings = verifyChain(cwd).map((f) => `chain: ${f}`);
   const notes = [];
   const dir = receiptsDir(cwd);
-  const files = existsSync5(dir) ? readdirSync4(dir).filter((f) => f.endsWith(".json")).sort() : [];
+  const files = existsSync6(dir) ? readdirSync5(dir).filter((f) => f.endsWith(".json")).sort() : [];
   const tracked = gitLines(cwd, "ls-tree", "-r", "--name-only", "HEAD", "--", ".sddx/receipts");
   if (tracked.ok) {
     for (const rel of tracked.lines) {
-      if (rel.endsWith(".json") && !existsSync5(join6(cwd, rel))) {
+      if (rel.endsWith(".json") && !existsSync6(join8(cwd, rel))) {
         findings.push(`${rel}: committed receipt missing from working tree — receipt deleted`);
       }
     }
   }
   for (const file of files) {
-    const rel = join6(".sddx", "receipts", file);
+    const rel = join8(".sddx", "receipts", file);
     let raw = null;
     try {
-      raw = readFileSync5(join6(cwd, rel), "utf8");
+      raw = readFileSync6(join8(cwd, rel), "utf8");
     } catch {}
-    if (raw !== null && raw.includes('"signature"')) {
+    if (raw?.includes('"signature"')) {
       let parsed = null;
       try {
         parsed = JSON.parse(raw);
@@ -10972,7 +8553,7 @@ function auditReceipts(cwd, opts = {}) {
       findings.push(`${rel}: working tree differs from committed state — receipt bytes tampered`);
     }
     if (opts.signatures) {
-      const v = spawnSync5("git", ["verify-commit", introducing], { cwd });
+      const v = spawnSync7("git", ["verify-commit", introducing], { cwd });
       if (v.status !== 0) {
         findings.push(`${rel}: binding commit ${introducing.slice(0, 12)} has no valid signature`);
       }
@@ -10980,13 +8561,13 @@ function auditReceipts(cwd, opts = {}) {
   }
   auditApprovals(cwd, findings, notes);
   if (opts.ci) {
-    const tasksDir = join6(cwd, ".sddx", "tasks");
-    if (existsSync5(tasksDir)) {
-      for (const f of readdirSync4(tasksDir).filter((x) => x.endsWith(".json"))) {
-        const rel = join6(".sddx", "tasks", f);
+    const tasksDir = join8(cwd, ".sddx", "tasks");
+    if (existsSync6(tasksDir)) {
+      for (const f of readdirSync5(tasksDir).filter((x) => x.endsWith(".json"))) {
+        const rel = join8(".sddx", "tasks", f);
         try {
-          const t = JSON.parse(readFileSync5(join6(tasksDir, f), "utf8"));
-          if (t.phase === "DONE" && !existsSync5(join6(dir, `${t.id}.json`))) {
+          const t = JSON.parse(readFileSync6(join8(tasksDir, f), "utf8"));
+          if (t.phase === "DONE" && !existsSync6(join8(dir, `${t.id}.json`))) {
             findings.push(`${rel}: task is DONE without a receipt — completion unproven`);
           }
         } catch {
@@ -10999,23 +8580,35 @@ function auditReceipts(cwd, opts = {}) {
 }
 
 // src/board.ts
-import { existsSync as existsSync8, mkdirSync as mkdirSync6, readdirSync as readdirSync6, readFileSync as readFileSync8, writeFileSync as writeFileSync7 } from "node:fs";
-import { join as join9 } from "node:path";
+import { existsSync as existsSync8, mkdirSync as mkdirSync8, readdirSync as readdirSync6, readFileSync as readFileSync8, writeFileSync as writeFileSync9 } from "node:fs";
+import { join as join10 } from "node:path";
 
 // src/lib/config.ts
-import { existsSync as existsSync6, readFileSync as readFileSync6 } from "node:fs";
-import { join as join7 } from "node:path";
-var INTERACTION_MODES2 = ["human", "auto"];
-var RUNTIME_SCOPES = ["global", "project"];
-var PACKAGE_MANAGERS = ["npm", "bun"];
-var CONFIG_SCHEMA_VERSION = "1.0";
+import { existsSync as existsSync7, mkdirSync as mkdirSync7, readFileSync as readFileSync7, writeFileSync as writeFileSync8 } from "node:fs";
+import { join as join9 } from "node:path";
+var PROFILES = ["default", "strict"];
+var INTERACTION_MODES = ["human", "auto"];
+var CONFIG_SCHEMA_VERSION = "2.0";
 var DEFAULT_AUTO_MAX_TASKS = 6;
+var configPath = (root) => join9(root, ".sddx", "config.json");
+function defaultConfig() {
+  return { schema_version: CONFIG_SCHEMA_VERSION, interaction_mode: "human", profile: "default" };
+}
+function ensureConfig(root) {
+  const path = configPath(root);
+  if (existsSync7(path))
+    return false;
+  mkdirSync7(join9(root, ".sddx"), { recursive: true });
+  writeFileSync8(path, `${JSON.stringify(defaultConfig(), null, 2)}
+`);
+  return true;
+}
 function readConfig(root) {
-  const path = join7(root, ".sddx", "config.json");
-  if (!existsSync6(path))
+  const path = configPath(root);
+  if (!existsSync7(path))
     return {};
   try {
-    const parsed = JSON.parse(readFileSync6(path, "utf8"));
+    const parsed = JSON.parse(readFileSync7(path, "utf8"));
     return typeof parsed === "object" && parsed !== null ? parsed : {};
   } catch {
     return {};
@@ -11037,6 +8630,16 @@ function resolveValue(opts) {
       return parsed;
   }
   return opts.fallback;
+}
+function classifyConfig(root, env = process.env) {
+  const cfg = readConfig(root);
+  return {
+    testGlobs: env.SDDX_TEST_GLOBS ?? cfg.test_globs,
+    exemptGlobs: env.SDDX_EXEMPT_GLOBS ?? cfg.exempt_globs
+  };
+}
+function maxIterations(root) {
+  return positiveInt(readConfig(root).max_iterations_default) ?? 5;
 }
 function stuckThreshold(root, env = process.env) {
   return resolveValue({
@@ -11069,7 +8672,7 @@ function boardEnabled(root, env = process.env) {
     fallback: true
   });
 }
-var asMode = (v) => typeof v === "string" && INTERACTION_MODES2.includes(v) ? v : null;
+var asMode = (v) => typeof v === "string" && INTERACTION_MODES.includes(v) ? v : null;
 function interactionMode(root) {
   const cfg = readConfig(root);
   if (cfg.interaction_mode !== undefined)
@@ -11079,6 +8682,12 @@ function interactionMode(root) {
 var gateInteractionMode = interactionMode;
 function autoMaxTasks(root) {
   return positiveInt(readConfig(root).auto_max_tasks) ?? DEFAULT_AUTO_MAX_TASKS;
+}
+function profile(root) {
+  const v = readConfig(root).profile;
+  if (v === undefined)
+    return "default";
+  return PROFILES.includes(v) ? v : "strict";
 }
 var KNOWN_AGENT_ROLES = ["intake", "orchestrator", "planner", "tddExecutor", "verifier"];
 function parseAgentModel(raw) {
@@ -11091,7 +8700,7 @@ function parseAgentModel(raw) {
     const role = eq === -1 ? "" : segment.slice(0, eq).trim();
     const model = eq === -1 ? "" : segment.slice(eq + 1).trim();
     if (eq === -1 || model === "" || !KNOWN_AGENT_ROLES.includes(role)) {
-      warnings.push(`agent_model: ignoring "${segment}" — expected one of ${KNOWN_AGENT_ROLES.join("|")} followed by =<model>`);
+      warnings.push(`agent_model: ignoring "${segment}"; expected one of ${KNOWN_AGENT_ROLES.join("|")} followed by =<model>`);
       continue;
     }
     models[role] = model;
@@ -11099,8 +8708,6 @@ function parseAgentModel(raw) {
   return { models, warnings };
 }
 var bool = (v) => typeof v === "boolean" ? v : null;
-var asRuntimeScope = (v) => typeof v === "string" && RUNTIME_SCOPES.includes(v) ? v : null;
-var asPackageManager = (v) => typeof v === "string" && PACKAGE_MANAGERS.includes(v) ? v : null;
 function resolveConfig(root, env = process.env) {
   const cfg = readConfig(root);
   return {
@@ -11156,9 +8763,7 @@ function resolveConfig(root, env = process.env) {
     verbose: resolveValue({ configValue: cfg.verbose, configParse: bool, fallback: false }),
     interaction_mode: interactionMode(root),
     auto_max_tasks: autoMaxTasks(root),
-    runtime_scope: asRuntimeScope(cfg.runtime_scope) ?? "global",
-    package_manager: asPackageManager(cfg.package_manager) ?? "npm",
-    adapters: Array.isArray(cfg.adapters) ? cfg.adapters.filter((a) => typeof a === "string") : [],
+    profile: profile(root),
     schema_version: typeof cfg.schema_version === "string" ? cfg.schema_version : null
   };
 }
@@ -11237,7 +8842,7 @@ var CONFIG_KEYS = [
     expectation: "a string",
     default: "",
     title: "Agent model overrides",
-    description: "Comma-separated role=model pairs (roles: orchestrator, planner, tddExecutor, verifier) — advisory, read by /sddx:run when dispatching subagents"
+    description: "Comma-separated role=model pairs (roles: orchestrator, planner, tddExecutor, verifier); advisory, read by /sddx:run when dispatching subagents"
   },
   {
     key: "verbose",
@@ -11249,16 +8854,16 @@ var CONFIG_KEYS = [
   },
   {
     key: "interaction_mode",
-    isValid: isOneOf(INTERACTION_MODES2),
-    expectation: `one of ${INTERACTION_MODES2.join("|")}`,
+    isValid: isOneOf(INTERACTION_MODES),
+    expectation: `one of ${INTERACTION_MODES.join("|")}`,
     default: "human",
     title: "Interaction mode",
     description: "Whether a human is consulted before anything is created: human (one question round, then plan approval) | auto (unattended up to the run branch, refusing rather than prompting at any autonomy bound)"
   },
   {
     key: "execution_mode",
-    isValid: isOneOf(INTERACTION_MODES2),
-    expectation: `one of ${INTERACTION_MODES2.join("|")}`,
+    isValid: isOneOf(INTERACTION_MODES),
+    expectation: `one of ${INTERACTION_MODES.join("|")}`,
     default: "human",
     title: "Interaction mode (deprecated spelling)",
     description: "Renamed to interaction_mode. Still read; never written.",
@@ -11273,28 +8878,12 @@ var CONFIG_KEYS = [
     description: "In auto mode, a plan with more nodes than this is refused rather than run"
   },
   {
-    key: "runtime_scope",
-    isValid: isOneOf(RUNTIME_SCOPES),
-    expectation: `one of ${RUNTIME_SCOPES.join("|")}`,
-    default: "global",
-    title: "Runtime scope",
-    description: "How generated adapter content invokes sddx: global (an `sddx` on PATH) | project (a lockfile-backed project dependency run through the package manager)"
-  },
-  {
-    key: "package_manager",
-    isValid: isOneOf(PACKAGE_MANAGERS),
-    expectation: `one of ${PACKAGE_MANAGERS.join("|")}`,
-    default: "npm",
-    title: "Package manager",
-    description: "Which package manager runs the project-local binary when runtime_scope=project"
-  },
-  {
-    key: "adapters",
-    isValid: (v) => Array.isArray(v) && v.every((a) => typeof a === "string"),
-    expectation: "an array of strings",
-    default: "",
-    title: "Enabled adapters",
-    description: "Project adapters `sddx init`/`sync` maintain (currently: claude)"
+    key: "profile",
+    isValid: isOneOf(PROFILES),
+    expectation: `one of ${PROFILES.join("|")}`,
+    default: "default",
+    title: "Profile",
+    description: "default (the boundary proof in verify) | strict (adds the per-edit test-first gate on harnesses with blocking hooks)"
   },
   {
     key: "schema_version",
@@ -11309,11 +8898,23 @@ var KNOWN_CONFIG_KEYS = new Set(CONFIG_KEYS.map((k) => k.key));
 var REMOVED_CONFIG_KEYS = new Map([
   [
     "workspace_mode",
-    "removed in sddx 4.0 — worktree is the only workspace strategy, so there is nothing to select. Remove the key; runs are unaffected."
+    "removed in sddx 4.0: worktree is the only workspace strategy, so there is nothing to select. Remove the key; runs are unaffected."
+  ],
+  [
+    "runtime_scope",
+    "removed in sddx 6: harness integration is installed by the sddx plugin, not generated into the repository. Remove the key."
+  ],
+  [
+    "package_manager",
+    "removed in sddx 6: harness integration is installed by the sddx plugin, not generated into the repository. Remove the key."
+  ],
+  [
+    "adapters",
+    "removed in sddx 6: harness integration is installed by the sddx plugin, not generated into the repository. Remove the key."
   ],
   [
     "prefer_solo",
-    "removed in sddx 4.0 along with `--solo` and `/sddx:quick` — a trivial task is a one-node `/sddx:run`. Remove the key; runs are unaffected."
+    "removed in sddx 4.0 along with `--solo` and `/sddx:quick`; a trivial task is a one-node `/sddx:run`. Remove the key; runs are unaffected."
   ]
 ]);
 function validateConfigObject(obj) {
@@ -11329,488 +8930,27 @@ function validateConfigObject(obj) {
   }
   for (const { key, isValid, expectation } of CONFIG_KEYS) {
     if (key in obj && !isValid(obj[key])) {
-      warnings.push(`"${key}" must be ${expectation} — got ${JSON.stringify(obj[key])}`);
+      warnings.push(`"${key}" must be ${expectation}, got ${JSON.stringify(obj[key])}`);
     }
   }
   const version = obj.schema_version;
   if (typeof version === "string" && version !== CONFIG_SCHEMA_VERSION) {
-    warnings.push(`"schema_version" is "${version}" but this sddx writes "${CONFIG_SCHEMA_VERSION}" — re-run \`sddx init\` to reconcile it`);
+    warnings.push(version.startsWith("1.") ? `"schema_version" is "${version}", written by sddx 5; run \`sddx migrate\`` : `"schema_version" is "${version}" but this sddx writes "${CONFIG_SCHEMA_VERSION}"`);
   }
   if (typeof obj.agent_model === "string") {
     warnings.push(...parseAgentModel(obj.agent_model).warnings);
   }
   if ("execution_mode" in obj) {
-    warnings.push(obj.interaction_mode === undefined ? '"execution_mode" has been renamed to "interaction_mode" — the old name is still read, rename it to silence this' : '"execution_mode" is ignored because "interaction_mode" is also set — remove the old key');
+    warnings.push(obj.interaction_mode === undefined ? '"execution_mode" has been renamed to "interaction_mode"; the old name is still read, rename it to silence this' : '"execution_mode" is ignored because "interaction_mode" is also set; remove the old key');
   }
   return warnings;
 }
 
-// src/lib/worktree.ts
-import { spawnSync as spawnSync7 } from "node:child_process";
-import {
-  appendFileSync,
-  copyFileSync,
-  existsSync as existsSync7,
-  mkdirSync as mkdirSync5,
-  readdirSync as readdirSync5,
-  readFileSync as readFileSync7,
-  realpathSync,
-  rmdirSync,
-  rmSync as rmSync2,
-  statSync,
-  writeFileSync as writeFileSync6
-} from "node:fs";
-import { dirname as dirname2, isAbsolute as isAbsolute2, join as join8, relative } from "node:path";
-
-// src/lib/git.ts
-import { spawnSync as spawnSync6 } from "node:child_process";
-function git(cwd, ...args) {
-  const r = spawnSync6("git", args, { cwd, encoding: "utf8" });
-  if (r.error)
-    throw new Error(`git not runnable: ${r.error.message}`);
-  if (r.status !== 0) {
-    throw new Error(`git ${args.join(" ")} failed: ${(r.stderr ?? "").trim()}`);
-  }
-  return (r.stdout ?? "").trim();
-}
-var headSha = (cwd) => git(cwd, "rev-parse", "HEAD");
-var currentBranch = (cwd) => git(cwd, "rev-parse", "--abbrev-ref", "HEAD");
-var createBranchAt = (cwd, name, sha) => {
-  git(cwd, "branch", name, sha);
-};
-function branchExists(cwd, name) {
-  const r = spawnSync6("git", ["rev-parse", "--verify", "--quiet", `refs/heads/${name}`], {
-    cwd
-  });
-  return r.status === 0;
-}
-function isMerged(cwd, branch) {
-  return git(cwd, "branch", "--merged", "HEAD", "--format=%(refname:short)").split(`
-`).includes(branch);
-}
-var deleteBranch = (cwd, name) => {
-  git(cwd, "branch", "-d", name);
-};
-var forceDeleteBranch = (cwd, name) => {
-  git(cwd, "branch", "-D", name);
-};
-function remoteUrl(cwd, remote) {
-  const r = spawnSync6("git", ["remote", "get-url", remote], { cwd, encoding: "utf8" });
-  return r.status === 0 ? r.stdout.trim() : null;
-}
-function defaultBranch(cwd) {
-  const r = spawnSync6("git", ["symbolic-ref", "refs/remotes/origin/HEAD"], {
-    cwd,
-    encoding: "utf8"
-  });
-  if (r.status === 0) {
-    const m = /^refs\/remotes\/origin\/(.+)$/.exec(r.stdout.trim());
-    if (m?.[1])
-      return m[1];
-  }
-  return branchExists(cwd, "main") ? "main" : "master";
-}
-var push = (cwd, branch) => {
-  git(cwd, "push", "-u", "origin", branch);
-};
-var stageAll = (cwd) => {
-  git(cwd, "add", "-A", "--", ".", ":!.sddx/goals");
-};
-var stagePath = (cwd, path) => {
-  git(cwd, "add", "--", path);
-};
-var writeTree = (cwd) => git(cwd, "write-tree");
-function commit(cwd, message) {
-  git(cwd, "commit", "-m", message);
-  return headSha(cwd);
-}
-
-// src/lib/worktree.ts
-var worktreesDir = (cwd) => join8(cwd, ".sddx-worktrees");
-function tryRev(cwd, ref) {
-  const r = spawnSync7("git", ["rev-parse", "--verify", "--quiet", ref], {
-    cwd,
-    encoding: "utf8"
-  });
-  return r.status === 0 ? r.stdout.trim() : null;
-}
-function resolveBaseRef(cwd) {
-  const symref = spawnSync7("git", ["symbolic-ref", "-q", "refs/remotes/origin/HEAD"], {
-    cwd,
-    encoding: "utf8"
-  });
-  if (symref.status === 0) {
-    const sha = tryRev(cwd, symref.stdout.trim());
-    if (sha)
-      return { sha, source: "origin/HEAD" };
-  }
-  for (const [ref, source] of [
-    ["refs/remotes/origin/main", "origin/main"],
-    ["refs/remotes/origin/master", "origin/master"]
-  ]) {
-    const sha = tryRev(cwd, ref);
-    if (sha)
-      return { sha, source };
-  }
-  return { sha: git(cwd, "rev-parse", "HEAD"), source: "HEAD" };
-}
-var gitCommonDir = (cwd) => {
-  const dir = git(cwd, "rev-parse", "--git-common-dir");
-  return isAbsolute2(dir) ? dir : join8(cwd, dir);
-};
-function resolveMainRepoRoot(cwd) {
-  const r = spawnSync7("git", ["worktree", "list", "--porcelain"], { cwd, encoding: "utf8" });
-  const first = (r.stdout ?? "").split(`
-`).find((l) => l.startsWith("worktree "));
-  if (r.status === 0 && first)
-    return first.slice("worktree ".length).trim();
-  const top = spawnSync7("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8" });
-  if (top.status === 0 && (top.stdout ?? "").trim())
-    return (top.stdout ?? "").trim();
-  return dirname2(gitCommonDir(cwd));
-}
-var EXCLUDE_LINE = ".sddx-worktrees/";
-function ensureExcluded(cwd) {
-  const infoDir = join8(gitCommonDir(cwd), "info");
-  mkdirSync5(infoDir, { recursive: true });
-  const exclude = join8(infoDir, "exclude");
-  const current = existsSync7(exclude) ? readFileSync7(exclude, "utf8") : "";
-  if (current.split(`
-`).includes(EXCLUDE_LINE))
-    return;
-  const sep = current === "" || current.endsWith(`
-`) ? "" : `
-`;
-  appendFileSync(exclude, `${sep}${EXCLUDE_LINE}
-`);
-}
-function worktreeAvailable(cwd) {
-  let root;
-  try {
-    root = resolveMainRepoRoot(cwd);
-  } catch {
-    return false;
-  }
-  return spawnSync7("git", ["worktree", "list"], { cwd: root }).status === 0;
-}
-function createWorktree(cwd, id, baseSha) {
-  const root = resolveMainRepoRoot(cwd);
-  ensureExcluded(root);
-  mkdirSync5(worktreesDir(root), { recursive: true });
-  const path = join8(worktreesDir(root), id);
-  git(root, "worktree", "add", "-q", path, "-b", `sddx/${id}`, baseSha);
-  return path;
-}
-function mergeParentsSequential(worktreePath, remaining) {
-  for (const sha of remaining) {
-    const r = spawnSync7("git", ["merge", "--no-ff", "-m", `sddx: merge dependency ${sha}`, sha], {
-      cwd: worktreePath,
-      encoding: "utf8"
-    });
-    if (r.status !== 0) {
-      spawnSync7("git", ["merge", "--abort"], { cwd: worktreePath });
-      throw new Error(`merge of ${sha} failed: ${(r.stderr ?? r.stdout ?? "").trim()}`);
-    }
-  }
-  return git(worktreePath, "rev-parse", "HEAD");
-}
-function materializeDependent(cwd, taskId2) {
-  const task = resolveTaskState(cwd, taskId2);
-  if (!task)
-    throw new Error(`no such task: ${taskId2}`);
-  assertAdvanceable(task);
-  const parentIds = dependsOnList(task);
-  if (parentIds.length === 0) {
-    throw new Error(`task ${taskId2} has no depends_on to materialize from`);
-  }
-  const parentShas = [];
-  for (const parentId of parentIds) {
-    const parent = resolveTaskState(cwd, parentId);
-    if (!parent)
-      throw new Error(`cannot materialize ${taskId2}: parent ${parentId} not found`);
-    if (parent.phase !== "DONE") {
-      throw new Error(`cannot materialize ${taskId2}: parent ${parentId} is ${parent.phase}, not DONE`);
-    }
-    const sha = tryRev(cwd, `refs/heads/sddx/${parentId}`) ?? tryRev(cwd, `sddx/${parentId}`);
-    if (!sha) {
-      throw new Error(`cannot materialize ${taskId2}: parent ${parentId}'s DONE commit is unresolvable`);
-    }
-    parentShas.push(sha);
-  }
-  const forkSha = parentShas[0];
-  const rest = parentShas.slice(1);
-  const path = createWorktree(cwd, taskId2, forkSha);
-  let finalSha = forkSha;
-  if (rest.length > 0) {
-    try {
-      finalSha = mergeParentsSequential(path, rest);
-    } catch (e) {
-      removeWorktreeForced(cwd, path);
-      throw new Error(`cannot materialize ${taskId2}: fan-in merge conflict combining parents [${parentIds.join(", ")}] — ${e.message}`);
-    }
-  }
-  const relSpec = task.spec_path;
-  const specSrc = join8(cwd, relSpec);
-  if (existsSync7(specSrc)) {
-    mkdirSync5(join8(sddxDir(path), "specs"), { recursive: true });
-    copyFileSync(specSrc, join8(path, relSpec));
-  }
-  task.workspace = {
-    mode: "worktree",
-    branch: `sddx/${taskId2}`,
-    base_sha: finalSha,
-    path: join8(".sddx-worktrees", taskId2)
-  };
-  writeTask(path, task);
-  rmSync2(join8(cwd, ".sddx", "tasks", `${taskId2}.json`), { force: true });
-  if (existsSync7(specSrc))
-    rmSync2(specSrc, { force: true });
-  return { path, baseSha: finalSha, mode: "worktree" };
-}
-function retryWorkspace(cwd, task) {
-  const policy = retryPolicyOf(task);
-  const root = resolveMainRepoRoot(cwd);
-  if (policy.workspace === "fresh") {
-    const branch = `sddx/${task.id}`;
-    if (task.workspace.path) {
-      const oldAbs = join8(root, task.workspace.path);
-      const specAbs = join8(oldAbs, task.spec_path);
-      const specBytes = existsSync7(specAbs) ? readFileSync7(specAbs) : null;
-      if (existsSync7(oldAbs)) {
-        try {
-          removeWorktreeForced(root, oldAbs);
-        } catch {}
-      }
-      if (branchExists(root, branch))
-        forceDeleteBranch(root, branch);
-      const newAbs = createWorktree(root, task.id, task.workspace.base_sha);
-      mkdirSync5(join8(sddxDir(newAbs), "tasks"), { recursive: true });
-      if (specBytes) {
-        mkdirSync5(dirname2(join8(newAbs, task.spec_path)), { recursive: true });
-        writeFileSync6(join8(newAbs, task.spec_path), specBytes);
-      }
-      task.workspace = { ...task.workspace, path: relative(root, newAbs) };
-    }
-  }
-  rematerializeStaleDependents(root, task.id);
-}
-var allKnownTaskIds = (cwd) => {
-  const ids = new Set;
-  const mainDir = join8(cwd, ".sddx", "tasks");
-  if (existsSync7(mainDir)) {
-    for (const f of readdirSync5(mainDir))
-      if (f.endsWith(".json"))
-        ids.add(f.slice(0, -5));
-  }
-  for (const id of worktreeIds(cwd))
-    ids.add(id);
-  return [...ids];
-};
-var isMaterialized = (t) => !isDeferred(t);
-function rematerializeStaleDependents(cwd, retriedTaskId) {
-  const rebuilt = [];
-  for (const id of allKnownTaskIds(cwd)) {
-    if (id === retriedTaskId)
-      continue;
-    const t = resolveTaskState(cwd, id);
-    if (!t)
-      continue;
-    if (!dependsOnList(t).includes(retriedTaskId))
-      continue;
-    if (!isMaterialized(t))
-      continue;
-    const staleBranch = `sddx/${id}`;
-    if (t.workspace.path) {
-      const abs = join8(cwd, t.workspace.path);
-      if (existsSync7(abs)) {
-        try {
-          removeWorktreeForced(cwd, abs);
-        } catch {}
-      }
-    }
-    if (branchExists(cwd, staleBranch))
-      forceDeleteBranch(cwd, staleBranch);
-    t.workspace = {
-      mode: "deferred",
-      materialize_as: "worktree",
-      branch: null,
-      base_sha: `pending:${dependsOnList(t).join(",")}`
-    };
-    mkdirSync5(join8(cwd, ".sddx", "tasks"), { recursive: true });
-    writeTask(cwd, t);
-    materializeDependent(cwd, id);
-    rebuilt.push(id);
-    rebuilt.push(...rematerializeStaleDependents(cwd, id));
-  }
-  return rebuilt;
-}
-var isDirty = (worktreePath) => git(worktreePath, "status", "--porcelain") !== "";
-function removeWorktree(cwd, path) {
-  git(cwd, "worktree", "remove", path);
-  git(cwd, "worktree", "prune");
-}
-function removeWorktreeForced(cwd, path) {
-  git(cwd, "worktree", "remove", "--force", path);
-  git(cwd, "worktree", "prune");
-}
-function listSddxWorktrees(cwd) {
-  const dir = worktreesDir(cwd);
-  if (!existsSync7(dir))
-    return [];
-  const realPrefix = `${realpathSync(dir)}/`;
-  const prefix = `${dir}/`;
-  const out = git(cwd, "worktree", "list", "--porcelain");
-  const entries = [];
-  let current = {};
-  for (const line of `${out}
-`.split(`
-`)) {
-    if (line.startsWith("worktree ")) {
-      current = { path: line.slice("worktree ".length), branch: null, head: null };
-    } else if (line.startsWith("HEAD ")) {
-      current.head = line.slice("HEAD ".length);
-    } else if (line.startsWith("branch ")) {
-      current.branch = line.slice("branch ".length).replace(/^refs\/heads\//, "");
-    } else if (line === "" && current.path) {
-      if (current.path.startsWith(realPrefix)) {
-        current.path = prefix + current.path.slice(realPrefix.length);
-        entries.push(current);
-      }
-      current = {};
-    }
-  }
-  return entries;
-}
-function submodulePaths(cwd, baseSha) {
-  const r = spawnSync7("git", ["show", `${baseSha}:.gitmodules`], { cwd, encoding: "utf8" });
-  if (r.status !== 0 || typeof r.stdout !== "string")
-    return [];
-  const paths = [];
-  for (const line of r.stdout.split(`
-`)) {
-    const m = /^\s*path\s*=\s*(.+?)\s*$/.exec(line);
-    if (m?.[1])
-      paths.push(m[1].replace(/\\/g, "/").replace(/\/+$/, ""));
-  }
-  return paths;
-}
-function submoduleScopeConflicts(cwd, baseSha, nodes) {
-  const submodules = submodulePaths(cwd, baseSha);
-  if (submodules.length === 0)
-    return [];
-  const conflicts = [];
-  for (const node of nodes) {
-    if (node.scope.length === 0) {
-      conflicts.push({ alias: node.alias, submodule: submodules[0] });
-      continue;
-    }
-    for (const sub of submodules) {
-      const hit = node.scope.find((s) => scopesOverlap([s], [`${sub}/**`]) || s === sub);
-      if (hit) {
-        conflicts.push({ alias: node.alias, submodule: sub, scope: hit });
-        break;
-      }
-    }
-  }
-  return conflicts;
-}
-var LOCK_STALE_MS = 10 * 60000;
-function acquireLock(lockPath, now) {
-  try {
-    mkdirSync5(lockPath);
-    return true;
-  } catch {
-    let age = 0;
-    try {
-      age = now - statSync(lockPath).mtimeMs;
-    } catch {
-      try {
-        mkdirSync5(lockPath);
-        return true;
-      } catch {
-        return false;
-      }
-    }
-    if (age <= LOCK_STALE_MS)
-      return false;
-    try {
-      rmdirSync(lockPath);
-      mkdirSync5(lockPath);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-}
-function readWorktreeTask(worktreePath, id) {
-  const path = join8(worktreePath, ".sddx", "tasks", `${id}.json`);
-  try {
-    return JSON.parse(readFileSync7(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
-var DISPOSABLE = new Set(["DONE", "ABANDONED"]);
-function writeSweepState(cwd, skipped) {
-  const entries = skipped.map((s) => ({ path: relative(cwd, s.path), reason: s.reason })).sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
-  mkdirSync5(join8(cwd, ".sddx"), { recursive: true });
-  writeFileSync6(join8(cwd, ".sddx", "sweep.json"), `${JSON.stringify({ skipped: entries }, null, 2)}
-`);
-}
-function sweep(cwd, opts = {}) {
-  const now = opts.now ?? Date.now();
-  const lockPath = join8(gitCommonDir(cwd), "sddx-sweep.lock");
-  if (!acquireLock(lockPath, now)) {
-    return { removed: [], skipped: [], locked: true };
-  }
-  const removed = [];
-  const skipped = [];
-  try {
-    for (const wt of listSddxWorktrees(cwd)) {
-      const id = wt.branch?.replace(/^sddx\//, "");
-      if (!id) {
-        skipped.push({ path: wt.path, reason: "no sddx branch" });
-        continue;
-      }
-      const task = readWorktreeTask(wt.path, id);
-      if (!task) {
-        skipped.push({ path: wt.path, reason: "no readable task state" });
-        continue;
-      }
-      if (!DISPOSABLE.has(task.phase)) {
-        skipped.push({ path: wt.path, reason: `phase ${task.phase}` });
-        continue;
-      }
-      if (isDirty(wt.path)) {
-        skipped.push({ path: wt.path, reason: "dirty" });
-        continue;
-      }
-      if (task.phase === "DONE" && !existsSync7(join8(wt.path, ".sddx", "receipts", `${id}.json`))) {
-        skipped.push({ path: wt.path, reason: "DONE without receipt" });
-        continue;
-      }
-      try {
-        removeWorktree(cwd, wt.path);
-        removed.push(wt.path);
-      } catch (e) {
-        skipped.push({ path: wt.path, reason: `remove failed: ${e.message}` });
-      }
-    }
-    writeSweepState(cwd, skipped);
-  } finally {
-    try {
-      rmdirSync(lockPath);
-    } catch {}
-  }
-  return { removed, skipped, locked: false };
-}
-var worktreeIds = (cwd) => existsSync7(worktreesDir(cwd)) ? readdirSync5(worktreesDir(cwd)) : [];
-
 // src/board.ts
-var DASH = "—";
+var DASH = "-";
 var cell = (s) => s.replace(/\|/g, "\\|").replace(/\n/g, " ");
 function receiptRef(dir, id) {
-  const path = join9(dir, `${id}.json`);
+  const path = join10(dir, `${id}.json`);
   if (!existsSync8(path))
     return DASH;
   try {
@@ -11823,20 +8963,19 @@ function taskRow(taskPath2, id, receiptsDirs, threshold) {
   let t;
   try {
     t = JSON.parse(readFileSync8(taskPath2, "utf8"));
-    if (typeof t !== "object" || t === null || typeof t.workspace !== "object" || !t.workspace) {
-      throw new Error("task state has no workspace block");
-    }
+    if (!isV6Task(t))
+      throw new Error("not a v6 task file");
   } catch {
     return {
       id,
-      rawPhase: "UNREADABLE",
+      goal: DASH,
+      state: "UNREADABLE",
       stuck: false,
-      sentence: "task file failed to parse",
-      workspace: DASH,
-      branch: null,
+      title: "task file failed to parse, or was written by sddx 5",
+      attempt: DASH,
       iterations: DASH,
       receipt: DASH,
-      allow: DASH
+      note: DASH
     };
   }
   let receipt = DASH;
@@ -11846,22 +8985,22 @@ function taskRow(taskPath2, id, receiptsDirs, threshold) {
       break;
   }
   const deps = dependsOnList(t);
+  const note = t.phase === "ABANDONED" && t.abandon_reason ? t.abandon_reason : t.allow.length > 0 ? `allow: ${t.allow.join(", ")}` : DASH;
   return {
     id: t.id,
-    rawPhase: t.phase,
+    goal: t.goal_id,
+    state: t.phase,
     stuck: Boolean(t.stuck && t.stuck.count >= threshold),
     ...deps.length > 0 ? { dependsOn: deps } : {},
-    ...t.on_dependency_failure ? { onDependencyFailure: t.on_dependency_failure } : {},
-    sentence: t.task,
-    workspace: t.workspace.mode ?? DASH,
-    branch: t.workspace.branch ?? null,
+    title: t.task,
+    attempt: String(t.attempt_count),
     iterations: String(t.iterations),
     receipt,
-    allow: t.allow.length > 0 ? t.allow.join(", ") : DASH
+    note
   };
 }
 function readFlagState(cwd) {
-  const path = join9(cwd, ".sddx", "sweep.json");
+  const path = join10(cwd, ".sddx", "sweep.json");
   if (!existsSync8(path))
     return { entries: [], unreadable: false };
   let entries;
@@ -11879,7 +9018,7 @@ function flagLines(state) {
     return [
       "## Flagged worktrees",
       "",
-      "- sweep state unreadable — `.sddx/sweep.json` failed to parse",
+      "- sweep state unreadable: `.sddx/sweep.json` failed to parse",
       ""
     ];
   }
@@ -11888,81 +9027,59 @@ function flagLines(state) {
   return [
     "## Flagged worktrees",
     "",
-    ...state.entries.map((e) => `- \`${cell(String(e.path))}\` — ${cell(String(e.reason))}`),
+    ...state.entries.map((e) => `- \`${cell(String(e.path))}\`: ${cell(String(e.reason))}`),
     ""
   ];
 }
 var jsonIds = (dir) => existsSync8(dir) ? readdirSync6(dir).filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length)).sort() : [];
 function collectRows(cwd) {
   const rows = new Map;
-  const mainReceipts = join9(cwd, ".sddx", "receipts");
+  const mainReceipts = join10(cwd, ".sddx", "receipts");
   const threshold = stuckThreshold(cwd);
-  for (const id of jsonIds(join9(cwd, ".sddx", "tasks"))) {
-    rows.set(id, taskRow(join9(cwd, ".sddx", "tasks", `${id}.json`), id, [mainReceipts], threshold));
+  for (const id of jsonIds(join10(cwd, ".sddx", "tasks"))) {
+    rows.set(id, taskRow(join10(cwd, ".sddx", "tasks", `${id}.json`), id, [mainReceipts], threshold));
   }
   const wtDir = worktreesDir(cwd);
   if (existsSync8(wtDir)) {
     for (const id of readdirSync6(wtDir).sort()) {
-      const taskPath2 = join9(wtDir, id, ".sddx", "tasks", `${id}.json`);
+      const taskPath2 = join10(wtDir, id, ".sddx", "tasks", `${id}.json`);
       if (!existsSync8(taskPath2))
         continue;
-      rows.set(id, taskRow(taskPath2, id, [join9(wtDir, id, ".sddx", "receipts"), mainReceipts], stuckThreshold(join9(wtDir, id))));
+      rows.set(id, taskRow(taskPath2, id, [join10(wtDir, id, ".sddx", "receipts"), mainReceipts], threshold));
     }
   }
   return rows;
 }
-function computeStatus(cwd, r, id) {
-  if (r.rawPhase === "UNREADABLE") {
-    return { status: "UNREADABLE", blockedOnId: null, skippedOnId: null };
+function labelFor(cwd, r) {
+  let label = r.state;
+  if (r.stuck)
+    label += " stuck";
+  let blockedOnId = null;
+  if (r.state === "PLANNED" && r.dependsOn) {
+    blockedOnId = blockedOn(cwd, { id: r.id, depends_on: r.dependsOn });
+    if (blockedOnId)
+      label += ` blocked-on-${blockedOnId}`;
   }
-  if (r.rawPhase === "DONE")
-    return { status: "Completed", blockedOnId: null, skippedOnId: null };
-  if (r.rawPhase === "ABANDONED") {
-    return { status: "Abandoned", blockedOnId: null, skippedOnId: null };
-  }
-  const taskLike = { id, depends_on: r.dependsOn, on_dependency_failure: r.onDependencyFailure };
-  const skipper = skippedOn(cwd, taskLike);
-  if (skipper)
-    return { status: "Skipped", blockedOnId: null, skippedOnId: skipper };
-  const blocker = blockedOn(cwd, taskLike);
-  if (blocker)
-    return { status: "Blocked", blockedOnId: blocker, skippedOnId: null };
-  return {
-    status: r.rawPhase === "PLAN" ? "Ready" : "Running",
-    blockedOnId: null,
-    skippedOnId: null
-  };
-}
-function statusLabel(status, stuck, blockedOnId, skippedOnId) {
-  let label = String(status);
-  if (stuck)
-    label += " ⚠stuck";
-  if (blockedOnId)
-    label += ` ⏸blocked-on-${blockedOnId}`;
-  if (skippedOnId)
-    label += ` skipped-on-${skippedOnId}`;
-  return label;
+  return { label, blockedOnId };
 }
 function boardDataFromRows(cwd, rows, flags) {
   const tasks = [...rows.keys()].sort().map((id) => {
     const r = rows.get(id);
-    const { status, blockedOnId, skippedOnId } = computeStatus(cwd, r, id);
-    return { ...r, status, blockedOnId, skippedOnId };
+    return { ...r, ...labelFor(cwd, r) };
   });
   return { tasks, flaggedWorktrees: flags.entries, flaggedWorktreesUnreadable: flags.unreadable };
 }
 function renderBoardFromRows(cwd, rows, flags) {
-  const lines = ["<!-- generated by sddx — do not edit -->", "", "# sddx board", ""];
+  const lines = ["<!-- generated by sddx, do not edit -->", "", "# sddx board", ""];
   if (rows.size === 0) {
     lines.push("_No tasks registered._", "");
   } else {
-    lines.push("| Task | Status | Depends | Sentence | Workspace | Iter | Receipt | Allow |", "| --- | --- | --- | --- | --- | --- | --- | --- |");
+    lines.push("| Task | Goal | State | Depends | Title | Attempt | Iter | Receipt | Note |", "| --- | --- | --- | --- | --- | --- | --- | --- | --- |");
     for (const id of [...rows.keys()].sort()) {
       const r = rows.get(id);
-      const { status, blockedOnId, skippedOnId } = computeStatus(cwd, r, id);
-      const label = statusLabel(status, r.stuck, blockedOnId, skippedOnId);
+      const { label } = labelFor(cwd, r);
       const depends = r.dependsOn && r.dependsOn.length > 0 ? cell(r.dependsOn.join(", ")) : DASH;
-      lines.push(`| ${cell(r.id)} | ${label} | ${depends} | ${cell(r.sentence)} | ${r.workspace} | ${r.iterations} | ${r.receipt} | ${cell(r.allow)} |`);
+      lines.push(`| ${cell(r.id)} | ${cell(r.goal)} | ${label} | ${depends} | ${cell(r.title)} | ${r.attempt} | ${r.iterations} | ${r.receipt} | ${cell(r.note)} |`);
     }
     lines.push("");
   }
@@ -11970,7 +9087,7 @@ function renderBoardFromRows(cwd, rows, flags) {
   return lines.join(`
 `);
 }
-var boardPath = (cwd) => join9(cwd, ".sddx", "BOARD.md");
+var boardPath = (cwd) => join10(cwd, ".sddx", "BOARD.md");
 function writeBoard(cwd) {
   const { path, changed } = computeBoard(cwd);
   return { path, changed };
@@ -11983,319 +9100,102 @@ function computeBoard(cwd) {
   const current = existsSync8(path) ? readFileSync8(path, "utf8") : null;
   let changed = false;
   if (current !== rendered) {
-    mkdirSync6(join9(cwd, ".sddx"), { recursive: true });
-    writeFileSync7(path, rendered);
+    mkdirSync8(join10(cwd, ".sddx"), { recursive: true });
+    writeFileSync9(path, rendered);
     changed = true;
   }
   return { path, changed, data: boardDataFromRows(cwd, rows, flags) };
 }
 
-// src/lib/adapter.ts
-import { existsSync as existsSync9, mkdirSync as mkdirSync7, readFileSync as readFileSync9, rmSync as rmSync3, writeFileSync as writeFileSync8 } from "node:fs";
-import { dirname as dirname3, join as join10 } from "node:path";
-var ADAPTER_SCHEMA_VERSION = "1.0";
-var manifestPath = (adapter) => `.sddx/local/adapters/${adapter}-install.json`;
-var declarationPath = (adapter) => `.sddx/adapters/${adapter}.json`;
-function readIfPresent(abs) {
-  try {
-    return existsSync9(abs) ? readFileSync9(abs, "utf8") : null;
-  } catch {
-    return null;
-  }
-}
-function readManifest(root, adapter) {
-  const raw = readIfPresent(join10(root, manifestPath(adapter)));
-  if (raw === null)
-    return null;
-  try {
-    const parsed = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed))
-      return null;
-    const m = parsed;
-    const record = (v) => typeof v === "object" && v !== null && !Array.isArray(v) ? v : {};
-    return {
-      schema_version: typeof m.schema_version === "string" ? m.schema_version : "",
-      adapter: typeof m.adapter === "string" ? m.adapter : adapter,
-      sddx_version: typeof m.sddx_version === "string" ? m.sddx_version : "",
-      invocation: typeof m.invocation === "string" ? m.invocation : "",
-      files: record(m.files),
-      merged: record(m.merged)
-    };
-  } catch {
-    return null;
-  }
-}
-var hash = (s) => sha256(s);
-var planHasConflicts = (plan) => plan.conflicts.length > 0;
-function disposeFile(root, file, manifest) {
-  const current = readIfPresent(join10(root, file.path));
-  if (current === null)
-    return { kind: "create", path: file.path, contents: file.contents };
-  if (current === file.contents)
-    return { kind: "unchanged", path: file.path };
-  const recorded = manifest?.files[file.path];
-  if (recorded !== undefined && recorded === hash(current)) {
-    return { kind: "update", path: file.path, contents: file.contents };
-  }
-  return {
-    kind: "conflict",
-    path: file.path,
-    reason: recorded === undefined ? "a file sddx does not own already exists here" : "this file was modified after sddx generated it"
-  };
-}
-function disposeMerge(root, target, manifest) {
-  const current = readIfPresent(join10(root, target.path));
-  let merged;
-  try {
-    merged = target.merge(current);
-  } catch (e) {
-    return { kind: "conflict", path: target.path, reason: e.message };
-  }
-  if (current === null)
-    return { kind: "create", path: target.path, contents: merged };
-  if (current === merged)
-    return { kind: "unchanged", path: target.path };
-  const present = target.fingerprint(current);
-  if (present === null) {
-    return { kind: "update", path: target.path, contents: merged };
-  }
-  const recorded = manifest?.merged[target.path];
-  if (recorded === undefined || recorded === present) {
-    return { kind: "update", path: target.path, contents: merged };
-  }
-  return {
-    kind: "conflict",
-    path: target.path,
-    reason: "sddx's entries in this file were modified after they were generated"
-  };
-}
-function disposeRetired(root, adapter, ctx, manifest) {
-  if (manifest === null)
-    return [];
-  const current = new Set(adapter.generate(ctx).map((f) => f.path));
-  const out = [];
-  for (const [path, recordedHash] of Object.entries(manifest.files)) {
-    if (current.has(path))
-      continue;
-    const onDisk = readIfPresent(join10(root, path));
-    if (onDisk === null)
-      continue;
-    if (hash(onDisk) !== recordedHash) {
-      out.push({
-        kind: "conflict",
-        path,
-        reason: "sddx no longer generates this file, and it was modified after sddx wrote it"
-      });
-      continue;
-    }
-    out.push({ kind: "remove", path });
-  }
-  return out;
-}
-function planAdapter(root, adapter, ctx) {
-  const manifest = readManifest(root, adapter.name);
-  const dispositions = [
-    ...adapter.generate(ctx).map((f) => disposeFile(root, f, manifest)),
-    ...adapter.mergeTargets(ctx).map((t) => disposeMerge(root, t, manifest)),
-    ...disposeRetired(root, adapter, ctx, manifest)
-  ];
-  const conflicts = dispositions.filter((d) => d.kind === "conflict").map(({ path, reason }) => ({ path, reason }));
-  return { adapter: adapter.name, dispositions, conflicts };
-}
+// src/lib/doctor.ts
+import { spawnSync as spawnSync8 } from "node:child_process";
+import { existsSync as existsSync10, readFileSync as readFileSync10 } from "node:fs";
+import { join as join12 } from "node:path";
 
-class AdapterConflictError extends Error {
-  conflicts;
-  constructor(conflicts) {
-    super([
-      `refusing to write ${conflicts.length} file(s) sddx cannot prove it owns:`,
-      ...conflicts.map((c) => `  ${c.path} — ${c.reason}`),
-      "",
-      "Nothing was written. Resolve each one and re-run:",
-      "  - keep your version: move it aside, then re-run to regenerate",
-      "  - discard your version: re-run with --force to overwrite (a .bak backup is kept)"
-    ].join(`
-`));
-    this.conflicts = conflicts;
-    this.name = "AdapterConflictError";
-  }
-}
-var json = (v) => `${JSON.stringify(v, null, 2)}
-`;
-function writeFile(root, rel, contents) {
-  const abs = join10(root, rel);
-  mkdirSync7(dirname3(abs), { recursive: true });
-  writeFileSync8(abs, contents);
-}
-function applyAdapter(root, adapter, ctx, opts = {}) {
-  const plan = planAdapter(root, adapter, ctx);
-  if (planHasConflicts(plan) && !opts.force)
-    throw new AdapterConflictError(plan.conflicts);
-  const written = [];
-  const backedUp = [];
-  const removed = [];
-  const files = adapter.generate(ctx);
-  const targets = adapter.mergeTargets(ctx);
-  const byPath = new Map(plan.dispositions.map((d) => [d.path, d]));
-  for (const file of files) {
-    const d = byPath.get(file.path);
-    if (d?.kind === "unchanged")
-      continue;
-    if (d?.kind === "conflict") {
-      const abs = join10(root, file.path);
-      writeFile(root, `${file.path}.bak`, readFileSync9(abs, "utf8"));
-      backedUp.push(`${file.path}.bak`);
-    }
-    writeFile(root, file.path, file.contents);
-    written.push(file.path);
-  }
-  for (const target of targets) {
-    const d = byPath.get(target.path);
-    if (d?.kind === "unchanged")
-      continue;
-    const abs = join10(root, target.path);
-    const current = readIfPresent(abs);
-    const conflicting = d?.kind === "conflict";
-    if (conflicting && current !== null) {
-      writeFile(root, `${target.path}.bak`, current);
-      backedUp.push(`${target.path}.bak`);
-    }
-    let contents;
-    try {
-      contents = target.merge(current);
-    } catch {
-      if (!conflicting)
-        throw new AdapterConflictError([{ path: target.path, reason: "unmergeable" }]);
-      contents = target.merge(null);
-    }
-    writeFile(root, target.path, contents);
-    written.push(target.path);
-  }
-  for (const d of plan.dispositions) {
-    if (d.kind !== "remove")
-      continue;
-    rmSync3(join10(root, d.path), { force: true });
-    removed.push(d.path);
-  }
-  writeManifest(root, adapter, ctx);
-  return { written, backedUp, removed };
-}
-function writeManifest(root, adapter, ctx) {
-  const files = {};
-  for (const f of adapter.generate(ctx))
-    files[f.path] = hash(f.contents);
-  const merged = {};
-  for (const t of adapter.mergeTargets(ctx)) {
-    const current = readIfPresent(join10(root, t.path));
-    const fp = current === null ? null : t.fingerprint(current);
-    if (fp !== null)
-      merged[t.path] = fp;
-  }
-  const manifest = {
-    schema_version: ADAPTER_SCHEMA_VERSION,
-    adapter: adapter.name,
-    sddx_version: ctx.sddxVersion,
-    invocation: ctx.invocation,
-    files,
-    merged
-  };
-  writeFile(root, manifestPath(adapter.name), json(manifest));
-}
-function writeDeclaration(root, adapter, policy) {
-  writeFile(root, declarationPath(adapter), json(policy));
-}
-function uninstallAdapter(root, adapter, ctx) {
-  const manifest = readManifest(root, adapter.name);
-  const removed = [];
-  const keptModified = [];
-  const expected = new Map(adapter.generate(ctx).map((f) => [f.path, hash(f.contents)]));
-  const owned = new Set([...expected.keys(), ...Object.keys(manifest?.files ?? {})]);
-  for (const path of owned) {
-    const abs = join10(root, path);
-    const current = readIfPresent(abs);
-    if (current === null)
-      continue;
-    const recorded = manifest?.files[path] ?? expected.get(path);
-    if (recorded !== hash(current)) {
-      keptModified.push(path);
-      continue;
-    }
-    rmSync3(abs, { force: true });
-    removed.push(path);
-  }
-  for (const target of adapter.mergeTargets(ctx)) {
-    const abs = join10(root, target.path);
-    const current = readIfPresent(abs);
-    if (current === null)
-      continue;
-    const present = target.fingerprint(current);
-    if (present === null)
-      continue;
-    const recorded = manifest?.merged[target.path];
-    if (recorded !== undefined && recorded !== present) {
-      keptModified.push(target.path);
-      continue;
-    }
-    writeFileSync8(abs, target.unmerge(current));
-    removed.push(`${target.path} (sddx entries)`);
-  }
-  const manifestAbs = join10(root, manifestPath(adapter.name));
-  if (existsSync9(manifestAbs)) {
-    rmSync3(manifestAbs, { force: true });
-    removed.push(manifestPath(adapter.name));
-  }
-  const declAbs = join10(root, declarationPath(adapter.name));
-  if (existsSync9(declAbs)) {
-    rmSync3(declAbs, { force: true });
-    removed.push(declarationPath(adapter.name));
-  }
-  return { removed, keptModified };
-}
-
-// src/lib/adapters/claude.ts
-import { readdirSync as readdirSync7, readFileSync as readFileSync10, statSync as statSync2 } from "node:fs";
+// src/lib/legacy/v5-claude.ts
+import { existsSync as existsSync9, readFileSync as readFileSync9 } from "node:fs";
 import { join as join11 } from "node:path";
-import { fileURLToPath } from "node:url";
-var INVOCATION_PLACEHOLDER = "{{SDDX}}";
-function templateRoot() {
-  const candidates = ["../../../templates/claude", "../templates/claude"];
-  for (const rel of candidates) {
-    const dir = fileURLToPath(new URL(`${rel}/`, import.meta.url));
-    try {
-      if (statSync2(dir).isDirectory())
-        return dir;
-    } catch {}
+// src/lib/legacy/v5-claude-ownership.json
+var v5_claude_ownership_default = {
+  sddx_version: "5.0.0",
+  invocations: ["sddx", "npm exec --offline --no -- sddx", "bunx --no-install sddx"],
+  files: {
+    ".claude/agents/sddx-intake.md": [
+      "d844d296cc81cb1055cc4ed547c5d11a5eafac5753ec60b21d38409bd2ac03e6"
+    ],
+    ".claude/agents/sddx-orchestrator.md": [
+      "1e3fbe630edd66103c79881a45f1fe80b69e3084005d0a634ebe54bf783b9def",
+      "34d133e2ed654fb62ccdae7cbb9d869504036ba81da90fcecfcc067efe063b04",
+      "398bff50cbe37d7d4640e46e1d8cfc7d4c703ff43b1b6661a325cd766ef8e360"
+    ],
+    ".claude/agents/sddx-planner.md": [
+      "0139f2cd94b1983e2a5ff31f501b147083b2694a0a7997160777cca12cf4449a"
+    ],
+    ".claude/agents/sddx-tdd-executor.md": [
+      "464df6da8cfc94dff617c030eb50f84a6a0dc43e1dba07f39c4e6af2c7b4dda2",
+      "79c35b32218a0451596fd32e33b9713c745afd5ca62fd9e927b4e9b9a3ba946b",
+      "a2439a3f763c6121042125a7c0481e40d43a4dbfcb999ef6bce511f6612954ff"
+    ],
+    ".claude/agents/sddx-verifier.md": [
+      "3c6941890ba743487c748c4fa7f1131d4e65f420a1c1e8e1212ececbafff810a",
+      "6656887d457a9e190732be3b517d77e9429acee81f8fea64ad21d4ee8601df78",
+      "fb3bb258a076c9104351dbe45eff01b0462afa34d5f4ee5b744cdd799450052c"
+    ],
+    ".claude/skills/sddx-audit/SKILL.md": [
+      "47774c6b82e49966a83c7d97713d588deaa3156f04b421a1fa34e05f0e199d62",
+      "510a5b2713dd8497314a93526ba7aa6688b83e4c16b21a1d7075818c96eee4f6",
+      "f5888c303271f8c63b4aa546ba82e433bdb46df1aca02b771cc5fdff266b99ca"
+    ],
+    ".claude/skills/sddx-board/SKILL.md": [
+      "be43cd08e4e801d305b5938973cd60ae5755aa3460c3adad07c5a96f6c5e2231",
+      "c276f6265ac19b8ec0b1c34773544a8bcdf2b33af570653bb8448509e9e0c84c",
+      "e21b9ba983d9d40c61f2d7192f00576e96d3deb85123baa235d037b7998d6500"
+    ],
+    ".claude/skills/sddx-plan/SKILL.md": [
+      "03b8ffebf4c8b9c0fb004c5fee30edf8730dfd7f722d785225239a59e5767234",
+      "1d64e4c090035a113ee9a5179779ddf31fafa8dc6f72d140ad765072effcc479",
+      "9107c2db210a428c831ae9b19e533f1bb908c5f8ce02eed9556c67ef92647c75"
+    ],
+    ".claude/skills/sddx-pr/SKILL.md": [
+      "88feb94bbebab16b611ec2648751ea62f1f911a529a9bfb7685743917a6e5f93",
+      "c9755b04836c7a61a3192efeef9ccf881f27af6c5d641e3636c7447ddbf93e5f",
+      "d7359126bfd7cac285682f704613ee855d85cf396581a0c74a7c200e9bf75bd5"
+    ],
+    ".claude/skills/sddx-run/SKILL.md": [
+      "079829680a2f48b30a6a2e26632d0bca6e70a4348e9f7f674e3be4dd55d427f3",
+      "f1ae008b71e9c1cf6d0393f7d27aad1832cdc859dd6b308fef1d4b2f9fbceddf",
+      "fe99bf70b7e78b41a33f0916becba8e1d40171c004392849b4f916382b3f9aa8"
+    ],
+    ".claude/skills/sddx-verify/SKILL.md": [
+      "540472a2ce44bffdafdbbc64759fef598cdc5d3daad5122a383e75f1faed97e3",
+      "5e6c45a70b3841ccaadd1dd33c06957504ceb3aa585c776c9298343cdaa178b3",
+      "66eb84ab2b44f58be9d6a752a94f54ba797f0bd996a81b117520a5ff357e6354"
+    ]
   }
-  throw new Error("sddx: adapter templates not found. This build is incomplete — reinstall @glapsfun/sddx.");
+};
+
+// src/lib/legacy/v5-claude.ts
+var V5_MANIFEST_PATH = ".sddx/local/adapters/claude-install.json";
+var V5_DECLARATION_PATH = ".sddx/adapters/claude.json";
+var V5_SETTINGS_PATH = ".claude/settings.json";
+var V5_OWNED = v5_claude_ownership_default.files;
+function readV5Manifest(root) {
+  try {
+    const raw = JSON.parse(readFileSync9(join11(root, V5_MANIFEST_PATH), "utf8"));
+    const files = raw.files;
+    return typeof files === "object" && files !== null && !Array.isArray(files) ? files : {};
+  } catch {
+    return {};
+  }
 }
-function readTemplateTree(dir, prefix = "") {
-  const out = [];
-  for (const entry of readdirSync7(dir).sort()) {
-    const abs = join11(dir, entry);
-    const rel = prefix === "" ? entry : `${prefix}/${entry}`;
-    if (statSync2(abs).isDirectory())
-      out.push(...readTemplateTree(abs, rel));
-    else
-      out.push({ rel, contents: readFileSync10(abs, "utf8") });
-  }
-  return out;
-}
-var substitute = (contents, ctx) => contents.split(INVOCATION_PLACEHOLDER).join(ctx.invocation);
-var CLAUDE_DIR = ".claude";
-function generatedPath(kind, name) {
-  return kind === "skills" ? `${CLAUDE_DIR}/skills/sddx-${name}/SKILL.md` : `${CLAUDE_DIR}/agents/sddx-${name}.md`;
-}
-function generate(ctx) {
-  const root = templateRoot();
-  const files = [];
-  for (const { rel, contents } of readTemplateTree(join11(root, "skills"))) {
-    const name = rel.split("/")[0];
-    files.push({ path: generatedPath("skills", name), contents: substitute(contents, ctx) });
-  }
-  for (const { rel, contents } of readTemplateTree(join11(root, "agents"))) {
-    const name = rel.replace(/\.md$/, "");
-    files.push({ path: generatedPath("agents", name), contents: substitute(contents, ctx) });
-  }
-  return files.sort((a, b) => a.path.localeCompare(b.path));
+function v5Ownership(root, path, manifest) {
+  const abs = join11(root, path);
+  if (!existsSync9(abs))
+    return "absent";
+  const hash = sha256(readFileSync9(abs));
+  if (manifest[path] === hash || (V5_OWNED[path] ?? []).includes(hash))
+    return "owned";
+  return "modified";
 }
 var HOOK_EVENTS = [
   "session-start",
@@ -12306,148 +9206,41 @@ var HOOK_EVENTS = [
   "stop-gate"
 ];
 var SDDX_HOOK_COMMAND = new RegExp(`(?:^|[\\s"'/])(?:sddx|hooks\\.mjs)["']?\\s+(?:hook\\s+)?(?:${HOOK_EVENTS.join("|")})\\s*$`);
-var isSddxCommand = (command) => typeof command === "string" && SDDX_HOOK_COMMAND.test(command.trim());
-var isSddxEntry = (entry) => Array.isArray(entry.hooks) && entry.hooks.length > 0 && entry.hooks.every((h) => isSddxCommand(h?.command));
-function templateHooks(ctx) {
-  const raw = readFileSync10(join11(templateRoot(), "hooks", "hooks.json"), "utf8");
-  const parsed = JSON.parse(substitute(raw, ctx));
-  return parsed.hooks;
-}
-
-class SettingsUnreadableError extends Error {
-  constructor(reason) {
-    super(`${CLAUDE_DIR}/settings.json ${reason} — refusing to overwrite it`);
-    this.name = "SettingsUnreadableError";
-  }
-}
+var isSddxEntry = (entry) => Array.isArray(entry.hooks) && entry.hooks.length > 0 && entry.hooks.every((h) => typeof h?.command === "string" && SDDX_HOOK_COMMAND.test(h.command.trim()));
 function detectIndent(source) {
   const m = /\n(\x20+)"/.exec(source);
   return m ? m[1].length : 2;
 }
-function mergeSettings(existing, ctx) {
-  let doc = {};
-  const source = existing ?? "";
-  if (source.trim() !== "") {
-    let parsed;
-    try {
-      parsed = JSON.parse(source);
-    } catch (e) {
-      throw new SettingsUnreadableError(`is not valid JSON (${e.message})`);
-    }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      throw new SettingsUnreadableError("is not a JSON object");
-    }
-    doc = parsed;
-  }
-  const hooks = { ...doc.hooks ?? {} };
-  const ours = templateHooks(ctx);
-  for (const [event, ourEntries] of Object.entries(ours)) {
-    const theirs = (hooks[event] ?? []).filter((e) => !isSddxEntry(e));
-    hooks[event] = [...theirs, ...ourEntries];
-  }
-  for (const [event, entries] of Object.entries(hooks)) {
-    if (event in ours)
-      continue;
-    const theirs = (entries ?? []).filter((e) => !isSddxEntry(e));
-    if (theirs.length === 0)
-      delete hooks[event];
-    else
-      hooks[event] = theirs;
-  }
-  return `${JSON.stringify({ ...doc, hooks }, null, detectIndent(source))}
-`;
-}
-function unmergeSettings(existing) {
+function unmergeV5Settings(existing) {
   let doc;
   try {
     const parsed = JSON.parse(existing);
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return existing;
+      return { text: existing, removed: 0 };
     }
     doc = parsed;
   } catch {
-    return existing;
+    return { text: existing, removed: 0 };
   }
+  let removed = 0;
   const hooks = { ...doc.hooks ?? {} };
   for (const [event, entries] of Object.entries(hooks)) {
     const theirs = (entries ?? []).filter((e) => !isSddxEntry(e));
+    removed += (entries ?? []).length - theirs.length;
     if (theirs.length === 0)
       delete hooks[event];
     else
       hooks[event] = theirs;
   }
+  if (removed === 0)
+    return { text: existing, removed: 0 };
   const next = { ...doc };
   if (Object.keys(hooks).length === 0)
     delete next.hooks;
   else
     next.hooks = hooks;
-  return `${JSON.stringify(next, null, detectIndent(existing))}
-`;
-}
-function settingsFingerprint(existing) {
-  let doc;
-  try {
-    doc = JSON.parse(existing);
-  } catch {
-    return null;
-  }
-  const hooks = doc.hooks ?? {};
-  const ourEntries = {};
-  for (const [event, entries] of Object.entries(hooks)) {
-    const mine = (entries ?? []).filter((e) => isSddxEntry(e));
-    if (mine.length > 0)
-      ourEntries[event] = mine;
-  }
-  if (Object.keys(ourEntries).length === 0)
-    return null;
-  return sha256(JSON.stringify(sortKeys(ourEntries)));
-}
-function sortKeys(value) {
-  if (Array.isArray(value))
-    return value.map(sortKeys);
-  if (typeof value === "object" && value !== null) {
-    const out = {};
-    for (const key of Object.keys(value).sort()) {
-      out[key] = sortKeys(value[key]);
-    }
-    return out;
-  }
-  return value;
-}
-function mergeTargets(ctx) {
-  return [
-    {
-      path: `${CLAUDE_DIR}/settings.json`,
-      merge: (existing) => mergeSettings(existing, ctx),
-      unmerge: unmergeSettings,
-      fingerprint: settingsFingerprint
-    }
-  ];
-}
-var claudeAdapter = { name: "claude", generate, mergeTargets };
-
-// src/lib/doctor.ts
-import { spawnSync as spawnSync8 } from "node:child_process";
-import { existsSync as existsSync10, readFileSync as readFileSync11 } from "node:fs";
-import { join as join12 } from "node:path";
-
-// src/lib/runtime.ts
-var LOCAL_EXEC = {
-  npm: ["npm", "exec", "--offline", "--no", "--", "sddx"],
-  bun: ["bunx", "--no-install", "sddx"]
-};
-function sddxInvocation(scope, pm) {
-  return scope === "global" ? ["sddx"] : [...LOCAL_EXEC[pm]];
-}
-function sddxCommand(scope, pm) {
-  return sddxInvocation(scope, pm).join(" ");
-}
-var ALL_INVOCATION_PREFIXES = [
-  ["sddx"],
-  ...Object.values(LOCAL_EXEC)
-];
-function isSddxInvocation(words) {
-  return ALL_INVOCATION_PREFIXES.some((prefix) => words.length >= prefix.length && prefix.every((word, i) => words[i] === word));
+  return { text: `${JSON.stringify(next, null, detectIndent(existing))}
+`, removed };
 }
 
 // src/lib/doctor.ts
@@ -12488,16 +9281,20 @@ function checkGit(root, cwd) {
 function checkConfig(root) {
   const path = join12(root, ".sddx", "config.json");
   if (!existsSync10(path)) {
-    return fail("project-config", ".sddx/config.json is missing", "sddx init");
+    return pass("project-config", "no .sddx/config.json; defaults apply until the first plan start");
   }
   let parsed;
   try {
-    parsed = JSON.parse(readFileSync11(path, "utf8"));
+    parsed = JSON.parse(readFileSync10(path, "utf8"));
   } catch (e) {
-    return fail("project-config", `.sddx/config.json is not valid JSON: ${e.message}`, "sddx init");
+    return fail("project-config", `.sddx/config.json is not valid JSON: ${e.message}`, "fix the JSON by hand, then: sddx config validate");
   }
   if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return fail("project-config", ".sddx/config.json is not a JSON object", "sddx init");
+    return fail("project-config", ".sddx/config.json is not a JSON object", "fix it by hand, then: sddx config validate");
+  }
+  const version = parsed.schema_version;
+  if (typeof version === "string" && version.startsWith("1.")) {
+    return fail("project-config", `.sddx/config.json was written by sddx 5 (${version})`, "sddx migrate");
   }
   const warnings = validateConfigObject(parsed);
   if (warnings.length > 0) {
@@ -12505,130 +9302,38 @@ function checkConfig(root) {
   }
   return pass("project-config", `schema_version ${CONFIG_SCHEMA_VERSION}`);
 }
-function projectDependency(root) {
-  let declared = false;
-  try {
-    const pkg = JSON.parse(readFileSync11(join12(root, "package.json"), "utf8"));
-    declared = pkg.dependencies?.["@glapsfun/sddx"] !== undefined || pkg.devDependencies?.["@glapsfun/sddx"] !== undefined;
-  } catch {
-    declared = false;
-  }
-  let installedVersion = null;
-  try {
-    const manifest = join12(root, "node_modules", "@glapsfun", "sddx", "package.json");
-    installedVersion = JSON.parse(readFileSync11(manifest, "utf8")).version;
-  } catch {
-    installedVersion = null;
-  }
-  return { declared, installedVersion };
-}
-function checkRuntimeScope(root, cfg, runningVersion) {
-  const invocation = sddxCommand(cfg.runtime_scope, cfg.package_manager);
-  const checks = [pass("runtime-scope", `${cfg.runtime_scope} → \`${invocation}\``)];
-  if (cfg.runtime_scope === "global") {
-    const found = which("sddx");
-    checks.push(found ? pass("runtime-resolution", `sddx resolves to ${found}`) : fail("runtime-resolution", "runtime_scope is global but no `sddx` is on PATH", "npm install -g @glapsfun/sddx"));
-    return checks;
-  }
-  const { declared, installedVersion } = projectDependency(root);
-  const install = cfg.package_manager === "bun" ? "bun add --dev @glapsfun/sddx" : "npm install --save-dev @glapsfun/sddx";
-  if (!declared) {
-    checks.push(fail("runtime-resolution", "runtime_scope is project but @glapsfun/sddx is not a project dependency", install));
-  } else if (installedVersion === null) {
-    checks.push(fail("runtime-resolution", "@glapsfun/sddx is declared but not installed (no node_modules entry)", cfg.package_manager === "bun" ? "bun install" : "npm install"));
-  } else if (installedVersion !== runningVersion) {
-    checks.push(warn("runtime-resolution", `project-local @glapsfun/sddx is ${installedVersion}, this process is ${runningVersion}`, install));
-  } else {
-    checks.push(pass("runtime-resolution", `project-local @glapsfun/sddx ${installedVersion}`));
-  }
-  const globalBin = which("sddx");
-  if (globalBin !== null) {
-    checks.push(warn("runtime-mismatch", `this repository pins its runtime, but a global sddx exists at ${globalBin}`, `${invocation} doctor`));
-  }
-  return checks;
-}
-function checkAdapters(root, cfg, adapters, ctx) {
-  if (cfg.adapters.length === 0) {
-    return [pass("adapters", "no adapters enabled")];
-  }
-  const checks = [];
-  for (const name of cfg.adapters) {
-    const adapter = adapters[name];
-    if (!adapter) {
-      checks.push(fail(`adapter:${name}`, `config enables adapter "${name}", which this sddx does not implement`, "sddx config validate"));
-      continue;
-    }
-    const manifest = readManifest(root, name);
-    const plan = planAdapter(root, adapter, ctx);
-    if (plan.conflicts.length > 0) {
-      checks.push(fail(`adapter:${name}`, plan.conflicts.map((c) => `${c.path} — ${c.reason}`).join("; "), `sddx sync --adapter ${name}   # or --force to overwrite (keeps a .bak)`));
-      continue;
-    }
-    const stale = plan.dispositions.filter((d) => d.kind === "create" || d.kind === "update");
-    if (stale.length > 0) {
-      checks.push(warn(`adapter:${name}`, `${stale.length} generated file(s) are out of date: ${stale.map((d) => d.path).join(", ")}`, `sddx sync --adapter ${name} --yes`));
-      continue;
-    }
-    if (manifest !== null && manifest.invocation !== ctx.invocation) {
-      checks.push(warn(`adapter:${name}`, `generated content invokes \`${manifest.invocation}\` but policy says \`${ctx.invocation}\``, `sddx sync --adapter ${name} --yes`));
-      continue;
-    }
-    checks.push(pass(`adapter:${name}`, `up to date (${Object.keys(manifest?.files ?? {}).length} files)`));
-    checks.push(...checkGeneratedTracked(root, adapter, ctx));
-  }
-  return checks;
-}
-function checkGeneratedTracked(root, adapter, ctx) {
-  const paths = [
-    ...adapter.generate(ctx).map((f) => f.path),
-    ...adapter.mergeTargets(ctx).map((t) => t.path)
-  ];
-  const ignored = paths.filter((p) => {
-    const r = spawnSync8("git", ["check-ignore", "-q", p], { cwd: root });
-    return r.status === 0;
-  });
-  if (ignored.length === 0)
-    return [];
-  return [
-    warn(`adapter:${adapter.name}:tracked`, `${ignored.length} generated file(s) are gitignored (${ignored.slice(0, 3).join(", ")}${ignored.length > 3 ? ", …" : ""}) — teammates will not get the TDD gate`, `git check-ignore -v ${ignored[0]}   # then un-ignore the sddx-owned paths, or accept a local-only setup`)
-  ];
-}
-function checkLegacyPlugin(root) {
+function checkV5Leftovers(root) {
   const findings = [];
-  if (existsSync10(join12(root, ".claude-plugin", "marketplace.json"))) {
-    findings.push(".claude-plugin/marketplace.json is still present");
-  }
-  const settings = join12(root, ".claude", "settings.json");
+  const manifest = readV5Manifest(root);
+  const owned = Object.keys(V5_OWNED).filter((p) => v5Ownership(root, p, manifest) !== "absent");
+  if (owned.length > 0)
+    findings.push(`${owned.length} sddx 5 file(s) under .claude/`);
+  if (existsSync10(join12(root, V5_DECLARATION_PATH)))
+    findings.push(V5_DECLARATION_PATH);
+  const settings = join12(root, V5_SETTINGS_PATH);
   if (existsSync10(settings)) {
     try {
-      if (readFileSync11(settings, "utf8").includes("CLAUDE_PLUGIN_ROOT")) {
-        findings.push(".claude/settings.json still registers plugin-root hooks");
+      if (unmergeV5Settings(readFileSync10(settings, "utf8")).removed > 0) {
+        findings.push(`sddx 5 hook registrations in ${V5_SETTINGS_PATH}`);
       }
     } catch {}
   }
   if (findings.length === 0)
-    return [pass("legacy-plugin", "no legacy plugin state")];
-  return [
-    warn("legacy-plugin", `${findings.join("; ")}. Running both is safe while you verify, but the duplicate hook registrations will both fire.`, "sddx init --adapter claude && sddx doctor   # then remove the plugin from Claude Code")
-  ];
+    return pass("v5-leftovers", "no sddx 5 integration files");
+  return warn("v5-leftovers", `${findings.join("; ")}; the sddx plugin replaces them and both would fire`, "sddx migrate   # preview, then: sddx migrate --yes");
 }
 function runDoctor(opts) {
   const checks = [checkBun(), checkGit(opts.root, opts.cwd)];
   checks.push(pass("sddx-version", opts.runningVersion));
   if (opts.root !== null) {
-    const configCheck = checkConfig(opts.root);
-    checks.push(configCheck);
-    if (opts.config !== null && opts.adapterContext !== null && configCheck.status !== "fail") {
-      checks.push(...checkRuntimeScope(opts.root, opts.config, opts.runningVersion));
-      checks.push(...checkAdapters(opts.root, opts.config, opts.adapters, opts.adapterContext));
-    }
-    checks.push(...checkLegacyPlugin(opts.root));
+    checks.push(checkConfig(opts.root));
+    checks.push(checkV5Leftovers(opts.root));
   }
   return { checks, failed: checks.some((c) => c.status === "fail") };
 }
 
 // src/lib/globalstate.ts
-import { chmodSync as chmodSync2, existsSync as existsSync11, mkdirSync as mkdirSync8, readFileSync as readFileSync12, writeFileSync as writeFileSync9 } from "node:fs";
+import { chmodSync as chmodSync3, existsSync as existsSync11, mkdirSync as mkdirSync9, readFileSync as readFileSync11, writeFileSync as writeFileSync10 } from "node:fs";
 import { homedir as homedir2 } from "node:os";
 import { dirname as dirname4, join as join13 } from "node:path";
 function globalRoot(env = process.env) {
@@ -12675,16 +9380,16 @@ function projectKey(root) {
 }
 var projectDir = (root, env) => join13(globalRoot(env), "projects", projectKey(root).key);
 function mkdirPrivate(dir) {
-  mkdirSync8(dir, { recursive: true, mode: 448 });
+  mkdirSync9(dir, { recursive: true, mode: 448 });
   try {
-    chmodSync2(dir, 448);
+    chmodSync3(dir, 448);
   } catch {}
 }
 function writePrivate(path, contents) {
   mkdirPrivate(dirname4(path));
-  writeFileSync9(path, contents, { mode: 384 });
+  writeFileSync10(path, contents, { mode: 384 });
   try {
-    chmodSync2(path, 384);
+    chmodSync3(path, 384);
   } catch {}
 }
 var GLOBAL_SCHEMA_VERSION = "1.0";
@@ -12705,20 +9410,419 @@ function rememberProject(root, env) {
   }
 }
 
+// node_modules/yaml/dist/index.js
+var composer = require_composer();
+var Document = require_Document();
+var Schema = require_Schema();
+var errors = require_errors();
+var Alias = require_Alias();
+var identity = require_identity();
+var Pair = require_Pair();
+var Scalar = require_Scalar();
+var YAMLMap = require_YAMLMap();
+var YAMLSeq = require_YAMLSeq();
+var cst = require_cst();
+var lexer = require_lexer();
+var lineCounter = require_line_counter();
+var parser = require_parser();
+var publicApi = require_public_api();
+var visit = require_visit();
+var $Composer = composer.Composer;
+var $Document = Document.Document;
+var $Schema = Schema.Schema;
+var $YAMLError = errors.YAMLError;
+var $YAMLParseError = errors.YAMLParseError;
+var $YAMLWarning = errors.YAMLWarning;
+var $Alias = Alias.Alias;
+var $isAlias = identity.isAlias;
+var $isCollection = identity.isCollection;
+var $isDocument = identity.isDocument;
+var $isMap = identity.isMap;
+var $isNode = identity.isNode;
+var $isPair = identity.isPair;
+var $isScalar = identity.isScalar;
+var $isSeq = identity.isSeq;
+var $Pair = Pair.Pair;
+var $Scalar = Scalar.Scalar;
+var $YAMLMap = YAMLMap.YAMLMap;
+var $YAMLSeq = YAMLSeq.YAMLSeq;
+var $Lexer = lexer.Lexer;
+var $LineCounter = lineCounter.LineCounter;
+var $Parser = parser.Parser;
+var $parse = publicApi.parse;
+var $parseAllDocuments = publicApi.parseAllDocuments;
+var $parseDocument = publicApi.parseDocument;
+var $stringify = publicApi.stringify;
+var $visit = visit.visit;
+var $visitAsync = visit.visitAsync;
+
+// src/lib/spec.ts
+var ORACLE_TYPES = new Set([
+  "command",
+  "test-suite",
+  "browser",
+  "manual"
+]);
+
+// src/lib/goalspec.ts
+var TASK_ID_RE = /^[A-Za-z][A-Za-z0-9-]*$/;
+var TASK_BLOCK_KEYS = [
+  "oracle",
+  "scope",
+  "depends_on",
+  "on_dependency_failure",
+  "retry",
+  "assumptions"
+];
+var ORACLE_KEYS = new Set(["type", "run", "expect", "runs", "setup"]);
+var DESIGN_SECTIONS = [
+  "Goal",
+  "Acceptance",
+  "Non-goals",
+  "Assumptions",
+  "Open decisions"
+];
+var FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+var HEADING = /^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$/;
+var LIST_ITEM = /^\s*(?:[-*+]|\d+[.)])\s+(.*\S)\s*$/;
+function scan(text) {
+  const raw = text.replace(/\r\n?/g, `
+`).split(`
+`);
+  const lines = [];
+  const headings = [];
+  const fences = [];
+  let open = null;
+  raw.forEach((t, i) => {
+    const n = i + 1;
+    if (open) {
+      const close = new RegExp(`^ {0,3}${open.marker[0] === "`" ? "`" : "~"}{${open.marker.length},}\\s*$`);
+      if (close.test(t)) {
+        fences.push({
+          info: open.info,
+          openLine: open.openLine,
+          body: open.body.join(`
+`),
+          index: open.index
+        });
+        open = null;
+      } else {
+        open.body.push(t);
+      }
+      lines.push({ n, text: t, inFence: true });
+      return;
+    }
+    const f = FENCE_OPEN.exec(t);
+    if (f && !(f[1]?.startsWith("`") && f[2]?.includes("`"))) {
+      const info = (f[2] ?? "").trim().split(/\s+/)[0] ?? "";
+      open = { marker: f[1] ?? "```", info, openLine: n, index: i, body: [] };
+      lines.push({ n, text: t, inFence: true });
+      return;
+    }
+    const h = HEADING.exec(t);
+    if (h) {
+      const content = (h[2] ?? "").replace(/[ \t]+#+[ \t]*$/, "").trim();
+      headings.push({ level: h[1]?.length ?? 1, text: content, line: n, index: i });
+    }
+    lines.push({ n, text: t, inFence: false });
+  });
+  return {
+    lines,
+    headings,
+    fences,
+    unclosedFence: open ? open.openLine : null
+  };
+}
+var norm = (s) => s.trim().replace(/\s+/g, " ").toLowerCase();
+function sectionEnd(s, h) {
+  const next = s.headings.find((x) => x.index > h.index && x.level <= h.level);
+  return next ? next.index : s.lines.length;
+}
+function linesBetween(s, from, to) {
+  return s.lines.slice(from + 1, to);
+}
+function listItems(lines) {
+  const out = [];
+  for (const l of lines) {
+    if (l.inFence)
+      continue;
+    const m = LIST_ITEM.exec(l.text);
+    if (m?.[1])
+      out.push(m[1].trim());
+  }
+  return out;
+}
+var isNonEmptyStringList = (v) => Array.isArray(v) && v.length > 0 && v.every((s) => typeof s === "string" && s.trim() !== "");
+var EXPECT_RE = /^exit\s+\d+$/;
+function parseTaskBlock(yamlText, line) {
+  const err = (message) => ({ message, line });
+  let raw;
+  try {
+    raw = $parse(yamlText);
+  } catch (e) {
+    const pos = e.linePos?.[0]?.line;
+    return {
+      errors: [
+        {
+          message: `invalid YAML: ${e.message.split(`
+`)[0]}`,
+          line: pos ? line + pos : line
+        }
+      ]
+    };
+  }
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    return { errors: [err("sddx block must be a YAML mapping")] };
+  }
+  const r = raw;
+  const errors2 = [];
+  for (const k of Object.keys(r)) {
+    if (!TASK_BLOCK_KEYS.includes(k)) {
+      errors2.push(err(`unknown key "${k}" (allowed: ${TASK_BLOCK_KEYS.join(", ")})`));
+    }
+  }
+  const o = r.oracle;
+  if (o === undefined) {
+    errors2.push(err("task has no oracle; no oracle, no goal"));
+  } else if (typeof o !== "object" || o === null || Array.isArray(o)) {
+    errors2.push(err("oracle: must be a mapping"));
+  } else {
+    const or2 = o;
+    for (const k of Object.keys(or2)) {
+      if (!ORACLE_KEYS.has(k))
+        errors2.push(err(`oracle: unknown key "${k}"`));
+    }
+    if (typeof or2.type !== "string" || !ORACLE_TYPES.has(or2.type)) {
+      errors2.push(err("oracle.type: must be one of command | test-suite | browser | manual"));
+    }
+    if (or2.type !== "manual") {
+      if (typeof or2.run !== "string" || or2.run.trim() === "") {
+        errors2.push(err("oracle.run: a command is required for non-manual oracles"));
+      }
+      if (typeof or2.expect !== "string" || !EXPECT_RE.test(or2.expect.trim())) {
+        errors2.push(err('oracle.expect: must be `exit <code>`, for example "exit 0"'));
+      }
+    }
+    if (or2.runs !== undefined && (typeof or2.runs !== "number" || !Number.isInteger(or2.runs) || or2.runs < 1)) {
+      errors2.push(err("oracle.runs: must be an integer >= 1"));
+    }
+    if (or2.setup !== undefined && (typeof or2.setup !== "string" || or2.setup.trim() === "")) {
+      errors2.push(err("oracle.setup: when present, must be a non-empty command"));
+    }
+  }
+  if (r.scope !== undefined && !isNonEmptyStringList(r.scope)) {
+    errors2.push(err("scope: when present, must be a non-empty list of non-empty globs"));
+  }
+  let dependsOn = [];
+  if (r.depends_on !== undefined) {
+    if (typeof r.depends_on === "string" && TASK_ID_RE.test(r.depends_on.trim())) {
+      dependsOn = [r.depends_on.trim()];
+    } else if (isNonEmptyStringList(r.depends_on) && r.depends_on.every((d) => TASK_ID_RE.test(d.trim()))) {
+      dependsOn = r.depends_on.map((d) => d.trim());
+    } else {
+      errors2.push(err("depends_on: must be a task id or a non-empty list of task ids"));
+    }
+  }
+  if (r.on_dependency_failure !== undefined && r.on_dependency_failure !== "skip" && r.on_dependency_failure !== "block") {
+    errors2.push(err("on_dependency_failure: must be one of skip | block"));
+  }
+  if (r.assumptions !== undefined && !isNonEmptyStringList(r.assumptions)) {
+    errors2.push(err("assumptions: when present, must be a non-empty list of non-empty strings"));
+  }
+  const retryRaw = r.retry;
+  let retry;
+  if (retryRaw !== undefined) {
+    if (typeof retryRaw !== "object" || retryRaw === null || Array.isArray(retryRaw)) {
+      errors2.push(err("retry: must be a mapping with optional max_attempts and workspace"));
+    } else {
+      const rr = retryRaw;
+      retry = {};
+      if (rr.max_attempts !== undefined) {
+        if (typeof rr.max_attempts !== "number" || !Number.isInteger(rr.max_attempts) || rr.max_attempts < 1) {
+          errors2.push(err("retry.max_attempts: must be an integer >= 1"));
+        } else
+          retry.max_attempts = rr.max_attempts;
+      }
+      if (rr.workspace !== undefined) {
+        if (rr.workspace !== "fresh" && rr.workspace !== "reuse") {
+          errors2.push(err("retry.workspace: must be one of fresh | reuse"));
+        } else
+          retry.workspace = rr.workspace;
+      }
+    }
+  }
+  if (errors2.length > 0)
+    return { errors: errors2 };
+  const or = o;
+  return {
+    errors: [],
+    value: {
+      oracle: {
+        type: or.type,
+        run: typeof or.run === "string" ? or.run.trim() : "",
+        expect: typeof or.expect === "string" ? or.expect.trim() : "exit 0",
+        ...typeof or.runs === "number" ? { runs: or.runs } : {},
+        ...typeof or.setup === "string" ? { setup: or.setup.trim() } : {}
+      },
+      scope: Array.isArray(r.scope) ? r.scope.map((s) => s.trim()) : [],
+      depends_on: dependsOn,
+      ...r.on_dependency_failure !== undefined ? { on_dependency_failure: r.on_dependency_failure } : {},
+      ...retry ? { retry } : {},
+      assumptions: Array.isArray(r.assumptions) ? r.assumptions.map((s) => s.trim()) : []
+    }
+  };
+}
+function parseGoalSpec(text) {
+  const s = scan(text);
+  const errors2 = [];
+  if (s.unclosedFence !== null) {
+    errors2.push({ message: "code fence is never closed", line: s.unclosedFence });
+  }
+  const firstContent = s.lines.find((l) => l.text.trim() !== "");
+  const h1 = s.headings.find((h) => h.level === 1);
+  let title = "";
+  if (!firstContent || !h1 || h1.line !== firstContent.n || h1.text === "") {
+    errors2.push({ message: "the file must start with a level-1 heading naming the goal", line: 1 });
+  } else {
+    title = h1.text;
+  }
+  const h2 = (name) => s.headings.filter((h) => h.level === 2 && norm(h.text) === norm(name));
+  const designs = h2("Design");
+  const taskSections = h2("Tasks");
+  for (const extra of designs.slice(1)) {
+    errors2.push({ message: "duplicate `## Design` section", line: extra.line });
+  }
+  for (const extra of taskSections.slice(1)) {
+    errors2.push({ message: "duplicate `## Tasks` section", line: extra.line });
+  }
+  const design = designs[0];
+  const tasksHeading = taskSections[0];
+  const content = {
+    Goal: null,
+    Acceptance: null,
+    "Non-goals": null,
+    Assumptions: null,
+    "Open decisions": null
+  };
+  if (!design) {
+    errors2.push({ message: "missing `## Design` section", line: null });
+  } else {
+    if (tasksHeading && tasksHeading.index < design.index) {
+      errors2.push({ message: "`## Tasks` must come after `## Design`", line: tasksHeading.line });
+    }
+    const end = sectionEnd(s, design);
+    const subs = s.headings.filter((h) => h.level === 3 && h.index > design.index && h.index < end);
+    for (const sub of subs) {
+      const name = DESIGN_SECTIONS.find((d) => norm(d) === norm(sub.text));
+      if (!name)
+        continue;
+      if (content[name] !== null) {
+        errors2.push({ message: `duplicate \`### ${name}\` subsection`, line: sub.line });
+        continue;
+      }
+      content[name] = linesBetween(s, sub.index, sectionEnd(s, sub));
+    }
+    for (const name of DESIGN_SECTIONS) {
+      if (content[name] === null) {
+        errors2.push({ message: `## Design is missing \`### ${name}\``, line: design.line });
+      }
+    }
+  }
+  const goalText = (content.Goal ?? []).filter((l) => !l.inFence && l.text.trim() !== "").map((l) => l.text.trim()).join(" ");
+  if (content.Goal && goalText === "") {
+    errors2.push({ message: "`### Goal` must not be empty", line: design?.line ?? null });
+  }
+  const acceptance = listItems(content.Acceptance ?? []);
+  if (content.Acceptance && acceptance.length === 0) {
+    errors2.push({
+      message: "`### Acceptance` needs at least one list item",
+      line: design?.line ?? null
+    });
+  }
+  const tasks = [];
+  if (tasksHeading) {
+    const end = sectionEnd(s, tasksHeading);
+    const taskHeadings = s.headings.filter((h) => h.level === 3 && h.index > tasksHeading.index && h.index < end);
+    const seen = new Map;
+    for (const th of taskHeadings) {
+      const m = /^(\S+)\s+(.+)$/.exec(th.text);
+      if (!m?.[1] || !m[2] || !TASK_ID_RE.test(m[1])) {
+        errors2.push({
+          message: "task heading must be `### <task-id> <title>` with an id like T1 or rl-1",
+          line: th.line
+        });
+        continue;
+      }
+      const [, id, title2] = m;
+      const prior = seen.get(id);
+      if (prior !== undefined) {
+        errors2.push({
+          message: `duplicate task id ${id} (lines ${prior} and ${th.line})`,
+          line: th.line
+        });
+        continue;
+      }
+      seen.set(id, th.line);
+      const tEnd = sectionEnd(s, th);
+      const blocks = s.fences.filter((f) => f.info === "sddx" && f.index > th.index && f.index < tEnd);
+      if (blocks.length === 0) {
+        errors2.push({ message: `task ${id} has no \`sddx\` block`, line: th.line });
+        continue;
+      }
+      if (blocks.length > 1) {
+        errors2.push({ message: `task ${id} has more than one \`sddx\` block`, line: th.line });
+        continue;
+      }
+      const block = blocks[0];
+      const parsed = parseTaskBlock(block.body, block.openLine);
+      if (!parsed.value) {
+        for (const e of parsed.errors)
+          errors2.push({ message: `task ${id}: ${e.message}`, line: e.line });
+        continue;
+      }
+      tasks.push({ id, title: title2.trim(), line: th.line, ...parsed.value });
+    }
+    const stray = s.fences.filter((f) => f.info === "sddx" && f.index > tasksHeading.index && f.index < end && !taskHeadings.some((th) => th.index < f.index));
+    for (const f of stray) {
+      errors2.push({ message: "`sddx` block outside any task heading", line: f.openLine });
+    }
+  }
+  if (errors2.length > 0)
+    return { errors: errors2.sort(byLine) };
+  const openDecisions = listItems(content["Open decisions"] ?? []);
+  return {
+    errors: [],
+    spec: {
+      title,
+      design: {
+        goal: goalText,
+        acceptance,
+        nonGoals: listItems(content["Non-goals"] ?? []),
+        assumptions: listItems(content.Assumptions ?? []),
+        openDecisions
+      },
+      status: openDecisions.length > 0 ? "draft" : "ready",
+      tasks
+    }
+  };
+}
+var byLine = (a, b) => (a.line ?? 0) - (b.line ?? 0);
+var formatSpecError = (path, e) => e.line === null ? `${path}: ${e.message}` : `${path}:${e.line}: ${e.message}`;
+
 // src/lib/hookdispatch.ts
-import { existsSync as existsSync15, readdirSync as readdirSync9, readFileSync as readFileSync15 } from "node:fs";
+import { existsSync as existsSync15, readdirSync as readdirSync8, readFileSync as readFileSync14 } from "node:fs";
 import { join as join17 } from "node:path";
 
 // src/tdd-gate.ts
 import { relative as relative2, resolve as resolve2 } from "node:path";
 
 // src/lib/resolve.ts
-import { existsSync as existsSync12, readdirSync as readdirSync8, readFileSync as readFileSync13, statSync as statSync3 } from "node:fs";
-import { basename, dirname as dirname5, join as join14, resolve as resolvePath } from "node:path";
+import { existsSync as existsSync12, readdirSync as readdirSync7, readFileSync as readFileSync12, statSync as statSync2 } from "node:fs";
+import { basename as basename2, dirname as dirname5, join as join14, resolve as resolvePath } from "node:path";
 function workspaceRoot(startPath) {
   let dir = resolvePath(startPath);
   try {
-    if (statSync3(dir).isFile())
+    if (statSync2(dir).isFile())
       dir = dirname5(dir);
   } catch {
     dir = dirname5(dir);
@@ -12736,13 +9840,13 @@ function headBranch(root) {
   try {
     const dotGit = join14(root, ".git");
     let gitDir = dotGit;
-    if (statSync3(dotGit).isFile()) {
-      const m = /^gitdir:\s*(.+)\s*$/m.exec(readFileSync13(dotGit, "utf8"));
+    if (statSync2(dotGit).isFile()) {
+      const m = /^gitdir:\s*(.+)\s*$/m.exec(readFileSync12(dotGit, "utf8"));
       if (!m)
         return null;
       gitDir = resolvePath(root, m[1].trim());
     }
-    const head = readFileSync13(join14(gitDir, "HEAD"), "utf8").trim();
+    const head = readFileSync12(join14(gitDir, "HEAD"), "utf8").trim();
     const ref = /^ref:\s*refs\/heads\/(.+)$/.exec(head);
     return ref ? ref[1] : null;
   } catch {
@@ -12754,17 +9858,17 @@ function readTaskFile(root, id) {
   if (!existsSync12(path))
     return null;
   try {
-    return { kind: "task", root, task: JSON.parse(readFileSync13(path, "utf8")) };
+    return { kind: "task", root, task: JSON.parse(readFileSync12(path, "utf8")) };
   } catch (e) {
     return { kind: "corrupt", root, path, error: e.message };
   }
 }
 function resolutionFailureReason(res, action) {
   if (res.kind === "ambiguous") {
-    return `sddx TDD gate: ambiguous governing task — ${res.ids.join(" and ")} are both active in this workspace. ` + "The gate refuses to guess. Abandon or finish one, or work in each task's own worktree.";
+    return `sddx: ambiguous governing task: ${res.ids.join(" and ")} are both active in this workspace. ` + "The gate refuses to guess. Abandon or finish one, or work in each task's own worktree.";
   }
   if (res.kind === "corrupt") {
-    return `sddx TDD gate: task state at ${res.path} is unreadable (${res.error}). Fix or remove it before ${action} — a broken state file must not silently disable the gate.`;
+    return `sddx: task state at ${res.path} is unreadable (${res.error}). Fix or remove it before ${action}; a broken state file must not silently disable the gate.`;
   }
   return null;
 }
@@ -12772,8 +9876,8 @@ function resolveTask(startPath) {
   const root = workspaceRoot(startPath);
   if (!root || !existsSync12(join14(root, ".sddx")))
     return { kind: "none" };
-  if (basename(dirname5(root)) === ".sddx-worktrees") {
-    const byName = readTaskFile(root, basename(root));
+  if (basename2(dirname5(root)) === ".sddx-worktrees") {
+    const byName = readTaskFile(root, basename2(root));
     if (byName)
       return byName;
   }
@@ -12787,15 +9891,15 @@ function resolveTask(startPath) {
   if (!existsSync12(tasksDir))
     return { kind: "none" };
   const candidates = [];
-  for (const file of readdirSync8(tasksDir).filter((f) => f.endsWith(".json"))) {
+  for (const file of readdirSync7(tasksDir).filter((f) => f.endsWith(".json"))) {
     const path = join14(tasksDir, file);
     let task;
     try {
-      task = JSON.parse(readFileSync13(path, "utf8"));
+      task = JSON.parse(readFileSync12(path, "utf8"));
     } catch (e) {
       return { kind: "corrupt", root, path, error: e.message };
     }
-    if (!isTerminal(task.phase) && !isDeferred(task))
+    if (!isTerminal(task.phase) && isStarted(task))
       candidates.push(task);
   }
   if (candidates.length === 0)
@@ -12806,24 +9910,17 @@ function resolveTask(startPath) {
 }
 
 // src/tdd-gate.ts
-function loadGateConfig(root, env = process.env) {
-  const fileConfig = readConfig(root);
-  return {
-    testGlobs: env.SDDX_TEST_GLOBS ?? fileConfig.test_globs,
-    exemptGlobs: env.SDDX_EXEMPT_GLOBS ?? fileConfig.exempt_globs
-  };
-}
 function blockMessage(task, relPath, config) {
   const testGlobs = [
     ...BUILTIN_TEST_GLOBS,
     ...(config.testGlobs ?? "").split(/\s+/).filter((g) => g !== "")
   ];
   return [
-    `sddx TDD gate: blocked write to ${relPath} — task ${task.id} is in ${task.phase} (rule: implementation path).`,
-    `Before GREEN, only test files may change. Do this instead:`,
-    `  1. Write a failing test for "${task.task}" under a test path (${testGlobs.slice(0, 4).join(", ")}, …).`,
-    "  2. Run the test runner so the failure is recorded (the gate lifts in GREEN).",
-    `  3. Only for files that genuinely cannot be test-driven: sddx task allow ${task.id} ${relPath} — the exemption is audited in the receipt.`
+    `sddx strict gate: blocked write to ${relPath}; task ${task.id} has no recorded failing test yet (rule: implementation path).`,
+    "Under the strict profile, only test files may change until a test has been seen failing. Do this instead:",
+    `  1. Write a failing test for "${task.task}" under a test path (${testGlobs.slice(0, 4).join(", ")}, ...).`,
+    "  2. Run the test runner so the failure is recorded; the gate lifts once it is.",
+    `  3. Only for files that genuinely cannot be test-driven: sddx task allow ${task.id} ${relPath}; the exemption is listed on the receipt.`
   ].join(`
 `);
 }
@@ -12833,47 +9930,23 @@ function inScope(relPath, scope) {
 }
 function scopeBlockMessage(task, relPath, scope) {
   return [
-    `sddx TDD gate: blocked write to ${relPath} — outside task ${task.id}'s declared scope.`,
+    `sddx strict gate: blocked write to ${relPath}; it is outside task ${task.id}'s declared scope.`,
     `This task may only write: ${scope.join(", ")}.`,
     "Do one of:",
     "  1. Write inside the declared scope.",
-    `  2. If this file genuinely belongs to the task, widen its spec's scope and re-create the task.`,
-    `  3. For a one-off exception: sddx task allow ${task.id} ${relPath} — audited in the receipt.`
+    "  2. If this file genuinely belongs to the task, widen the scope in its goal spec and plan again.",
+    `  3. For a one-off exception: sddx task allow ${task.id} ${relPath}; it is listed on the receipt.`
   ].join(`
 `);
 }
-var APPROVALS_PATH = /(^|\/)\.sddx\/approvals\//;
-var CONFIG_PATH = /(^|\/)\.sddx\/config\.json$/;
-function approvalWriteBlock(relOrAbs) {
-  const path = normalizeRelPath(relOrAbs);
-  if (APPROVALS_PATH.test(path)) {
-    return [
-      `sddx approval gate: blocked write to ${relOrAbs} — approval tokens are not editable.`,
-      "A token records that a human approved a plan, so writing one directly would forge that.",
-      "Approve a plan the only way that counts (it raises your own permission dialog):",
-      "  sddx graph create --graph <path> --dry-run   # review it first",
-      "  sddx graph approve --graph <path>"
-    ].join(`
-`);
-  }
-  if (CONFIG_PATH.test(path)) {
-    return [
-      `sddx approval gate: blocked write to ${relOrAbs} — sddx configuration is not tool-editable.`,
-      "It carries interaction_mode, which decides whether a plan needs your approval at all,",
-      "so a tool that could rewrite it could switch off the gate that constrains it.",
-      "Edit it yourself, or inspect the effective values with: sddx config show"
-    ].join(`
-`);
-  }
-  return null;
-}
 function tddGate(input, env = process.env) {
-  const anchor = input.filePath ? resolve2(input.cwd ?? process.cwd(), input.filePath) : input.cwd ?? process.cwd();
-  if (input.filePath) {
-    const forged = approvalWriteBlock(input.filePath) ?? approvalWriteBlock(anchor);
-    if (forged)
-      return { allow: false, reason: forged };
-  }
+  const cwd = input.cwd ?? process.cwd();
+  if (!input.filePath)
+    return { allow: true };
+  const anchor = resolve2(cwd, input.filePath);
+  const repo = workspaceRoot(anchor);
+  if (!repo || profile(mainRootOf(repo)) !== "strict")
+    return { allow: true };
   const res = resolveTask(anchor);
   if (res.kind === "none")
     return { allow: true };
@@ -12882,130 +9955,138 @@ function tddGate(input, env = process.env) {
     return { allow: false, reason: failure };
   if (res.kind !== "task")
     return { allow: true };
-  if (!input.filePath)
+  const task = res.task;
+  if (task.phase !== "IN_PROGRESS" || task.profile !== "strict")
     return { allow: true };
   const relPath = relative2(res.root, anchor);
-  const config = input.config ?? loadGateConfig(res.root, env);
-  const cls = classify(relPath, res.task.allow, config);
-  if ((res.task.phase === "PLAN" || res.task.phase === "RED") && cls.rule === "implementation") {
-    return { allow: false, reason: blockMessage(res.task, relPath, config) };
+  const config = input.config ?? classifyConfig(mainRootOf(res.root), env);
+  const cls = classify(relPath, task.allow, config);
+  if (cls.rule !== "implementation")
+    return { allow: true };
+  if (!task.strict?.phase) {
+    return { allow: false, reason: blockMessage(task, relPath, config) };
   }
-  const scope = res.task.scope ?? [];
-  if (cls.rule === "implementation" && scope.length > 0 && !inScope(relPath, scope)) {
-    return { allow: false, reason: scopeBlockMessage(res.task, relPath, scope) };
+  const scope = task.scope ?? [];
+  if (scope.length > 0 && !inScope(relPath, scope)) {
+    return { allow: false, reason: scopeBlockMessage(task, relPath, scope) };
   }
   return { allow: true };
 }
 
 // src/lib/approvalgate.ts
-import { existsSync as existsSync13, readFileSync as readFileSync14 } from "node:fs";
-import { dirname as dirname6, isAbsolute as isAbsolute3, join as join15, resolve as resolve3 } from "node:path";
+import { existsSync as existsSync13, readFileSync as readFileSync13 } from "node:fs";
+import { isAbsolute as isAbsolute3, join as join15, resolve as resolve3 } from "node:path";
 
-// src/lib/spec.ts
-var ORACLE_TYPES = new Set(["command", "test-suite", "browser", "manual"]);
-function toList(v) {
-  if (Array.isArray(v))
-    return v.map(String);
-  if (typeof v === "string" && v.trim() !== "")
-    return [v];
-  return [];
+// src/lib/protectedpaths.ts
+var GIT_READ_SUBCOMMANDS = ["status", "diff", "log", "show"];
+function commandWords(segment) {
+  const words = segment.trim().split(/\s+/).filter((w) => w !== "");
+  let i = 0;
+  while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i]))
+    i += 1;
+  return words.slice(i);
 }
-function parseSpec(yamlText) {
-  let raw;
-  try {
-    raw = $parse(yamlText);
-  } catch (e) {
-    return { errors: [`invalid YAML: ${e.message}`] };
-  }
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    return { errors: ["spec must be a YAML mapping"] };
-  }
-  const r = raw;
-  const errors2 = [];
-  if (typeof r.task !== "string" || r.task.trim() === "") {
-    errors2.push("task: one-sentence description required");
-  }
-  const sc = r.success_criteria;
-  if (!Array.isArray(sc) || sc.length === 0 || !sc.every((s) => typeof s === "string" && s.trim() !== "")) {
-    errors2.push("success_criteria: non-empty list of binary criteria required");
-  }
-  const o = r.oracle;
-  if (typeof o !== "object" || o === null || Array.isArray(o)) {
-    errors2.push("oracle: required — no oracle, no goal");
-  } else {
-    const or2 = o;
-    if (typeof or2.type !== "string" || !ORACLE_TYPES.has(or2.type)) {
-      errors2.push("oracle.type: must be one of command | test-suite | browser | manual");
+var commandBasename = (word) => {
+  const bare = word.replace(/^["']+|["']+$/g, "");
+  return bare.slice(bare.lastIndexOf("/") + 1);
+};
+function protectedPathRef(command) {
+  if (/\bsddx-proofs\b/.test(command))
+    return PROOFS_DIR;
+  if (!/\.sddx\b/.test(command))
+    return null;
+  if (/\bapprovals\b/.test(command))
+    return ".sddx/approvals/";
+  if (/(^|[^\w.-])config\.json\b/.test(command))
+    return ".sddx/config.json";
+  return null;
+}
+var READ_ONLY = new Set([
+  "cat",
+  "grep",
+  "rg",
+  "ls",
+  "head",
+  "tail",
+  "wc",
+  "stat",
+  "file",
+  "diff",
+  "echo"
+]);
+function isReadOnly(command) {
+  if (/\$\(|`|<\(/.test(command))
+    return false;
+  if (command.replace(/\d*>&\d+/g, "").includes(">"))
+    return false;
+  for (const segment of command.split(/\|\||&&|;|\||\r?\n/)) {
+    const words = commandWords(segment);
+    if (words.length === 0)
+      continue;
+    const cmd = commandBasename(words[0]);
+    if (cmd === "git") {
+      const sub = words.slice(1).find((w) => !w.startsWith("-"));
+      if (sub === undefined || !GIT_READ_SUBCOMMANDS.includes(sub))
+        return false;
+      continue;
     }
-    if (or2.type !== "manual" && (typeof or2.run !== "string" || or2.run.trim() === "")) {
-      errors2.push("oracle.run: command required for non-manual oracles");
-    }
-    if (or2.runs !== undefined && (typeof or2.runs !== "number" || !Number.isInteger(or2.runs) || or2.runs < 1)) {
-      errors2.push("oracle.runs: must be an integer >= 1");
-    }
+    if (!READ_ONLY.has(cmd))
+      return false;
   }
-  if (r.scope !== undefined) {
-    if (!Array.isArray(r.scope) || r.scope.length === 0 || !r.scope.every((s) => typeof s === "string" && s.trim() !== "")) {
-      errors2.push("scope: when present, must be a non-empty list of non-empty globs");
-    }
+  return true;
+}
+var PROOFS_DIR = ".git/sddx-proofs/";
+var PROOF_WHY = "A proof record is what review trusts as sddx verify's result, so writing one would forge a passing proof.";
+function protectedPathBlock(path) {
+  const why = path === ".sddx/config.json" ? "It carries interaction_mode, which decides whether a plan needs your approval at all." : path === PROOFS_DIR ? PROOF_WHY : "A token records that a human approved a plan, so writing one would forge that.";
+  return [
+    `sddx approval gate: blocked Bash command referencing ${path}.`,
+    why,
+    "This path is not reachable from a shell in any phase; the gate does not parse",
+    "redirection targets, so it refuses the command rather than guess at intent.",
+    path === ".sddx/config.json" ? "Inspect the effective configuration with: sddx config show" : path === PROOFS_DIR ? "Prove a task the only way that counts: sddx verify <id>" : "Approve a plan the only way that counts: sddx plan approve <spec>"
+  ].join(`
+`);
+}
+var APPROVALS_PATH = /(^|\/)\.sddx\/approvals\//;
+var CONFIG_PATH = /(^|\/)\.sddx\/config\.json$/;
+var PROOFS_PATH = /(^|\/)sddx-proofs\//;
+function protectedWriteBlock(path) {
+  const p = normalizeRelPath(path);
+  if (PROOFS_PATH.test(p)) {
+    return [
+      `sddx approval gate: blocked write to ${path}; proof records are not editable.`,
+      PROOF_WHY,
+      "Prove a task the only way that counts: sddx verify <id>"
+    ].join(`
+`);
   }
-  if (r.on_dependency_failure !== undefined && r.on_dependency_failure !== "skip" && r.on_dependency_failure !== "block") {
-    errors2.push("on_dependency_failure: must be one of skip | block");
+  if (APPROVALS_PATH.test(p)) {
+    return [
+      `sddx approval gate: blocked write to ${path}; approval tokens are not editable.`,
+      "A token records that a person approved a plan, so writing one directly would forge that.",
+      "Approve a plan the only way that counts (it raises your own permission dialog):",
+      "  sddx plan check <spec>     # review it first",
+      "  sddx plan approve <spec>"
+    ].join(`
+`);
   }
-  if (r.assumptions !== undefined) {
-    if (!Array.isArray(r.assumptions) || r.assumptions.length === 0 || !r.assumptions.every((s) => typeof s === "string" && s.trim() !== "")) {
-      errors2.push("assumptions: when present, must be a non-empty list of non-empty strings");
-    }
+  if (CONFIG_PATH.test(p)) {
+    return [
+      `sddx approval gate: blocked write to ${path}; sddx configuration is not tool-editable.`,
+      "It carries interaction_mode and profile, which decide whether a plan needs your approval",
+      "and how strictly edits are gated, so a tool that could rewrite it could switch off its own gate.",
+      "Edit it yourself, or inspect the effective values with: sddx config show"
+    ].join(`
+`);
   }
-  const retryRaw = r.retry;
-  if (retryRaw !== undefined) {
-    if (typeof retryRaw !== "object" || retryRaw === null || Array.isArray(retryRaw)) {
-      errors2.push("retry: must be a mapping with optional max_attempts/workspace");
-    } else {
-      const rr = retryRaw;
-      if (rr.max_attempts !== undefined && (typeof rr.max_attempts !== "number" || !Number.isInteger(rr.max_attempts) || rr.max_attempts < 1)) {
-        errors2.push("retry.max_attempts: must be an integer >= 1");
-      }
-      if (rr.workspace !== undefined && rr.workspace !== "fresh" && rr.workspace !== "reuse") {
-        errors2.push("retry.workspace: must be one of fresh | reuse");
-      }
-    }
-  }
-  if (errors2.length > 0)
-    return { errors: errors2 };
-  const or = o;
-  return {
-    errors: [],
-    spec: {
-      task: r.task.trim(),
-      context: toList(r.context),
-      success_criteria: sc.map((s) => s.trim()),
-      scope: Array.isArray(r.scope) ? r.scope.map((s) => s.trim()) : [],
-      oracle: {
-        type: or.type,
-        run: typeof or.run === "string" ? or.run.trim() : "",
-        expect: typeof or.expect === "string" ? or.expect.trim() : "exit 0",
-        ...typeof or.runs === "number" ? { runs: or.runs } : {}
-      },
-      stop_rules: Array.isArray(r.stop_rules) ? r.stop_rules : [],
-      out_of_scope: toList(r.out_of_scope),
-      assumptions: Array.isArray(r.assumptions) ? r.assumptions.map((s) => s.trim()) : [],
-      ...r.on_dependency_failure !== undefined ? { on_dependency_failure: r.on_dependency_failure } : {},
-      ...retryRaw !== undefined && typeof retryRaw === "object" && retryRaw !== null ? {
-        retry: {
-          ...typeof retryRaw.max_attempts === "number" ? { max_attempts: retryRaw.max_attempts } : {},
-          ...typeof retryRaw.workspace === "string" ? {
-            workspace: retryRaw.workspace
-          } : {}
-        }
-      } : {}
-    }
-  };
+  return null;
 }
 
 // src/lib/approvalgate.ts
 var pass2 = { decision: "pass" };
 var ask = (reason) => ({ decision: "ask", reason });
+var deny = (reason) => ({ decision: "deny", reason });
 function lex(command) {
   const segments2 = [];
   let tokens = [];
@@ -13102,19 +10183,12 @@ function lex(command) {
   return { segments: segments2, opaque };
 }
 var segments2 = (command) => lex(command).segments;
-var hasFlag = (tokens, name) => tokens.includes(name);
-function tokenValue(tokens, name) {
-  for (let i = 0;i < tokens.length; i++) {
-    if (tokens[i] === name)
-      return tokens[i + 1];
-    if (tokens[i].startsWith(`${name}=`))
-      return tokens[i].slice(name.length + 1);
-  }
-  return;
-}
+var invokesSddx = (token) => /sddx/i.test(token) || /^cli\.(mjs|ts)$/.test(token.slice(token.lastIndexOf("/") + 1));
 var isSubcommand = (tokens, a, b) => {
   const i = tokens.indexOf(a);
   if (i === -1)
+    return false;
+  if (!tokens.slice(0, i).some(invokesSddx))
     return false;
   for (let j = i + 1;j < tokens.length; j++) {
     const t = tokens[j];
@@ -13142,7 +10216,7 @@ var WRAPPERS = new Set([
   "command",
   "exec"
 ]);
-var basename2 = (word) => word.slice(word.lastIndexOf("/") + 1);
+var basename3 = (word) => word.slice(word.lastIndexOf("/") + 1);
 function allSegments(command, depth = 0) {
   const segs = segments2(command);
   if (depth >= 3)
@@ -13150,7 +10224,7 @@ function allSegments(command, depth = 0) {
   const out = [...segs];
   for (const tokens of segs) {
     const head = tokens[0];
-    if (!head || !WRAPPERS.has(basename2(head)))
+    if (!head || !WRAPPERS.has(basename3(head)))
       continue;
     for (const token of tokens.slice(1)) {
       if (/\s/.test(token))
@@ -13161,42 +10235,56 @@ function allSegments(command, depth = 0) {
 }
 function gatedAction(command) {
   const segs = allSegments(command);
-  if (segs.some((t) => isSubcommand(t, "graph", "approve")))
+  if (segs.some((t) => isSubcommand(t, "plan", "approve")))
     return "approve";
-  if (segs.some((t) => isSubcommand(t, "graph", "create") && !hasFlag(t, "--dry-run"))) {
-    return "create";
-  }
+  if (segs.some((t) => isSubcommand(t, "plan", "start")))
+    return "start";
   return null;
 }
-function readNodes(graphPath) {
-  if (!existsSync13(graphPath))
-    return null;
-  const { graph } = parseGraph(readFileSync14(graphPath, "utf8"));
-  if (!graph)
-    return null;
-  const graphDir = dirname6(graphPath);
-  const nodes = [];
-  for (const node of graph.tasks) {
-    const { spec } = parseSpec(readFileSync14(resolve3(graphDir, node.spec), "utf8"));
-    if (!spec)
-      return null;
-    nodes.push({
-      alias: node.alias,
-      scope: spec.scope ?? [],
-      oracleType: spec.oracle.type
-    });
+var VALUE_FLAGS = new Set(["--output", "--harness"]);
+function specArgOf(tokens, b) {
+  const i = tokens.indexOf(b);
+  if (i === -1)
+    return;
+  for (let j = i + 1;j < tokens.length; j++) {
+    const t = tokens[j];
+    if (VALUE_FLAGS.has(t)) {
+      j += 1;
+      continue;
+    }
+    if (!t.startsWith("-"))
+      return t;
   }
-  return nodes;
+  return;
+}
+function readPlan(specPath) {
+  if (!existsSync13(specPath))
+    return null;
+  const { spec } = parseGoalSpec(readFileSync13(specPath, "utf8"));
+  if (!spec)
+    return null;
+  return {
+    nodes: spec.tasks.map((t) => ({ alias: t.id, scope: t.scope, oracleType: t.oracle.type })),
+    openDecisions: spec.design.openDecisions
+  };
 }
 function approvalGate(event) {
-  const { command, cwd } = event;
-  if (!command || !cwd)
+  const { command, filePath } = event;
+  const cwd = event.cwd ?? process.cwd();
+  if (filePath !== undefined) {
+    const blocked = protectedWriteBlock(filePath) ?? protectedWriteBlock(resolve3(cwd, filePath));
+    return blocked ? deny(blocked) : pass2;
+  }
+  if (!command)
     return pass2;
   try {
+    const protectedPath = protectedPathRef(command);
+    if (protectedPath && !isReadOnly(command))
+      return deny(protectedPathBlock(protectedPath));
     const parsed = lex(command);
     const action = gatedAction(command);
     if (!action) {
-      if (parsed.opaque && /\bsddx\b/.test(command) && /\bgraph\b/.test(command)) {
+      if (parsed.opaque && /\bsddx\b/.test(command) && /\bplan\b/.test(command)) {
         return ask([
           "sddx: this command names sddx and uses an expansion the approval gate cannot read.",
           "What it expands to cannot be verified, so it cannot be vouched for."
@@ -13205,40 +10293,37 @@ function approvalGate(event) {
       }
       return pass2;
     }
-    const owns = (t) => action === "approve" ? isSubcommand(t, "graph", "approve") : isSubcommand(t, "graph", "create") && !hasFlag(t, "--dry-run");
-    const tokens = allSegments(command).find(owns) ?? [];
-    const graphArg = tokenValue(tokens, "--graph");
+    const tokens = allSegments(command).find((t) => isSubcommand(t, "plan", action)) ?? [];
+    const specArg = specArgOf(tokens, action);
+    const specPath = specArg ? isAbsolute3(specArg) ? specArg : join15(cwd, specArg) : null;
     if (action === "approve") {
-      const plan = graphArg ? planHash(isAbsolute3(graphArg) ? graphArg : join15(cwd, graphArg)) : null;
+      const plan2 = specPath ? planHash(specPath) : null;
       return ask([
-        `sddx: this records YOUR approval of plan ${plan?.hash ? plan.hash.slice(0, 12) : "(unreadable)"}.`,
+        `sddx: this records YOUR approval of plan ${plan2?.hash ? plan2.hash.slice(0, 12) : "(unreadable)"}.`,
         "Approve only if you have reviewed it:",
-        `  sddx graph create --graph ${graphArg ?? "<path>"} --dry-run`
+        `  sddx plan check ${specArg ?? "<spec>"}`
       ].join(`
 `));
     }
-    if (!graphArg) {
-      return ask("sddx: plan creation without a --graph argument — cannot verify what would run");
-    }
-    const graphPath = isAbsolute3(graphArg) ? graphArg : join15(cwd, graphArg);
-    const nodes = readNodes(graphPath);
-    if (!nodes) {
-      return ask(`sddx: plan at ${graphArg} could not be read — approval cannot be verified`);
-    }
-    const gate = decideGate(cwd, graphPath, nodes, gateInteractionMode(cwd), autoMaxTasks(cwd), scopesOverlap);
+    if (!specPath)
+      return ask("sddx: plan start without a spec argument; cannot verify what would run");
+    const plan = readPlan(specPath);
+    if (!plan)
+      return ask(`sddx: plan at ${specArg} could not be read; approval cannot be verified`);
+    const gate = decideGate(cwd, specPath, plan.nodes, gateInteractionMode(cwd), autoMaxTasks(cwd), scopesOverlap, plan.openDecisions);
     if (gate.ok)
       return pass2;
     if (gate.refusal)
       return pass2;
-    const scale = `${gate.nodeCount} node${gate.nodeCount === 1 ? "" : "s"}`;
+    const scale = `${gate.nodeCount} task${gate.nodeCount === 1 ? "" : "s"}`;
     return ask([
-      `sddx: this creates ${scale} of work from plan ${gate.hash.slice(0, 12)}.`,
+      `sddx: this starts ${scale} of work from plan ${gate.hash.slice(0, 12)}.`,
       gate.reason ?? "approval required",
-      `Review it first: sddx graph create --graph ${graphArg} --dry-run`
+      `Review it first: sddx plan check ${specArg}`
     ].join(`
 `));
   } catch (e) {
-    return ask(`sddx: approval could not be verified (${e.message}) — asking instead`);
+    return ask(`sddx: approval could not be verified (${e.message}); asking instead`);
   }
 }
 
@@ -13265,75 +10350,9 @@ var BASH_ALLOW_BASE = [
   "tail",
   "wc"
 ];
-var GIT_READ_SUBCOMMANDS = ["status", "diff", "log", "show"];
 var EVAL_CAPABLE = new Set(["bun", "node", "npx", "python", "python3"]);
 var EVAL_FLAGS = new Set(["-e", "--eval", "-p", "--print", "-c", "--exec"]);
-function protectedPathRef(command) {
-  if (!/\.sddx\b/.test(command))
-    return null;
-  if (/\bapprovals\b/.test(command))
-    return ".sddx/approvals/";
-  if (/(^|[^\w.-])config\.json\b/.test(command))
-    return ".sddx/config.json";
-  return null;
-}
-var READ_ONLY = new Set([
-  "cat",
-  "grep",
-  "rg",
-  "ls",
-  "head",
-  "tail",
-  "wc",
-  "stat",
-  "file",
-  "diff",
-  "echo"
-]);
-function isReadOnly(command) {
-  if (/\$\(|`|<\(/.test(command))
-    return false;
-  if (command.replace(/\d*>&\d+/g, "").includes(">"))
-    return false;
-  for (const segment of command.split(/\|\||&&|;|\||\r?\n/)) {
-    const words = commandWords(segment);
-    if (words.length === 0)
-      continue;
-    const cmd = commandBasename(words[0]);
-    if (cmd === "git") {
-      const sub = words.slice(1).find((w) => !w.startsWith("-"));
-      if (sub === undefined || !GIT_READ_SUBCOMMANDS.includes(sub))
-        return false;
-      continue;
-    }
-    if (!READ_ONLY.has(cmd))
-      return false;
-  }
-  return true;
-}
-function protectedPathBlock(path) {
-  const why = path === ".sddx/config.json" ? "It carries interaction_mode, which decides whether a plan needs your approval at all." : "A token records that a human approved a plan, so writing one would forge that.";
-  return [
-    `sddx approval gate: blocked Bash command referencing ${path}.`,
-    why,
-    "This path is not reachable from a shell in any phase — the gate does not parse",
-    "redirection targets, so it refuses the command rather than guess at intent.",
-    path === ".sddx/config.json" ? "Inspect the effective configuration with: sddx config show" : "Approve a plan the only way that counts: sddx graph approve --graph <path>"
-  ].join(`
-`);
-}
 var splitList = (value) => (value ?? "").split(/\s+/).filter((s) => s !== "");
-function commandWords(segment) {
-  const words = segment.trim().split(/\s+/).filter((w) => w !== "");
-  let i = 0;
-  while (i < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[i]))
-    i += 1;
-  return words.slice(i);
-}
-var commandBasename = (word) => {
-  const bare = word.replace(/^["']+|["']+$/g, "");
-  return bare.slice(bare.lastIndexOf("/") + 1);
-};
 function checkBashCommand(command, extraAllow) {
   if (/\$\(|`|<\(/.test(command)) {
     return {
@@ -13355,7 +10374,7 @@ function checkBashCommand(command, extraAllow) {
     const cmd = commandBasename(words[0]);
     if (cmd === "sddx-run" || cmd === "sddx")
       continue;
-    if (isSddxInvocation(words.map((w) => commandBasename(w))))
+    if (["bunx", "npx"].includes(cmd) && words.map(commandBasename).includes("sddx"))
       continue;
     if (cmd === "git") {
       const sub = words.slice(1).find((w) => !w.startsWith("-"));
@@ -13381,23 +10400,22 @@ function checkBashCommand(command, extraAllow) {
 }
 function blockMessage2(task, why) {
   return [
-    `sddx TDD gate: blocked Bash command — task ${task.id} is in ${task.phase} (${why}).`,
-    `Pre-GREEN, Bash may only run tests or read state: ${BASH_ALLOW_BASE.join(", ")}, git ${GIT_READ_SUBCOMMANDS.join("|")}, and the sddx CLI itself.`,
-    "Write the failing test with Edit/Write under a test path and run the test runner so the failure is recorded (the gate lifts in GREEN).",
-    "A legitimately needed read-only tool can be added via userConfig red_bash_allow."
+    `sddx strict gate: blocked Bash command; task ${task.id} has no recorded failing test yet (${why}).`,
+    `Until then, Bash may only run tests or read state: ${BASH_ALLOW_BASE.join(", ")}, git ${GIT_READ_SUBCOMMANDS.join("|")}, and the sddx CLI itself.`,
+    "Write the failing test under a test path and run the test runner so the failure is recorded; the gate lifts once it is.",
+    "A legitimately needed read-only tool can be added with the red_bash_allow config key."
   ].join(`
 `);
 }
 function bashGate(input, env = process.env) {
   if (typeof input.command !== "string" || input.command.trim() === "")
     return { allow: true };
-  const protectedPath = protectedPathRef(input.command);
-  if (protectedPath && !isReadOnly(input.command)) {
-    return { allow: false, reason: protectedPathBlock(protectedPath) };
-  }
+  const cwd = input.cwd ?? process.cwd();
+  if (profile(mainRootOf(cwd)) !== "strict")
+    return { allow: true };
   if (checkBashCommand(input.command, []).allow)
     return { allow: true };
-  const res = resolveTask(input.cwd ?? process.cwd());
+  const res = resolveTask(cwd);
   if (res.kind === "none")
     return { allow: true };
   const failure = resolutionFailureReason(res, "running commands");
@@ -13405,13 +10423,14 @@ function bashGate(input, env = process.env) {
     return { allow: false, reason: failure };
   if (res.kind !== "task")
     return { allow: true };
-  if (res.task.phase !== "PLAN" && res.task.phase !== "RED")
+  const t = res.task;
+  if (t.phase !== "IN_PROGRESS" || t.profile !== "strict" || t.strict?.phase)
     return { allow: true };
-  const extra = splitList(env.SDDX_RED_BASH_ALLOW ?? readConfig(res.root).red_bash_allow);
+  const extra = splitList(env.SDDX_RED_BASH_ALLOW ?? readConfig(mainRootOf(res.root)).red_bash_allow);
   const decision = checkBashCommand(input.command, extra);
   if (decision.allow)
     return decision;
-  return { allow: false, reason: blockMessage2(res.task, decision.reason) };
+  return { allow: false, reason: blockMessage2(t, decision.reason) };
 }
 
 // src/lib/recorder.ts
@@ -13434,61 +10453,58 @@ function matchTestRunner(command) {
   }
   return null;
 }
-function failureFingerprint(exitCode, output, command = "") {
-  const tail = output.split(`
-`).slice(-20).join(`
-`).replace(/\d+(\.\d+)?/g, "#").replace(/\s+/g, " ").trim();
-  return sha256(`${exitCode}
-${command.trim()}
-${tail}`);
-}
-function recordTestRun(cwd, command, exitCode, output = "") {
+function recordTestRun(cwd, command, exitCode) {
   if (matchTestRunner(command) === null || exitCode === undefined) {
-    return { matched: false, transitioned: null };
+    return { matched: false, recorded: null };
   }
+  if (profile(mainRootOf(cwd)) !== "strict")
+    return { matched: true, recorded: null };
   const res = resolveTask(cwd);
   if (res.kind !== "task")
-    return { matched: true, transitioned: null };
+    return { matched: true, recorded: null };
   const task = res.task;
-  if (legacyWorkspaceOf(task) !== null && !isTerminal(task.phase)) {
-    return { matched: true, transitioned: null };
+  if (task.phase !== "IN_PROGRESS" || task.profile !== "strict") {
+    return { matched: true, recorded: null, taskId: task.id };
   }
-  const at = new Date().toISOString();
-  if (exitCode !== 0) {
-    const fp = failureFingerprint(exitCode, output, command);
-    task.stuck = task.stuck?.fingerprint === fp ? { fingerprint: fp, count: task.stuck.count + 1, since: task.stuck.since } : { fingerprint: fp, count: 1, since: at };
-  } else if (task.stuck) {
-    task.stuck = undefined;
-  }
-  let to = null;
-  if (task.phase === "PLAN" && exitCode !== 0)
-    to = "RED";
-  if ((task.phase === "RED" || task.phase === "REFACTOR") && exitCode === 0)
-    to = "GREEN";
-  if (to) {
-    transition(task, to, { testExit: exitCode, source: "hook" });
-  } else {
-    task.evidence.last_test = { test_exit: exitCode, at, source: "hook" };
-  }
-  let stuck;
-  if (task.stuck) {
-    const threshold = stuckThreshold(res.root);
-    if (task.stuck.count >= threshold)
-      stuck = { count: task.stuck.count, threshold };
-  }
+  const strict = task.strict ?? { runs: [] };
+  strict.runs.push({ test_exit: exitCode, source: "hook", at: new Date().toISOString() });
+  let recorded = null;
+  if (exitCode !== 0 && strict.phase === undefined)
+    recorded = "RED";
+  if (exitCode === 0 && strict.phase === "RED")
+    recorded = "GREEN";
+  if (recorded)
+    strict.phase = recorded;
+  task.strict = strict;
   writeTask(res.root, task);
-  return { matched: true, transitioned: to, taskId: task.id, stuck };
+  return { matched: true, recorded, taskId: task.id };
+}
+function recordManualRun(task, phase, exitCode) {
+  if (phase === "RED" && exitCode === 0) {
+    throw new Error("RED requires evidence of a failing test: --test-exit <nonzero exit code>");
+  }
+  if (phase === "GREEN" && exitCode !== 0) {
+    throw new Error("GREEN requires evidence of a passing test: --test-exit 0");
+  }
+  if (task.phase !== "IN_PROGRESS" || task.profile !== "strict") {
+    throw new Error(`task ${task.id} is not an IN_PROGRESS strict-profile task`);
+  }
+  const strict = task.strict ?? { runs: [] };
+  if (phase === "GREEN" && strict.phase === undefined) {
+    throw new Error(`GREEN requires a recorded failing run first: sddx task phase ${task.id} RED --test-exit <nonzero exit code>`);
+  }
+  strict.runs.push({ test_exit: exitCode, source: "manual", at: new Date().toISOString() });
+  strict.phase = phase;
+  task.strict = strict;
 }
 
 // src/lib/stopgate.ts
 import { existsSync as existsSync14 } from "node:fs";
 import { join as join16 } from "node:path";
 var NEXT_STEP = {
-  PLAN: "write a failing test and run it to enter RED",
-  RED: "run sddx red-check <id>, then make the failing test pass (run the test runner to enter GREEN)",
-  GREEN: "refactor if needed, then: sddx task phase <id> VERIFY && sddx verify <id>",
-  REFACTOR: "re-run tests to return to GREEN, then verify",
-  VERIFY: "run: sddx verify <id>",
+  PLANNED: "start it with: sddx task start <id>",
+  IN_PROGRESS: "make the change, then prove it with: sddx verify <id>",
+  IN_REVIEW: "",
   DONE: "",
   ABANDONED: ""
 };
@@ -13521,10 +10537,20 @@ function stopGate(event) {
     }
     return { block: false };
   }
-  if (task.stuck && task.stuck.count >= stuckThreshold(res.root)) {
+  if (task.phase === "IN_REVIEW") {
+    return { block: false, note: `sddx: task ${task.id} is verified and awaiting review.` };
+  }
+  const root = mainRootOf(res.root);
+  if (task.stuck && task.stuck.count >= stuckThreshold(root)) {
     return {
       block: false,
-      note: `sddx: task ${task.id} is stuck — ${task.stuck.count} identical failures; escalating to the human is the correct next step.`
+      note: `sddx: task ${task.id} is stuck after ${task.stuck.count} identical verify failures; escalate to a person instead of iterating.`
+    };
+  }
+  if (task.iterations >= maxIterations(root)) {
+    return {
+      block: false,
+      note: `sddx: task ${task.id} reached its iteration limit (${task.iterations}); escalate to a person, or abandon it.`
     };
   }
   const step = NEXT_STEP[task.phase].replaceAll("<id>", task.id);
@@ -13537,7 +10563,7 @@ function stopGate(event) {
 // src/lib/hookdispatch.ts
 function readEvent() {
   try {
-    const raw = readFileSync15(0, "utf8");
+    const raw = readFileSync14(0, "utf8");
     const parsed = raw.trim() === "" ? {} : JSON.parse(raw);
     return typeof parsed === "object" && parsed !== null ? parsed : {};
   } catch {
@@ -13547,6 +10573,7 @@ function readEvent() {
 var emit = (output) => {
   console.log(JSON.stringify(output));
 };
+var FILE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 function cmdTddGate(event) {
   const decision = tddGate({
     filePath: event.tool_input?.file_path ?? event.tool_input?.notebook_path,
@@ -13565,7 +10592,11 @@ function cmdTddGate(event) {
   });
 }
 function cmdApprovalGate(event) {
-  const decision = approvalGate({ command: event.tool_input?.command, cwd: event.cwd });
+  const fileTool = typeof event.tool_name === "string" && FILE_TOOLS.has(event.tool_name) || (event.tool_input?.file_path ?? event.tool_input?.notebook_path) !== undefined;
+  const decision = approvalGate(fileTool ? {
+    filePath: String(event.tool_input?.file_path ?? event.tool_input?.notebook_path ?? ""),
+    cwd: event.cwd
+  } : { command: event.tool_input?.command, cwd: event.cwd });
   if (decision.decision === "pass") {
     emit({});
     return;
@@ -13573,7 +10604,7 @@ function cmdApprovalGate(event) {
   emit({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
-      permissionDecision: "ask",
+      permissionDecision: decision.decision,
       permissionDecisionReason: decision.reason
     }
   });
@@ -13600,33 +10631,35 @@ function exitCodeOf(response) {
   }
   return;
 }
-function outputOf(response) {
-  let out = "";
-  for (const key of ["stdout", "stderr", "output"]) {
-    const v = response?.[key];
-    if (typeof v === "string")
-      out += v;
-  }
-  return out;
-}
 function cmdRecordTest(event) {
   const command = event.tool_input?.command;
   if (typeof command !== "string") {
     emit({});
     return;
   }
-  const res = recordTestRun(event.cwd ?? process.cwd(), command, exitCodeOf(event.tool_response), outputOf(event.tool_response));
-  const parts = [];
-  if (res.transitioned)
-    parts.push(`sddx: task ${res.taskId} → ${res.transitioned} (observed test run)`);
-  if (res.stuck)
-    parts.push(`sddx: task ${res.taskId} has failed identically ${res.stuck.count}× (threshold ${res.stuck.threshold}) — stuck; stop and escalate to the human instead of iterating.`);
-  emit(parts.length > 0 ? { systemMessage: parts.join(`
-`) } : {});
+  const res = recordTestRun(event.cwd ?? process.cwd(), command, exitCodeOf(event.tool_response));
+  emit(res.recorded ? { systemMessage: `sddx: task ${res.taskId} recorded ${res.recorded} (observed test run)` } : {});
 }
 function cmdStopGate(event) {
   const decision = stopGate({ cwd: event.cwd, stop_hook_active: event.stop_hook_active });
   emit(decision.block ? { decision: "block", reason: decision.reason } : decision.note ? { systemMessage: decision.note } : {});
+}
+function activeTaskFiles(root) {
+  const files = [];
+  const main = join17(root, ".sddx", "tasks");
+  if (existsSync15(main)) {
+    for (const f of readdirSync8(main).filter((n) => n.endsWith(".json")))
+      files.push(join17(main, f));
+  }
+  const wts = join17(root, ".sddx-worktrees");
+  if (existsSync15(wts)) {
+    for (const id of readdirSync8(wts)) {
+      const f = join17(wts, id, ".sddx", "tasks", `${id}.json`);
+      if (existsSync15(f))
+        files.push(f);
+    }
+  }
+  return files;
 }
 function cmdSessionStart(event) {
   const cwd = event.cwd ?? process.cwd();
@@ -13644,16 +10677,13 @@ function cmdSessionStart(event) {
         lines.push(`sddx: board refresh failed: ${e.message}`);
       }
     }
-    const tasksDir = join17(cwd, ".sddx", "tasks");
-    if (existsSync15(tasksDir)) {
-      for (const file of readdirSync9(tasksDir).filter((f) => f.endsWith(".json"))) {
-        try {
-          const t = JSON.parse(readFileSync15(join17(tasksDir, file), "utf8"));
-          if (!isTerminal(t.phase))
-            lines.push(`sddx task ${t.id}: phase ${t.phase} — ${t.task}`);
-        } catch {
-          lines.push(`sddx: task file ${file} is unreadable`);
-        }
+    for (const file of activeTaskFiles(cwd)) {
+      try {
+        const t = JSON.parse(readFileSync14(file, "utf8"));
+        if (!isTerminal(t.phase))
+          lines.push(`sddx task ${t.id}: ${t.phase}, ${t.task}`);
+      } catch {
+        lines.push(`sddx: task file ${file} is unreadable`);
       }
     }
   }
@@ -13691,492 +10721,622 @@ function runHook(sub) {
   process.exit(0);
 }
 
-// src/lib/init.ts
+// src/lib/lifecycle.ts
+import { rmSync as rmSync6 } from "node:fs";
+import { join as join19 } from "node:path";
+
+// src/lib/proof.ts
+import { spawnSync as spawnSync10 } from "node:child_process";
+import { existsSync as existsSync16, mkdirSync as mkdirSync10, mkdtempSync as mkdtempSync3, readFileSync as readFileSync15, rmSync as rmSync5, writeFileSync as writeFileSync11 } from "node:fs";
+import { tmpdir as tmpdir3 } from "node:os";
+import { join as join18 } from "node:path";
+
+// src/lib/oracle.ts
 import { spawnSync as spawnSync9 } from "node:child_process";
-import { existsSync as existsSync16, mkdirSync as mkdirSync9, readFileSync as readFileSync16, rmSync as rmSync4, writeFileSync as writeFileSync10 } from "node:fs";
-import { dirname as dirname7, join as join18 } from "node:path";
-function planIsNoop(plan) {
-  return plan.files.every((f) => f.kind === "unchanged") && plan.packageOps.length === 0;
-}
-
-class NotAGitRepositoryError extends Error {
-  cwd;
-  constructor(cwd) {
-    super(`not a git repository: ${cwd}
-` + `sddx init operates on a repository — its state lives in git, and a worktree per task is the isolation model.
-` + "Run `git init` first, or run sddx init from inside an existing repository.");
-    this.cwd = cwd;
-    this.name = "NotAGitRepositoryError";
-  }
-}
-function repositoryRoot(cwd) {
-  const r = spawnSync9("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8" });
-  if (r.status !== 0)
-    throw new NotAGitRepositoryError(cwd);
-  const root = (r.stdout ?? "").trim();
-  if (root === "")
-    throw new NotAGitRepositoryError(cwd);
-  return root;
-}
-var TRACKED_SDDX_DIRS = [
-  "specs",
-  "drafts",
-  "context",
-  "tasks",
-  "goals",
-  "receipts",
-  "adapters"
-];
-var EPHEMERAL_PATHS = [
-  ".sddx/local/",
-  ".sddx/cache/",
-  ".sddx/sessions/",
-  ".sddx-worktrees/"
-];
-var GITIGNORE_BEGIN = "# sddx (generated) — do not edit between markers";
-var GITIGNORE_END = "# end sddx";
-function gitignoreBlock() {
-  return [GITIGNORE_BEGIN, ...EPHEMERAL_PATHS, GITIGNORE_END].join(`
-`);
-}
-function withGitignoreBlock(existing) {
-  const block = gitignoreBlock();
-  const stripped = stripGitignoreBlocks(existing).replace(/\s*$/, "");
-  return stripped === "" ? `${block}
-` : `${stripped}
-
-${block}
-`;
-}
-function stripGitignoreBlocks(existing) {
-  let out = "";
-  let rest = existing;
-  while (true) {
-    const begin = rest.indexOf(GITIGNORE_BEGIN);
-    if (begin === -1)
-      break;
-    const afterBegin = begin + GITIGNORE_BEGIN.length;
-    const endMarker = rest.indexOf(GITIGNORE_END, afterBegin);
-    const nextBegin = rest.indexOf(GITIGNORE_BEGIN, afterBegin);
-    const wellFormed = endMarker !== -1 && (nextBegin === -1 || nextBegin > endMarker);
-    if (!wellFormed) {
-      out += rest.slice(0, afterBegin);
-      rest = rest.slice(afterBegin);
-      continue;
-    }
-    let end = endMarker + GITIGNORE_END.length;
-    if (rest[end] === `
-`)
-      end += 1;
-    out += rest.slice(0, begin);
-    rest = rest.slice(end);
-  }
-  return out + rest;
-}
-function configContents(opts) {
+var ORACLE_TIMEOUT_MS = 10 * 60000;
+function runOracle(cwd, run) {
+  const started = Date.now();
+  const r = spawnSync9("sh", ["-c", run], { cwd, timeout: ORACLE_TIMEOUT_MS });
+  if (r.error)
+    throw new Error(`oracle could not run: ${r.error.message}`);
   return {
-    schema_version: CONFIG_SCHEMA_VERSION,
-    interaction_mode: opts.interactionMode,
-    runtime_scope: opts.runtimeScope,
-    package_manager: opts.packageManager,
-    adapters: [...opts.adapters].sort()
+    exitCode: r.status ?? -1,
+    durationMs: Date.now() - started,
+    stdout: r.stdout ?? Buffer.alloc(0),
+    stderr: r.stderr ?? Buffer.alloc(0)
   };
 }
-var json2 = (value) => `${JSON.stringify(value, null, 2)}
-`;
-function readIfPresent2(path) {
+
+// src/lib/proof.ts
+var STATE_EXCLUDE = ":(exclude).sddx";
+function worktreeTree(worktree) {
+  const dir = mkdtempSync3(join18(tmpdir3(), "sddx-tree-"));
+  const env = { ...process.env, GIT_INDEX_FILE: join18(dir, "index") };
+  const run = (args) => {
+    const r = spawnSync10("git", args, { cwd: worktree, env, encoding: "utf8" });
+    if (r.status !== 0)
+      throw new Error(`git ${args[0]} failed: ${(r.stderr ?? "").trim()}`);
+    return (r.stdout ?? "").trim();
+  };
   try {
-    return existsSync16(path) ? readFileSync16(path, "utf8") : null;
+    run(["read-tree", "HEAD"]);
+    run(["add", "-A", "--", ".", STATE_EXCLUDE]);
+    return run(["write-tree"]);
+  } finally {
+    rmSync5(dir, { recursive: true, force: true });
+  }
+}
+function diffZ(cwd, args) {
+  const r = spawnSync10("git", ["diff", "-z", "--no-renames", "--no-ext-diff", ...args], {
+    cwd,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024
+  });
+  if (r.status !== 0)
+    throw new Error(`git diff failed: ${(r.stderr ?? "").trim()}`);
+  return (r.stdout ?? "").split("\x00").filter((f) => f !== "");
+}
+function changedFiles(cwd, base, tree) {
+  const fields = diffZ(cwd, ["--name-status", base, tree, "--", ".", STATE_EXCLUDE]);
+  const files = [];
+  for (let i = 0;i + 1 < fields.length; i += 2) {
+    const status = fields[i];
+    const path = fields[i + 1];
+    files.push({ status: status === "A" ? "A" : status === "D" ? "D" : "M", path });
+  }
+  return files;
+}
+var sddxChanges = (cwd, base, tree) => diffZ(cwd, ["--name-only", base, tree, "--", ".sddx"]);
+function gitOnPaths(cwd, args, paths) {
+  const r = spawnSync10("git", ["--literal-pathspecs", ...args, "--pathspec-from-file=-", "--pathspec-file-nul"], { cwd, input: `${paths.join("\x00")}\x00`, encoding: "utf8" });
+  if (r.status !== 0)
+    throw new Error(`git ${args[0]} failed: ${(r.stderr ?? "").trim()}`);
+}
+function changedTestFiles(cwd, base, tree, config) {
+  return changedFiles(cwd, base, tree).filter((f) => classify(f.path, [], config).rule === "test");
+}
+function diffSha256(cwd, base, tree) {
+  const r = spawnSync10("git", ["diff", "--binary", base, tree, "--", ".", STATE_EXCLUDE], {
+    cwd,
+    maxBuffer: 512 * 1024 * 1024
+  });
+  if (r.status !== 0)
+    throw new Error(`git diff failed: ${r.stderr?.toString().trim()}`);
+  return sha256(r.stdout);
+}
+var expectedExit = (expect) => {
+  const m = /^exit\s+(\d+)$/.exec(expect.trim());
+  if (!m)
+    throw new Error(`unsupported oracle.expect: "${expect}" (expected "exit <code>")`);
+  return Number(m[1]);
+};
+function failureFingerprint(half, exitCode, output) {
+  const tail = output.toString("utf8").split(`
+`).slice(-20).join(`
+`).replace(/\d+(\.\d+)?/g, "#").replace(/\s+/g, " ").trim();
+  return sha256(`${half}\x00${exitCode}\x00${tail}`);
+}
+var proofPath = (root, id) => join18(worktreesDir(root), `${id}${PROOF_SUFFIX}`);
+var proofRecordPath = (root, id) => join18(gitCommonDir(root), "sddx-proofs", `${id}.json`);
+function writeProofRecord(root, record) {
+  const path = proofRecordPath(root, record.task_id);
+  mkdirSync10(join18(path, ".."), { recursive: true });
+  writeFileSync11(path, `${JSON.stringify(record, null, 2)}
+`);
+}
+function readProofRecord(root, id, attempt) {
+  try {
+    const r = JSON.parse(readFileSync15(proofRecordPath(root, id), "utf8"));
+    return r.task_id === id && r.attempt === attempt ? r : null;
   } catch {
     return null;
   }
 }
-function fileOp(root, relPath, contents, reason) {
-  const current = readIfPresent2(join18(root, relPath));
-  if (current === contents)
-    return { path: relPath, kind: "unchanged", reason };
-  return { path: relPath, kind: current === null ? "create" : "modify", contents, reason };
+function clearProofRecord(root, id) {
+  rmSync5(proofRecordPath(root, id), { force: true });
 }
-function pinInstallCommand(pm) {
-  return pm === "bun" ? ["bun", "add", "--dev", "@glapsfun/sddx"] : ["npm", "install", "--save-dev", "@glapsfun/sddx"];
+function claimProofPath(root, id, path) {
+  const existing = listSddxWorktrees(root).find((w) => w.path === path);
+  const owner = proofOwner(existing?.locked ?? null);
+  if (owner.alive) {
+    throw new Error(`a verify of ${id} is already running${owner.pid ? ` (pid ${owner.pid})` : ""}. If none is, remove its proof worktree: git worktree remove --force --force ${path}`);
+  }
+  if (existing || existsSync16(path))
+    removeScratchWorktree(root, path);
 }
-function alreadyPinned(root) {
-  const pkg = readIfPresent2(join18(root, "package.json"));
-  if (pkg === null)
-    return false;
+function runSetup(path, setup) {
+  if (!setup)
+    return { ok: true, exitCode: 0 };
+  const r = runOracle(path, setup);
+  return { ok: r.exitCode === 0, exitCode: r.exitCode };
+}
+function runBoundaryProof(opts) {
+  const { root, id, base, tree, oracle } = opts;
+  const want = expectedExit(oracle.expect);
+  const tests = changedTestFiles(root, base, tree, opts.classify);
+  const testFiles = tests.map((t) => t.path);
+  const path = proofPath(root, id);
+  claimProofPath(root, id, path);
+  git(root, "worktree", "add", "-q", "--detach", "--lock", "--reason", proofLockReason(), path, base);
   try {
-    const parsed = JSON.parse(pkg);
-    return parsed.dependencies?.["@glapsfun/sddx"] !== undefined || parsed.devDependencies?.["@glapsfun/sddx"] !== undefined;
-  } catch {
-    return false;
-  }
-}
-function planInit(cwd, opts, adapterFiles) {
-  const root = repositoryRoot(cwd);
-  const files = [];
-  for (const dir of TRACKED_SDDX_DIRS) {
-    files.push(fileOp(root, `.sddx/${dir}/.gitkeep`, "", `scaffold the tracked .sddx/${dir}/ directory`));
-  }
-  const config = configContents(opts);
-  files.push(fileOp(root, ".sddx/config.json", json2(config), "project policy"));
-  const gitignore = readIfPresent2(join18(root, ".gitignore")) ?? "";
-  files.push(fileOp(root, ".gitignore", withGitignoreBlock(gitignore), "ignore only the ephemeral sddx paths"));
-  if (adapterFiles)
-    files.push(...adapterFiles(root, opts));
-  const packageOps = [];
-  if (opts.runtimeScope === "project" && !alreadyPinned(root)) {
-    packageOps.push({
-      command: pinInstallCommand(opts.packageManager),
-      reason: "pin @glapsfun/sddx as a project dependency (project-pinned runtime scope)"
+    const added = tests.filter((t) => t.status !== "D").map((t) => t.path);
+    const deleted = tests.filter((t) => t.status === "D").map((t) => t.path);
+    if (added.length > 0)
+      gitOnPaths(path, ["checkout", tree], added);
+    if (deleted.length > 0)
+      gitOnPaths(path, ["rm", "-q"], deleted);
+    const fail2 = (half, exitCode, message, output, green2 = []) => ({
+      ok: false,
+      half,
+      exitCode,
+      message,
+      testFiles,
+      fingerprint: failureFingerprint(half, exitCode, output),
+      green: green2
     });
-  }
-  return { root, files, packageOps, config };
-}
-
-class InitRollback {
-  steps = [];
-  createdFile(absPath, rel) {
-    this.steps.push({
-      describe: `remove ${rel}`,
-      undo: () => {
-        if (existsSync16(absPath))
-          rmSync4(absPath, { force: true });
-      }
-    });
-  }
-  modifiedFile(absPath, rel, previous) {
-    this.steps.push({
-      describe: `restore ${rel}`,
-      undo: () => writeFileSync10(absPath, previous)
-    });
-  }
-  capture(absPath, rel) {
-    if (existsSync16(absPath)) {
-      let previous;
-      try {
-        previous = readFileSync16(absPath, "utf8");
-      } catch {
-        return;
-      }
-      this.modifiedFile(absPath, rel, previous);
-    } else {
-      this.createdFile(absPath, rel);
+    const redSetup = runSetup(path, oracle.setup);
+    if (!redSetup.ok) {
+      return fail2("setup", redSetup.exitCode, `oracle.setup exited ${redSetup.exitCode} on the base commit`, Buffer.alloc(0));
     }
-  }
-  createdDir(absPath, rel) {
-    this.steps.push({
-      describe: `remove ${rel}/`,
-      undo: () => {
-        if (existsSync16(absPath))
-          rmSync4(absPath, { recursive: true, force: true });
-      }
-    });
-  }
-  replay() {
-    const undone = [];
-    for (const step of [...this.steps].reverse()) {
-      try {
-        step.undo();
-        undone.push(step.describe);
-      } catch (e) {
-        undone.push(`${step.describe} — FAILED: ${e.message}`);
+    const red = runOracle(path, oracle.run);
+    if (red.exitCode === want) {
+      return fail2("red", red.exitCode, `the oracle passes without the change (exit ${red.exitCode} on the base commit plus ${testFiles.length} changed test file(s)), so it proves nothing about this task`, Buffer.concat([red.stdout, red.stderr]));
+    }
+    git(path, "read-tree", "-u", "--reset", tree);
+    const greenSetup = runSetup(path, oracle.setup);
+    if (!greenSetup.ok) {
+      return fail2("setup", greenSetup.exitCode, `oracle.setup exited ${greenSetup.exitCode} on the verified tree`, Buffer.alloc(0));
+    }
+    const green = [];
+    for (let i = 0;i < opts.runs; i += 1) {
+      const run = runOracle(path, oracle.run);
+      green.push({
+        exit_code: run.exitCode,
+        duration_ms: run.durationMs,
+        stdout_sha256: sha256(run.stdout),
+        stderr_sha256: sha256(run.stderr)
+      });
+      if (run.exitCode !== want) {
+        return fail2("green", run.exitCode, `the oracle exited ${run.exitCode} on the verified tree (run ${i + 1} of ${opts.runs}), expected ${want}`, Buffer.concat([run.stdout, run.stderr]), green);
       }
     }
-    return undone;
-  }
-}
-
-class InitApplyError extends Error {
-  rolledBack;
-  constructor(message, rolledBack) {
-    super(message);
-    this.rolledBack = rolledBack;
-    this.name = "InitApplyError";
-  }
-}
-function applyInit(plan, opts = {}) {
-  const rollback = new InitRollback;
-  const written = [];
-  const packageOps = [];
-  const fail2 = (message) => {
-    throw new InitApplyError(message, rollback.replay());
-  };
-  try {
-    for (const op of plan.files) {
-      if (op.kind === "unchanged" || op.contents === undefined)
-        continue;
-      const abs = join18(plan.root, op.path);
-      const dir = dirname7(abs);
-      if (!existsSync16(dir)) {
-        mkdirSync9(dir, { recursive: true });
-        rollback.createdDir(dir, op.path.split("/").slice(0, -1).join("/"));
-      }
-      if (op.kind === "modify") {
-        rollback.modifiedFile(abs, op.path, readFileSync16(abs, "utf8"));
-      } else {
-        rollback.createdFile(abs, op.path);
-      }
-      writeFileSync10(abs, op.contents);
-      written.push(op.path);
-    }
-  } catch (e) {
-    return fail2(`writing project files failed: ${e.message}`);
-  }
-  if (opts.runAdapters) {
-    try {
-      written.push(...opts.runAdapters(plan, (rel) => rollback.capture(join18(plan.root, rel), rel)));
-    } catch (e) {
-      return fail2(`adapter installation failed: ${e.message}`);
-    }
-  }
-  for (const op of plan.packageOps) {
-    const printable = op.command.join(" ");
-    try {
-      if (opts.runCommand) {
-        opts.runCommand(op.command);
-      } else {
-        const [bin, ...args] = op.command;
-        const r = spawnSync9(bin, args, { cwd: plan.root, encoding: "utf8" });
-        if (r.status !== 0) {
-          throw new Error((r.stderr ?? "").trim() || `exited ${r.status}`);
-        }
-      }
-      packageOps.push(printable);
-    } catch (e) {
-      return fail2(`\`${printable}\` failed: ${e.message}`);
-    }
-  }
-  return { written, packageOps };
-}
-
-// src/lib/initprompt.ts
-var isInteractive = () => Boolean(process.stdin.isTTY) && Boolean(process.stdout.isTTY);
-
-class InitCancelled extends Error {
-  constructor() {
-    super("cancelled");
-    this.name = "InitCancelled";
-  }
-}
-var describe = (key) => CONFIG_KEYS.find((k) => k.key === key)?.description ?? "";
-async function promptInitOptions(defaults, knownAdapters) {
-  const p3 = await Promise.resolve().then(() => (init_dist4(), exports_dist));
-  const cancelled = (v) => p3.isCancel(v);
-  const guard = (v) => {
-    if (cancelled(v))
-      throw new InitCancelled;
-    return v;
-  };
-  p3.intro("sddx init");
-  const runtimeScope = guard(await p3.select({
-    message: "How should this project invoke sddx?",
-    initialValue: defaults.runtimeScope ?? "global",
-    options: [
-      {
-        value: "global",
-        label: "Global",
-        hint: "an `sddx` on PATH — simplest"
-      },
-      {
-        value: "project",
-        label: "Project-pinned",
-        hint: "a lockfile-backed dependency — reproducible across the team"
-      }
-    ]
-  }));
-  const packageManager = runtimeScope === "project" ? guard(await p3.select({
-    message: "Which package manager runs the project-local binary?",
-    initialValue: defaults.packageManager ?? "npm",
-    options: [
-      { value: "npm", label: "npm" },
-      { value: "bun", label: "bun" }
-    ]
-  })) : defaults.packageManager ?? "npm";
-  const adapters = guard(await p3.multiselect({
-    message: "Which project adapters should sddx install?",
-    required: false,
-    initialValues: defaults.adapters ?? [],
-    options: knownAdapters.map((name) => ({
-      value: name,
-      label: name,
-      hint: name === "claude" ? "skills, agents, and the TDD-gate hooks" : ""
-    }))
-  }));
-  const interactionMode2 = guard(await p3.select({
-    message: "Interaction mode",
-    initialValue: defaults.interactionMode ?? "human",
-    options: [
-      {
-        value: "human",
-        label: "human",
-        hint: "one question round, then plan approval"
-      },
-      {
-        value: "auto",
-        label: "auto",
-        hint: "unattended up to the run branch; refuses at any autonomy bound"
-      }
-    ]
-  }));
-  p3.note(describe("interaction_mode"), "interaction_mode");
-  return { runtimeScope, packageManager, adapters, interactionMode: interactionMode2 };
-}
-async function confirmPlan(rendered) {
-  const p3 = await Promise.resolve().then(() => (init_dist4(), exports_dist));
-  p3.note(rendered, "planned changes");
-  const answer = await p3.confirm({ message: "Apply these changes?", initialValue: true });
-  if (p3.isCancel(answer))
-    return false;
-  return answer === true;
-}
-
-// src/lib/intake.ts
-var QUESTION_CAP = 3;
-function parseQuestionBatch(yamlText) {
-  let raw;
-  try {
-    raw = $parse(yamlText);
-  } catch (e) {
-    return { errors: [`invalid YAML: ${e.message}`] };
-  }
-  if (raw === null || raw === undefined)
-    return { questions: [], errors: [] };
-  if (typeof raw !== "object" || Array.isArray(raw)) {
-    return { errors: ["question batch must be a YAML mapping with a `questions` list"] };
-  }
-  const r2 = raw;
-  if (!("questions" in r2)) {
-    if (Object.keys(r2).length > 0) {
-      return { errors: ["question batch must be a YAML mapping with a `questions` list"] };
-    }
-    return { questions: [], errors: [] };
-  }
-  if (r2.questions === undefined || r2.questions === null)
-    return { questions: [], errors: [] };
-  if (!Array.isArray(r2.questions)) {
-    return { errors: ["questions: must be a list"] };
-  }
-  if (r2.questions.length > QUESTION_CAP) {
     return {
-      errors: [
-        `questions: ${r2.questions.length} returned, over the cap of ${QUESTION_CAP} per dispatch — ask the ${QUESTION_CAP} that can change scope, behavior, safety, an oracle, or the plan, and resolve the rest as assumptions`
-      ]
+      ok: true,
+      testFiles,
+      red: {
+        exit_code: red.exitCode,
+        stdout_sha256: sha256(red.stdout),
+        stderr_sha256: sha256(red.stderr)
+      },
+      green
     };
+  } finally {
+    try {
+      removeScratchWorktree(root, path);
+    } catch {}
   }
-  const errors2 = [];
-  const out = [];
-  const seen = new Set;
-  for (let i2 = 0;i2 < r2.questions.length; i2++) {
-    const e = r2.questions[i2];
-    if (typeof e !== "object" || e === null || Array.isArray(e)) {
-      errors2.push(`questions[${i2}]: must be a mapping with id, question and why`);
-      continue;
-    }
-    const q = e;
-    const field = (name) => {
-      const v = q[name];
-      if (typeof v !== "string" || v.trim() === "") {
-        errors2.push(`questions[${i2}]: missing "${name}"`);
-        return "";
-      }
-      return v.trim();
-    };
-    const id = field("id");
-    const question = field("question");
-    const why = field("why");
-    if (id !== "") {
-      if (seen.has(id))
-        errors2.push(`questions[${i2}]: duplicate question id "${id}"`);
-      else
-        seen.add(id);
-    }
-    const dflt = typeof q.default === "string" ? q.default.trim() : undefined;
-    out.push({ id, question, why, ...dflt ? { default: dflt } : {} });
-  }
-  if (errors2.length > 0)
-    return { errors: errors2 };
-  return { questions: out, errors: [] };
 }
+
+// src/lib/lifecycle.ts
+function goalHalt(root, goal) {
+  for (const id of goal.task_ids) {
+    const t = resolveTaskState(root, id);
+    if (!t || failurePolicyOf(t) !== "block")
+      continue;
+    for (const parentId of t.depends_on ?? []) {
+      const parent = resolveTaskState(root, parentId);
+      if (parent?.phase === "ABANDONED") {
+        return `task ${parentId} was abandoned and ${id} declares on_dependency_failure: block, so goal ${goal.id} is halted`;
+      }
+    }
+  }
+  return null;
+}
+function startTask(cwd, id) {
+  const root = resolveMainRepoRoot(cwd);
+  const home = taskHome(root, id);
+  if (!home)
+    throw new Error(`no such task: ${id}`);
+  const task = readTask(home, id);
+  assertV6(task);
+  if (task.phase !== "PLANNED") {
+    throw new Error(`task ${id} is ${task.phase}; task start requires PLANNED`);
+  }
+  const blocker = blockedOn(root, task);
+  if (blocker) {
+    const parent = resolveTaskState(root, blocker);
+    throw new Error(`cannot start ${id}: dependency ${blocker} is ${parent?.phase ?? "missing"}, not DONE`);
+  }
+  const goal = readGoal(root, task.goal_id);
+  const halt = goalHalt(root, goal);
+  if (halt)
+    throw new Error(`cannot start ${id}: ${halt}`);
+  const ws = startTaskWorkspace(root, task, goal.run_branch);
+  task.workspace = {
+    branch: `sddx/${id}`,
+    base_sha: ws.baseSha,
+    path: join19(".sddx-worktrees", id)
+  };
+  task.profile = profile(root);
+  if (task.profile === "strict")
+    task.strict = { runs: [] };
+  transition(task, "IN_PROGRESS");
+  writeTask(ws.path, task);
+  if (home === root)
+    rmSync6(taskPath(root, id), { force: true });
+  return { task, path: ws.path, baseSha: ws.baseSha, reused: ws.reused };
+}
+function readyTasks(cwd, goalId) {
+  const root = resolveMainRepoRoot(cwd);
+  const goal = readGoal(root, goalId);
+  if (goalHalt(root, goal))
+    return [];
+  return goal.task_ids.filter((id) => {
+    const t = resolveTaskState(root, id);
+    return t?.phase === "PLANNED" && blockedOn(root, t) === null;
+  });
+}
+function persistTerminal(root, home, task) {
+  writeTask(root, task);
+  if (home !== root)
+    rmSync6(taskPath(home, task.id), { force: true });
+}
+function cascadeSkips(root, goal, failedId) {
+  const skipped = [];
+  const queue = [failedId];
+  while (queue.length > 0) {
+    const parentId = queue.shift();
+    for (const id of goal.task_ids) {
+      const home = taskHome(root, id);
+      if (!home)
+        continue;
+      const t = readTask(home, id);
+      if (t.phase !== "PLANNED" || !(t.depends_on ?? []).includes(parentId))
+        continue;
+      if (failurePolicyOf(t) !== "skip")
+        continue;
+      t.abandon_reason = "skipped";
+      t.skipped_on = parentId;
+      transition(t, "ABANDONED", `skipped: dependency ${parentId} was abandoned`);
+      persistTerminal(root, home, t);
+      skipped.push(id);
+      queue.push(id);
+    }
+  }
+  return skipped;
+}
+function abandonTask(cwd, id, reason) {
+  const root = resolveMainRepoRoot(cwd);
+  const home = taskHome(root, id);
+  if (!home)
+    throw new Error(`no such task: ${id}`);
+  const task = readTask(home, id);
+  const outcome = abandonOrRetry(task, reason);
+  clearProofRecord(root, id);
+  if (outcome.retried) {
+    const hadWorktree = task.workspace !== undefined;
+    releaseForRetry(root, task);
+    if (hadWorktree && task.workspace === undefined) {
+      writeTask(root, task);
+    } else {
+      writeTask(home, task);
+    }
+    return { ...outcome, task, skipped: [] };
+  }
+  persistTerminal(root, home, task);
+  const skipped = cascadeSkips(root, readGoal(root, task.goal_id), id);
+  return { ...outcome, task, skipped };
+}
+
+// src/lib/migrate.ts
+import { spawnSync as spawnSync11 } from "node:child_process";
+import {
+  existsSync as existsSync17,
+  mkdirSync as mkdirSync11,
+  readdirSync as readdirSync9,
+  readFileSync as readFileSync16,
+  renameSync,
+  rmSync as rmSync7,
+  writeFileSync as writeFileSync12
+} from "node:fs";
+import { dirname as dirname6, join as join20 } from "node:path";
+var LEGACY_DIR = ".sddx/legacy";
+var TERMINAL = new Set(["DONE", "ABANDONED"]);
+var REMOVED_KEYS = ["runtime_scope", "package_manager", "adapters"];
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync16(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function v5TasksIn(root, dir, inWorktree) {
+  const abs = join20(root, dir);
+  if (!existsSync17(abs))
+    return [];
+  const out = [];
+  for (const f of readdirSync9(abs).filter((n) => n.endsWith(".json"))) {
+    const raw = readJson(join20(abs, f));
+    if (raw === null || isV6Task(raw))
+      continue;
+    const phase = String(raw.phase ?? "unknown");
+    out.push({ id: f.slice(0, -".json".length), phase, path: `${dir}/${f}`, inWorktree });
+  }
+  return out;
+}
+function v5Goals(root) {
+  const r = spawnSync11("git", ["for-each-ref", "--format=%(refname)", "refs/sddx/goals/"], {
+    cwd: root,
+    encoding: "utf8"
+  });
+  const goals = [];
+  for (const ref of (r.stdout ?? "").split(`
+`).map((s) => s.trim())) {
+    if (!ref.startsWith("refs/sddx/goals/"))
+      continue;
+    const blob = spawnSync11("git", ["cat-file", "-p", ref], { cwd: root, encoding: "utf8" });
+    try {
+      const g = JSON.parse(blob.stdout ?? "");
+      if (g.spec_path === undefined)
+        goals.push({ id: g.id, task_ids: g.task_ids ?? [] });
+    } catch {}
+  }
+  return goals;
+}
+function v5Phase(root, id) {
+  for (const p of [
+    join20(root, ".sddx-worktrees", id, ".sddx", "tasks", `${id}.json`),
+    join20(root, ".sddx", "tasks", `${id}.json`)
+  ]) {
+    const raw = readJson(p);
+    if (raw !== null)
+      return String(raw.phase);
+  }
+  const r = spawnSync11("git", ["show", `sddx/${id}:.sddx/tasks/${id}.json`], {
+    cwd: root,
+    encoding: "utf8"
+  });
+  if (r.status !== 0)
+    return null;
+  try {
+    return String(JSON.parse(r.stdout).phase);
+  } catch {
+    return null;
+  }
+}
+function detectV5State(root) {
+  const cfg = readJson(configPath(root));
+  const configVersion = cfg && typeof cfg.schema_version === "string" && cfg.schema_version.startsWith("1.") ? cfg.schema_version : null;
+  const tasks = v5TasksIn(root, ".sddx/tasks", false);
+  const wts = join20(root, ".sddx-worktrees");
+  if (existsSync17(wts)) {
+    for (const id of readdirSync9(wts)) {
+      tasks.push(...v5TasksIn(root, `.sddx-worktrees/${id}/.sddx/tasks`, true).filter((t) => t.id === id));
+    }
+  }
+  const specDir = join20(root, ".sddx", "specs");
+  const specYamls = existsSync17(specDir) ? readdirSync9(specDir).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml")).map((f) => `.sddx/specs/${f}`) : [];
+  const dirsToArchive = ["drafts", "context", "goals"].map((d) => `.sddx/${d}`).filter((d) => existsSync17(join20(root, d)) && readdirSync9(join20(root, d)).some((f) => f !== ".gitkeep"));
+  const goalsInFlight = v5Goals(root).map((g) => ({
+    id: g.id,
+    outstanding: g.task_ids.filter((id) => !TERMINAL.has(v5Phase(root, id) ?? "missing"))
+  })).filter((g) => g.outstanding.length > 0);
+  const manifest = readV5Manifest(root);
+  const claudeOwned = [];
+  const claudeModified = [];
+  for (const path of Object.keys(V5_OWNED)) {
+    const o = v5Ownership(root, path, manifest);
+    if (o === "owned")
+      claudeOwned.push(path);
+    else if (o === "modified")
+      claudeModified.push(path);
+  }
+  let settingsHooks = 0;
+  if (existsSync17(join20(root, V5_SETTINGS_PATH))) {
+    settingsHooks = unmergeV5Settings(readFileSync16(join20(root, V5_SETTINGS_PATH), "utf8")).removed;
+  }
+  const pkg = readJson(join20(root, "package.json"));
+  const packageDependency = Boolean(pkg && ["dependencies", "devDependencies"].some((k) => pkg[k]?.["@glapsfun/sddx"] !== undefined));
+  return {
+    configVersion,
+    tasks,
+    specYamls,
+    dirsToArchive,
+    goalsInFlight,
+    claudeOwned,
+    claudeModified,
+    settingsHooks,
+    declaration: existsSync17(join20(root, V5_DECLARATION_PATH)),
+    packageDependency
+  };
+}
+function v5Blockers(s) {
+  const out = [];
+  if (s.configVersion)
+    out.push(`.sddx/config.json has schema_version ${s.configVersion}`);
+  for (const t of s.tasks) {
+    if (!t.inWorktree || !TERMINAL.has(t.phase))
+      out.push(`v5 task state ${t.path}`);
+  }
+  return out;
+}
+function inFlight(s) {
+  const out = s.tasks.filter((t) => !TERMINAL.has(t.phase)).map((t) => `task ${t.id} is ${t.phase} (${t.path})`);
+  for (const g of s.goalsInFlight) {
+    out.push(`goal ${g.id} has unfinished tasks: ${g.outstanding.join(", ")}`);
+  }
+  return [...new Set(out)];
+}
+function planMigration(s) {
+  const actions = [];
+  for (const p of s.claudeOwned) {
+    actions.push({ kind: "remove", path: p, detail: "generated by sddx 5, unmodified" });
+  }
+  for (const p of s.claudeModified) {
+    actions.push({
+      kind: "keep",
+      path: p,
+      detail: "generated by sddx 5 but edited since; remove it by hand"
+    });
+  }
+  if (s.settingsHooks > 0) {
+    actions.push({
+      kind: "rewrite",
+      path: V5_SETTINGS_PATH,
+      detail: `remove ${s.settingsHooks} sddx hook entr${s.settingsHooks === 1 ? "y" : "ies"}, keep everything else`
+    });
+  }
+  if (s.declaration) {
+    actions.push({
+      kind: "remove",
+      path: V5_DECLARATION_PATH,
+      detail: "sddx 5 adapter declaration"
+    });
+  }
+  for (const d of s.dirsToArchive) {
+    actions.push({ kind: "move", path: d, detail: `to ${LEGACY_DIR}/${d.slice(".sddx/".length)}` });
+  }
+  for (const t of s.tasks.filter((x) => !x.inWorktree)) {
+    actions.push({ kind: "move", path: t.path, detail: `to ${LEGACY_DIR}/tasks/` });
+  }
+  for (const p of s.specYamls) {
+    actions.push({ kind: "move", path: p, detail: `to ${LEGACY_DIR}/specs/` });
+  }
+  if (s.configVersion) {
+    actions.push({
+      kind: "rewrite",
+      path: ".sddx/config.json",
+      detail: `schema_version ${CONFIG_SCHEMA_VERSION}, drop ${REMOVED_KEYS.join(", ")}`
+    });
+  }
+  if (s.packageDependency) {
+    actions.push({
+      kind: "manual",
+      path: "package.json",
+      detail: "lists @glapsfun/sddx; remove it or upgrade it to 6 yourself (migrate never edits package manifests)"
+    });
+  }
+  return actions;
+}
+function move(root, from, to) {
+  const dest = join20(root, to);
+  mkdirSync11(dirname6(dest), { recursive: true });
+  renameSync(join20(root, from), dest);
+}
+function applyMigration(root, s) {
+  for (const p of s.claudeOwned)
+    rmSync7(join20(root, p), { force: true });
+  for (const p of s.claudeOwned) {
+    const dir = dirname6(join20(root, p));
+    if (existsSync17(dir) && readdirSync9(dir).length === 0)
+      rmSync7(dir, { recursive: true });
+  }
+  if (s.settingsHooks > 0) {
+    const path = join20(root, V5_SETTINGS_PATH);
+    writeFileSync12(path, unmergeV5Settings(readFileSync16(path, "utf8")).text);
+  }
+  if (s.declaration)
+    rmSync7(join20(root, V5_DECLARATION_PATH), { force: true });
+  for (const d of s.dirsToArchive)
+    move(root, d, `${LEGACY_DIR}/${d.slice(".sddx/".length)}`);
+  for (const t of s.tasks.filter((x) => !x.inWorktree)) {
+    move(root, t.path, `${LEGACY_DIR}/tasks/${t.id}.json`);
+  }
+  for (const p of s.specYamls)
+    move(root, p, `${LEGACY_DIR}/specs/${p.slice(".sddx/specs/".length)}`);
+  if (s.configVersion) {
+    const cfg = readJson(configPath(root));
+    const next = { schema_version: CONFIG_SCHEMA_VERSION };
+    for (const [k, v] of Object.entries(cfg)) {
+      if (k === "schema_version" || REMOVED_KEYS.includes(k))
+        continue;
+      next[k] = v;
+    }
+    writeFileSync12(configPath(root), `${JSON.stringify(next, null, 2)}
+`);
+  }
+}
+var nothingToDo = (actions) => actions.every((a) => a.kind === "keep" || a.kind === "manual");
 
 // src/lib/prhost.ts
-import { spawnSync as spawnSync10 } from "node:child_process";
+import { spawnSync as spawnSync12 } from "node:child_process";
 function run(cli, args, cwd) {
-  return spawnSync10(cli, args, { cwd, encoding: "utf8", env: process.env });
+  return spawnSync12(cli, args, { cwd, encoding: "utf8", env: process.env });
 }
 var ghBackend = {
   name: "gh",
   identity(cwd) {
-    const r2 = run("gh", ["api", "user", "--jq", ".login"], cwd);
-    return r2.status === 0 ? r2.stdout.trim() : null;
+    const r = run("gh", ["api", "user", "--jq", ".login"], cwd);
+    return r.status === 0 ? r.stdout.trim() : null;
   },
   authStatus(cwd) {
-    const r2 = run("gh", ["auth", "status"], cwd);
-    if (r2.error) {
+    const r = run("gh", ["auth", "status"], cwd);
+    if (r.error) {
       return { ok: false, message: "gh CLI not found — install it from https://cli.github.com" };
     }
-    return { ok: r2.status === 0, message: ((r2.stderr ?? "") + (r2.stdout ?? "")).trim() };
+    return { ok: r.status === 0, message: ((r.stderr ?? "") + (r.stdout ?? "")).trim() };
   },
   openPr(cwd, { branch, title, body }) {
-    const r2 = run("gh", ["pr", "create", "--head", branch, "--title", title, "--body", body], cwd);
-    if (r2.status !== 0) {
-      throw new Error(`gh pr create failed: ${(r2.stderr ?? "").trim()}`);
+    const r = run("gh", ["pr", "create", "--head", branch, "--title", title, "--body", body], cwd);
+    if (r.status !== 0) {
+      throw new Error(`gh pr create failed: ${(r.stderr ?? "").trim()}`);
     }
-    return r2.stdout.trim();
+    return r.stdout.trim();
   },
   findPr(cwd, branch) {
-    const r2 = run("gh", ["pr", "view", branch, "--json", "url"], cwd);
-    if (r2.status !== 0)
+    const r = run("gh", ["pr", "view", branch, "--json", "url"], cwd);
+    if (r.status !== 0)
       return null;
     try {
-      return { url: JSON.parse(r2.stdout).url };
+      return { url: JSON.parse(r.stdout).url };
     } catch {
       return null;
     }
   },
   mergePr(cwd, branch) {
-    const r2 = run("gh", ["pr", "merge", branch, "--merge"], cwd);
-    if (r2.status !== 0) {
-      throw new Error(`gh pr merge failed: ${(r2.stderr ?? "").trim()}`);
+    const r = run("gh", ["pr", "merge", branch, "--merge"], cwd);
+    if (r.status !== 0) {
+      throw new Error(`gh pr merge failed: ${(r.stderr ?? "").trim()}`);
     }
-    return ((r2.stdout ?? "") + (r2.stderr ?? "")).trim();
+    return ((r.stdout ?? "") + (r.stderr ?? "")).trim();
   }
 };
 var glabBackend = {
   name: "glab",
   identity(cwd) {
-    const r2 = run("glab", ["api", "user", "--jq", ".username"], cwd);
-    return r2.status === 0 ? r2.stdout.trim() : null;
+    const r = run("glab", ["api", "user", "--jq", ".username"], cwd);
+    return r.status === 0 ? r.stdout.trim() : null;
   },
   authStatus(cwd) {
-    const r2 = run("glab", ["auth", "status"], cwd);
-    if (r2.error) {
+    const r = run("glab", ["auth", "status"], cwd);
+    if (r.error) {
       return {
         ok: false,
         message: "glab CLI not found — install it from https://gitlab.com/gitlab-org/cli"
       };
     }
-    return { ok: r2.status === 0, message: ((r2.stderr ?? "") + (r2.stdout ?? "")).trim() };
+    return { ok: r.status === 0, message: ((r.stderr ?? "") + (r.stdout ?? "")).trim() };
   },
   openPr(cwd, { branch, title, body }) {
-    const r2 = run("glab", ["mr", "create", "--source-branch", branch, "--title", title, "--description", body, "--yes"], cwd);
-    if (r2.status !== 0) {
-      throw new Error(`glab mr create failed: ${(r2.stderr ?? "").trim()}`);
+    const r = run("glab", ["mr", "create", "--source-branch", branch, "--title", title, "--description", body, "--yes"], cwd);
+    if (r.status !== 0) {
+      throw new Error(`glab mr create failed: ${(r.stderr ?? "").trim()}`);
     }
-    return r2.stdout.trim();
+    return r.stdout.trim();
   },
   findPr(cwd, branch) {
-    const r2 = run("glab", ["mr", "view", branch], cwd);
-    if (r2.status !== 0)
+    const r = run("glab", ["mr", "view", branch], cwd);
+    if (r.status !== 0)
       return null;
-    const m3 = /(https?:\/\/\S+)/.exec(r2.stdout);
-    return { url: m3 ? m3[1] : r2.stdout.trim() };
+    const m = /(https?:\/\/\S+)/.exec(r.stdout);
+    return { url: m ? m[1] : r.stdout.trim() };
   },
   mergePr(cwd, branch) {
-    const r2 = run("glab", ["mr", "merge", branch, "--yes"], cwd);
-    if (r2.status !== 0) {
-      throw new Error(`glab mr merge failed: ${(r2.stderr ?? "").trim()}`);
+    const r = run("glab", ["mr", "merge", branch, "--yes"], cwd);
+    if (r.status !== 0) {
+      throw new Error(`glab mr merge failed: ${(r.stderr ?? "").trim()}`);
     }
-    return ((r2.stdout ?? "") + (r2.stderr ?? "")).trim();
+    return ((r.stdout ?? "") + (r.stderr ?? "")).trim();
   }
 };
 var BACKENDS = { gh: ghBackend, glab: glabBackend };
@@ -14215,14 +11375,14 @@ function renderPrBody(cwd, goal) {
     "| Task | Oracle | Exit | Receipt sha256 |",
     "| --- | --- | --- | --- |"
   ];
-  for (const taskId2 of merged) {
-    const receipt = resolveReceipt(cwd, taskId2);
-    const raw = resolveReceiptRaw(cwd, taskId2);
+  for (const taskId of merged) {
+    const receipt = resolveReceipt(cwd, taskId);
+    const raw = resolveReceiptRaw(cwd, taskId);
     if (!receipt || !raw) {
-      throw new Error(`receipt for merged task ${taskId2} is missing — the run branch is inconsistent`);
+      throw new Error(`receipt for merged task ${taskId} is missing — the run branch is inconsistent`);
     }
     const exitCode = receipt.runs?.at(-1)?.exit_code ?? receipt.exit_code ?? "?";
-    lines.push(`| \`${taskId2}\` | \`${receipt.oracle.run}\` | ${exitCode} | \`${sha256(raw)}\` |`);
+    lines.push(`| \`${taskId}\` | \`${receipt.oracle.run}\` | ${exitCode} | \`${sha256(raw)}\` |`);
   }
   lines.push("", "_Generated by `sddx pr create` from verified receipts — not hand-written._");
   return lines.join(`
@@ -14253,33 +11413,33 @@ function createGoalPr(cwd, id, opts = {}) {
 }
 
 // src/lib/runbranch.ts
-import { spawnSync as spawnSync11 } from "node:child_process";
-import { existsSync as existsSync18, mkdirSync as mkdirSync10, rmdirSync as rmdirSync2, statSync as statSync4 } from "node:fs";
-import { isAbsolute as isAbsolute4, join as join20 } from "node:path";
+import { spawnSync as spawnSync13 } from "node:child_process";
+import { existsSync as existsSync18, mkdirSync as mkdirSync12, rmdirSync as rmdirSync2, statSync as statSync3 } from "node:fs";
+import { isAbsolute as isAbsolute4, join as join21 } from "node:path";
 var LOCK_STALE_MS2 = 5 * 60000;
 var LOCK_TIMEOUT_MS = 30000;
 function gitCommonDir2(cwd) {
   const dir = git(cwd, "rev-parse", "--git-common-dir");
-  return isAbsolute4(dir) ? dir : join20(cwd, dir);
+  return isAbsolute4(dir) ? dir : join21(cwd, dir);
 }
-function withGoalLock(root, goalId2, fn) {
-  const lockPath = join20(gitCommonDir2(root), `sddx-runbranch-${goalId2}.lock`);
+function withGoalLock(root, goalId, fn) {
+  const lockPath = join21(gitCommonDir2(root), `sddx-runbranch-${goalId}.lock`);
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   for (;; ) {
     try {
-      mkdirSync10(lockPath);
+      mkdirSync12(lockPath);
       break;
     } catch {
       if (existsSync18(lockPath)) {
         try {
-          if (Date.now() - statSync4(lockPath).mtimeMs > LOCK_STALE_MS2)
+          if (Date.now() - statSync3(lockPath).mtimeMs > LOCK_STALE_MS2)
             rmdirSync2(lockPath);
         } catch {}
       }
       if (Date.now() > deadline) {
-        throw new Error(`timed out waiting for run-branch integration lock on goal ${goalId2}`);
+        throw new Error(`timed out waiting for run-branch integration lock on goal ${goalId}`);
       }
-      spawnSync11("sleep", ["0.1"]);
+      spawnSync13("sleep", ["0.1"]);
     }
   }
   try {
@@ -14296,18 +11456,36 @@ function integrateTaskIntoRunBranch(taskCwd, id) {
   if (!goal)
     return { result: "none", reason: "no-goal" };
   const task = readTask(taskCwd, id);
-  const branch = task.workspace.branch;
+  const branch = task.workspace?.branch;
   if (!branch)
     return { result: "none", reason: "no-branch", runBranch: goal.run_branch };
   const outcome = withGoalLock(root, goal.id, () => {
-    const tmpPath = join20(worktreesDir(root), `integrate-${id}`);
+    const tmpPath = join21(worktreesDir(root), `integrate-${id}`);
+    const holder = checkedOutAt(root, goal.run_branch);
+    if (holder && isRunBranchScratch(holder))
+      removeScratchWorktree(root, holder);
+    if (existsSync18(tmpPath))
+      removeScratchWorktree(root, tmpPath);
     git(root, "worktree", "add", "-q", tmpPath, goal.run_branch);
     let result;
     try {
-      const r2 = spawnSync11("git", ["merge", "--no-ff", "-m", `sddx: merge ${id} into ${goal.run_branch}`, branch], { cwd: tmpPath, encoding: "utf8" });
-      if (r2.status !== 0) {
-        spawnSync11("git", ["merge", "--abort"], { cwd: tmpPath });
-        result = { result: "conflict", runBranch: goal.run_branch };
+      const r = spawnSync13("git", [
+        "merge",
+        "--no-ff",
+        "--no-verify",
+        "-m",
+        `sddx: merge ${id} into ${goal.run_branch}`,
+        branch
+      ], { cwd: tmpPath, encoding: "utf8" });
+      if (r.status !== 0) {
+        const unmerged = spawnSync13("git", ["diff", "--name-only", "--diff-filter=U"], {
+          cwd: tmpPath,
+          encoding: "utf8"
+        });
+        const conflicts = (unmerged.stdout ?? "").split(`
+`).filter((l) => l.trim() !== "");
+        spawnSync13("git", ["merge", "--abort"], { cwd: tmpPath });
+        result = { result: "conflict", runBranch: goal.run_branch, conflicts };
       } else {
         const mergeSha = git(tmpPath, "rev-parse", "HEAD");
         result = { result: "merged", runBranch: goal.run_branch, mergeCommit: mergeSha };
@@ -14331,19 +11509,25 @@ function integrateTaskIntoRunBranch(taskCwd, id) {
     merged_at: new Date().toISOString(),
     result: outcome.result === "merged" ? "merged" : "conflict"
   };
-  writeTask(taskCwd, task);
-  stagePath(taskCwd, join20(".sddx", "tasks", `${id}.json`));
-  commit(taskCwd, `sddx(${id}): record integration (${outcome.result})`);
+  task.updated_at = new Date().toISOString();
+  commitOnBranch({
+    worktree: taskCwd,
+    branch,
+    baseTree: git(taskCwd, "rev-parse", "HEAD^{tree}"),
+    files: { [join21(".sddx", "tasks", `${id}.json`)]: `${JSON.stringify(task, null, 2)}
+` },
+    message: `sddx(${id}): record integration (${outcome.result})`
+  });
   return outcome;
 }
-function revertTaskMerge(cwd, goalId2, id) {
-  return withGoalLock(cwd, goalId2, () => {
-    const goal = readGoal(cwd, goalId2);
+function revertTaskMerge(cwd, goalId, id) {
+  return withGoalLock(cwd, goalId, () => {
+    const goal = readGoal(cwd, goalId);
     const latest = [...goal.merges].reverse().find((e) => e.task_id === id);
     if (latest?.result !== "merged" || !latest.commit_sha) {
-      throw new Error(`task ${id} has no current merge in goal ${goalId2} to revert`);
+      throw new Error(`task ${id} has no current merge in goal ${goalId} to revert`);
     }
-    const tmpPath = join20(worktreesDir(cwd), `revert-${id}`);
+    const tmpPath = join21(worktreesDir(cwd), `revert-${id}`);
     git(cwd, "worktree", "add", "-q", tmpPath, goal.run_branch);
     let revertSha;
     try {
@@ -14374,15 +11558,15 @@ var CATEGORY_LABEL = {
 };
 function renderMenu(visible) {
   const lines = ["Next Actions", ""];
-  let n3 = 0;
+  let n = 0;
   for (const cat of CATEGORY_ORDER) {
-    const inCat = visible.filter((a2) => a2.category === cat);
+    const inCat = visible.filter((a) => a.category === cat);
     if (inCat.length === 0)
       continue;
     lines.push(CATEGORY_LABEL[cat]);
-    for (const a2 of inCat) {
-      n3++;
-      lines.push(`${n3}. ${a2.label}`);
+    for (const a of inCat) {
+      n++;
+      lines.push(`${n}. ${a.label}`);
     }
     lines.push("");
   }
@@ -14390,8 +11574,8 @@ function renderMenu(visible) {
   return lines.join(`
 `).trimEnd();
 }
-function normalize(text2) {
-  return text2.toLowerCase().replace(/[^\w\s]/g, "").replace(/\s+/g, " ").trim();
+function normalize(text) {
+  return text.toLowerCase().replace(/[^\w\s]/g, "").replace(/\s+/g, " ").trim();
 }
 function resolveSelection(input, visible) {
   const trimmed = input.trim();
@@ -14400,15 +11584,15 @@ function resolveSelection(input, visible) {
     return visible[asIndex - 1];
   }
   const normalized = normalize(trimmed);
-  const matches = visible.filter((a2) => normalize(a2.label) === normalized || (a2.aliases ?? []).some((alias) => normalize(alias) === normalized));
+  const matches = visible.filter((a) => normalize(a.label) === normalized || (a.aliases ?? []).some((alias) => normalize(alias) === normalized));
   if (matches.length === 1)
     return matches[0];
   if (matches.length > 1)
     return { error: "ambiguous" };
   return { error: "not-found" };
 }
-function detectRunState(cwd, goalId2) {
-  const goal = readGoal(cwd, goalId2);
+function detectRunState(cwd, goalId) {
+  const goal = readGoal(cwd, goalId);
   const merged = currentlyMergedTaskIds(goal);
   const failed = goal.task_ids.filter((id) => {
     if (merged.includes(id))
@@ -14441,33 +11625,33 @@ function runActions(cwd, state) {
       }
     }
   ];
-  for (const taskId2 of state.failedTaskIds) {
+  for (const taskId of state.failedTaskIds) {
     actions.push({
-      id: `retry-${taskId2}`,
-      label: `Retry ${taskId2}`,
+      id: `retry-${taskId}`,
+      label: `Retry ${taskId}`,
       category: "development",
       validIn: [],
-      aliases: [`retry ${taskId2}`],
+      aliases: [`retry ${taskId}`],
       implemented: true,
       run() {
         return {
           ok: true,
-          message: `${taskId2} is ABANDONED (retry budget exhausted) — re-plan and dispatch a fresh ` + "attempt for it; the rest of the run is unaffected"
+          message: `${taskId} is ABANDONED (retry budget exhausted) — re-plan and dispatch a fresh ` + "attempt for it; the rest of the run is unaffected"
         };
       }
     });
   }
-  for (const taskId2 of state.mergedTaskIds) {
+  for (const taskId of state.mergedTaskIds) {
     actions.push({
-      id: `revert-${taskId2}`,
-      label: `Revert ${taskId2}`,
+      id: `revert-${taskId}`,
+      label: `Revert ${taskId}`,
       category: "git",
       validIn: [],
-      aliases: [`revert ${taskId2}`],
+      aliases: [`revert ${taskId}`],
       implemented: true,
       run(cwd2) {
-        const sha = revertTaskMerge(cwd2, state.goalId, taskId2);
-        return { ok: true, message: `reverted ${taskId2}'s merge (${sha})` };
+        const sha = revertTaskMerge(cwd2, state.goalId, taskId);
+        return { ok: true, message: `reverted ${taskId}'s merge (${sha})` };
       }
     });
   }
@@ -14541,8 +11725,8 @@ function runActions(cwd, state) {
 }
 
 // src/lib/output.ts
-import { existsSync as existsSync19, writeFileSync as writeFileSync11 } from "node:fs";
-import { join as join21 } from "node:path";
+import { existsSync as existsSync19, writeFileSync as writeFileSync13 } from "node:fs";
+import { join as join22 } from "node:path";
 
 // src/lib/ansi.ts
 var CODES = {
@@ -14559,13 +11743,13 @@ function colorEnabled(opts = {}) {
     return false;
   if (process.env.NO_COLOR !== undefined)
     return false;
-  const stream2 = opts.stream ?? process.stdout;
-  return Boolean(stream2.isTTY);
+  const stream = opts.stream ?? process.stdout;
+  return Boolean(stream.isTTY);
 }
-function paint(text2, color, enabled) {
+function paint(text, color, enabled) {
   if (!enabled)
-    return text2;
-  return `${CODES[color]}${text2}${CODES.reset}`;
+    return text;
+  return `${CODES[color]}${text}${CODES.reset}`;
 }
 
 // src/lib/output.ts
@@ -14593,33 +11777,33 @@ function formatLine(msg, colorOn) {
     return msg.text;
   return paint(`${MARKERS[msg.kind]} ${msg.text}`, COLORS[msg.kind], true);
 }
-function printLine(text2) {
-  console.log(text2);
+function printLine(text) {
+  console.log(text);
 }
-function printError(text2) {
-  console.error(text2);
+function printError(text) {
+  console.error(text);
 }
 function parseOutputFlag(args) {
   const rest = [];
   let format = "terminal";
   let noColor = false;
-  for (let i2 = 0;i2 < args.length; i2++) {
-    const a2 = args[i2];
-    if (a2 === "--output") {
-      const v = args[i2 + 1];
+  for (let i = 0;i < args.length; i++) {
+    const a = args[i];
+    if (a === "--output") {
+      const v = args[i + 1];
       if (v === undefined || !OUTPUT_FORMATS.includes(v)) {
         printError(`invalid --output value: ${v ?? "(missing)"} — expected one of ${OUTPUT_FORMATS.join("|")}`);
         process.exit(2);
       }
       format = v;
-      i2++;
+      i++;
       continue;
     }
-    if (a2 === "--no-color") {
+    if (a === "--no-color") {
       noColor = true;
       continue;
     }
-    rest.push(a2);
+    rest.push(a);
   }
   return { format, noColor, rest };
 }
@@ -14643,20 +11827,21 @@ function renderMarkdown(result) {
   lines.push("");
   lines.push("## Execution Summary");
   lines.push("");
-  const summary = result.messages.filter((m3) => m3.kind === "start" || m3.kind === "success").map((m3) => `- ${m3.text}`);
+  const summary = result.messages.filter((m) => m.kind === "start" || m.kind === "success").map((m) => `- ${m.text}`);
   lines.push(summary.length > 0 ? summary.join(`
 `) : "_no summary available_");
   lines.push("");
   const data = result.data;
-  const tasks2 = data && Array.isArray(data.tasks) ? data.tasks : null;
-  if (tasks2) {
+  const tasks = data && Array.isArray(data.tasks) ? data.tasks : null;
+  if (tasks) {
     lines.push("## Task Results");
     lines.push("");
-    lines.push("| Task | Branch | Phase | Receipt |");
+    lines.push("| Task | Goal | State | Receipt |");
     lines.push("| --- | --- | --- | --- |");
-    for (const raw of tasks2) {
-      const t2 = raw;
-      lines.push(`| ${t2.id ?? ""} | ${t2.branch ?? ""} | ${t2.phase ?? ""} | ${t2.receipt ?? "—"} |`);
+    for (const raw of tasks) {
+      const t = raw;
+      const state = t.label ?? t.state ?? t.phase ?? "";
+      lines.push(`| ${t.id ?? ""} | ${t.goal ?? ""} | ${state} | ${t.receipt ?? "-"} |`);
     }
     lines.push("");
   }
@@ -14673,8 +11858,8 @@ function renderMarkdown(result) {
   if (nextActions) {
     lines.push("## Next Actions");
     lines.push("");
-    for (const a2 of nextActions)
-      lines.push(`- ${a2}`);
+    for (const a of nextActions)
+      lines.push(`- ${a}`);
     lines.push("");
   }
   lines.push("<details><summary>Raw data (JSON)</summary>");
@@ -14688,11 +11873,11 @@ function renderMarkdown(result) {
 `);
 }
 function writeTerminalFinal(result, colorFor) {
-  for (const m3 of result.messages) {
-    if (m3.kind === "start" || m3.kind === "progress")
+  for (const m of result.messages) {
+    if (m.kind === "start" || m.kind === "progress")
       continue;
-    const line = formatLine(m3, colorFor(m3.stream));
-    if (m3.stream === "stderr")
+    const line = formatLine(m, colorFor(m.stream));
+    if (m.stream === "stderr")
       process.stderr.write(`${line}
 `);
     else
@@ -14701,11 +11886,11 @@ function writeTerminalFinal(result, colorFor) {
   }
 }
 function uniquePath(dir, baseName, ext) {
-  let candidate = join21(dir, `${baseName}.${ext}`);
-  let n3 = 2;
+  let candidate = join22(dir, `${baseName}.${ext}`);
+  let n = 2;
   while (existsSync19(candidate)) {
-    candidate = join21(dir, `${baseName}-${n3}.${ext}`);
-    n3++;
+    candidate = join22(dir, `${baseName}-${n}.${ext}`);
+    n++;
   }
   return candidate;
 }
@@ -14728,33 +11913,33 @@ class Reporter {
     this.pluginVersion = opts.pluginVersion ?? "unknown";
     this.harness = opts.harness ?? "claude-code";
   }
-  colorFor(stream2) {
-    return stream2 === "stdout" ? this.stdoutColorOn : this.stderrColorOn;
+  colorFor(stream) {
+    return stream === "stdout" ? this.stdoutColorOn : this.stderrColorOn;
   }
-  record(kind, text2, data, stream2) {
-    const msg = { kind, text: text2, data, stream: stream2 ?? defaultStreamFor(kind) };
+  record(kind, text, data, stream) {
+    const msg = { kind, text, data, stream: stream ?? defaultStreamFor(kind) };
     this.messages.push(msg);
     if (this.format === "terminal" && (kind === "start" || kind === "progress")) {
       process.stderr.write(`${formatLine(msg, this.colorFor(msg.stream))}
 `);
     }
   }
-  start(text2) {
-    this.record("start", text2);
+  start(text) {
+    this.record("start", text);
   }
-  progress(text2, data) {
-    this.record("progress", text2, data);
+  progress(text, data) {
+    this.record("progress", text, data);
   }
-  success(text2, data) {
-    this.record("success", text2, data);
+  success(text, data) {
+    this.record("success", text, data);
   }
-  warn(text2) {
-    this.warnings.push(text2);
-    this.record("warning", text2);
+  warn(text) {
+    this.warnings.push(text);
+    this.record("warning", text);
   }
-  error(text2, opts = {}) {
-    this.errors.push(text2);
-    this.record("error", text2, undefined, opts.stream);
+  error(text, opts = {}) {
+    this.errors.push(text);
+    this.record("error", text, undefined, opts.stream);
   }
   finish(data, opts = {}) {
     const status = opts.status ?? (this.errors.length > 0 ? "error" : this.warnings.length > 0 ? "warning" : "success");
@@ -14771,7 +11956,7 @@ class Reporter {
   }
   write(result) {
     if (this.format === "terminal") {
-      writeTerminalFinal(result, (stream2) => this.colorFor(stream2));
+      writeTerminalFinal(result, (stream) => this.colorFor(stream));
       return;
     }
     if (this.format === "json") {
@@ -14784,13 +11969,13 @@ class Reporter {
 `);
       return;
     }
-    writeTerminalFinal(result, (stream2) => this.colorFor(stream2));
+    writeTerminalFinal(result, (stream) => this.colorFor(stream));
     const baseName = `sddx-${result.command.replace(/\s+/g, "-")}`;
     const jsonPath = uniquePath(process.cwd(), baseName, "json");
     const mdPath = uniquePath(process.cwd(), baseName, "md");
-    writeFileSync11(jsonPath, `${renderJson(result, this.pluginVersion, this.harness)}
+    writeFileSync13(jsonPath, `${renderJson(result, this.pluginVersion, this.harness)}
 `);
-    writeFileSync11(mdPath, `${renderMarkdown(result)}
+    writeFileSync13(mdPath, `${renderMarkdown(result)}
 `);
     process.stdout.write(`wrote ${jsonPath}
 `);
@@ -14799,64 +11984,498 @@ class Reporter {
   }
 }
 
-// src/lib/oracle.ts
-import { spawnSync as spawnSync12 } from "node:child_process";
-var ORACLE_TIMEOUT_MS = 10 * 60000;
-function runOracle(cwd, run2) {
-  const started = Date.now();
-  const r2 = spawnSync12("sh", ["-c", run2], { cwd, timeout: ORACLE_TIMEOUT_MS });
-  if (r2.error)
-    throw new Error(`oracle could not run: ${r2.error.message}`);
+// src/lib/plan.ts
+import { spawnSync as spawnSync14 } from "node:child_process";
+import { existsSync as existsSync20, mkdtempSync as mkdtempSync4, readFileSync as readFileSync17, rmSync as rmSync8 } from "node:fs";
+import { tmpdir as tmpdir4 } from "node:os";
+import { join as join23, relative as relative3, resolve as resolve4, sep as sep2 } from "node:path";
+var SPEC_NAME_RE = /^\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*\.md$/;
+function ancestors(id, parents, guard = new Set([id])) {
+  const out = new Set;
+  for (const p of parents.get(id) ?? []) {
+    if (guard.has(p))
+      continue;
+    guard.add(p);
+    out.add(p);
+    for (const a of ancestors(p, parents, guard))
+      out.add(a);
+  }
+  return out;
+}
+function validateSchedule(nodes) {
+  const errors2 = [];
+  const parents = new Map;
+  for (const n of nodes)
+    parents.set(n.id, n.dependsOn);
+  const WHITE = 0;
+  const GRAY = 1;
+  const BLACK = 2;
+  const color = new Map;
+  for (const n of nodes)
+    color.set(n.id, WHITE);
+  const visit2 = (id) => {
+    color.set(id, GRAY);
+    for (const p of parents.get(id) ?? []) {
+      const c = color.get(p);
+      if (c === GRAY)
+        return p;
+      if (c === WHITE) {
+        const found = visit2(p);
+        if (found)
+          return found;
+      }
+    }
+    color.set(id, BLACK);
+    return null;
+  };
+  for (const n of nodes) {
+    if (color.get(n.id) !== WHITE)
+      continue;
+    const cyclic = visit2(n.id);
+    if (cyclic)
+      errors2.push(`dependency cycle involving "${cyclic}"`);
+  }
+  if (errors2.length > 0)
+    return [...new Set(errors2)];
+  for (let i = 0;i < nodes.length; i++) {
+    for (let j = i + 1;j < nodes.length; j++) {
+      const a = nodes[i];
+      const b = nodes[j];
+      const ordered = ancestors(a.id, parents).has(b.id) || ancestors(b.id, parents).has(a.id);
+      if (!ordered && scopesOverlap(a.scope, b.scope)) {
+        errors2.push(`scope overlap between concurrent tasks "${a.id}" and "${b.id}"; order one after the other or make their scopes disjoint`);
+      }
+    }
+  }
+  return [...new Set(errors2)];
+}
+function planRuleErrors(spec) {
+  const errors2 = [];
+  if (spec.tasks.length === 0)
+    errors2.push("plan has no tasks: add a `## Tasks` section");
+  for (const d of spec.design.openDecisions) {
+    errors2.push(`open decision blocks planning: "${d}"`);
+  }
+  const ids = new Set(spec.tasks.map((t) => t.id));
+  for (const t of spec.tasks) {
+    for (const d of t.depends_on) {
+      if (!ids.has(d))
+        errors2.push(`task ${t.id} depends on unknown task ${d}`);
+    }
+  }
+  errors2.push(...validateSchedule(spec.tasks.map((t) => ({ id: t.id, dependsOn: t.depends_on, scope: t.scope }))));
+  return errors2;
+}
+function taskIdInUse(root, id) {
+  const receipt = join23(".sddx", "receipts", `${id}.json`);
+  if (existsSync20(join23(root, receipt)))
+    return receipt;
+  if (existsSync20(taskPath(root, id)))
+    return relative3(root, taskPath(root, id));
+  if (existsSync20(join23(worktreesDir(root), id)))
+    return join23(".sddx-worktrees", id);
+  if (branchExists(root, `sddx/${id}`))
+    return `branch sddx/${id}`;
+  if (resolveTaskState(root, id))
+    return `task ${id}`;
+  return null;
+}
+var posix = (p) => p.split(sep2).join("/");
+function isCommitted(root, specPath) {
+  const tracked = spawnSync14("git", ["ls-files", "--error-unmatch", "--", specPath], { cwd: root });
+  if (tracked.status !== 0)
+    return false;
+  return spawnSync14("git", ["diff", "--quiet", "HEAD", "--", specPath], { cwd: root }).status === 0;
+}
+function resolvePlan(cwd, specArg) {
+  const root = resolveMainRepoRoot(cwd);
+  const absPath = resolve4(cwd, specArg);
+  const specPath = posix(relative3(root, absPath));
+  const goalId = goalIdFromSpec(specPath);
+  const plan = {
+    root,
+    specPath,
+    absPath,
+    hash: "",
+    goalId,
+    runBranch: runBranchName(goalId),
+    notices: [],
+    errors: []
+  };
+  let text;
+  try {
+    text = readFileSync17(absPath, "utf8");
+  } catch {
+    plan.errors.push(`cannot read spec ${specArg}`);
+    return plan;
+  }
+  plan.hash = planHash(absPath).hash;
+  if (!specPath.startsWith(".sddx/specs/") || specPath.slice(".sddx/specs/".length).includes("/")) {
+    plan.errors.push(`${specPath}: a goal spec must live directly in .sddx/specs/`);
+  } else if (!SPEC_NAME_RE.test(specPath.slice(".sddx/specs/".length))) {
+    plan.errors.push(`${specPath}: a goal spec must be named <YYYY-MM-DD>-<slug>.md`);
+  }
+  if (!isCommitted(root, specPath)) {
+    const slug2 = goalId.replace(/^\d{4}-\d{2}-\d{2}-/, "");
+    plan.errors.push(`${specPath} is not committed; commit it first so the plan you start is in history:
+  git add ${specPath} && git commit -m "plan: ${slug2}"`);
+  }
+  const { spec, errors: errors2 } = parseGoalSpec(text);
+  if (!spec) {
+    plan.errors.push(...errors2.map((e) => formatSpecError(specPath, e)));
+    return plan;
+  }
+  plan.spec = spec;
+  plan.errors.push(...planRuleErrors(spec));
+  for (const t of spec.tasks) {
+    const used = taskIdInUse(root, t.id);
+    if (used)
+      plan.errors.push(`task id ${t.id} is already used by ${used}; task ids are unique per repository`);
+  }
+  if (goalExists(root, goalId))
+    plan.errors.push(`goal ${goalId} already exists`);
+  if (branchExists(root, plan.runBranch)) {
+    plan.errors.push(`run branch ${plan.runBranch} already exists`);
+  }
+  if (!worktreeAvailable(root)) {
+    plan.errors.push("worktree unavailable: git cannot create worktrees for this repository. Use a checkout where `git worktree list` succeeds.");
+    return plan;
+  }
+  const base = resolveBaseRef(root);
+  plan.base = base;
+  if (base.source === "HEAD")
+    plan.notices.push("no origin remote: forking from local HEAD");
+  for (const c of submoduleScopeConflicts(root, base.sha, spec.tasks.map((t) => ({ alias: t.id, scope: t.scope })))) {
+    plan.errors.push(c.scope ? `task ${c.alias} declares scope ${c.scope}, which reaches the submodule ${c.submodule}; a worktree crossing a submodule boundary is unsafe` : `task ${c.alias} declares no scope, so it cannot be proven disjoint from the submodule ${c.submodule}`);
+  }
+  return plan;
+}
+function gateNodes(spec) {
+  return spec.tasks.map((t) => ({ alias: t.id, scope: t.scope, oracleType: t.oracle.type }));
+}
+function decidePlanGate(plan) {
+  const spec = plan.spec;
+  return decideGate(plan.root, plan.absPath, gateNodes(spec), gateInteractionMode(plan.root), autoMaxTasks(plan.root), scopesOverlap, spec.design.openDecisions);
+}
+
+class Rollback {
+  steps = [];
+  add(describe, undo) {
+    this.steps.push({ describe, undo });
+  }
+  run() {
+    const stuck = [];
+    for (const step of [...this.steps].reverse()) {
+      try {
+        step.undo();
+      } catch (e) {
+        stuck.push(`${step.describe} (${e.message})`);
+      }
+    }
+    return stuck;
+  }
+}
+function commitSpecOnBranch(root, branch, parent, specPath, bytes, message) {
+  const dir = mkdtempSync4(join23(tmpdir4(), "sddx-plan-index-"));
+  const env = { ...process.env, GIT_INDEX_FILE: join23(dir, "index") };
+  const run2 = (args, input) => {
+    const r = spawnSync14("git", args, { cwd: root, env, input, encoding: "utf8" });
+    if (r.status !== 0)
+      throw new Error(`git ${args[0]} failed: ${(r.stderr ?? "").trim()}`);
+    return (r.stdout ?? "").trim();
+  };
+  try {
+    run2(["read-tree", parent]);
+    const blob = run2(["hash-object", "-w", "--stdin"], bytes);
+    run2(["update-index", "--add", "--cacheinfo", `100644,${blob},${specPath}`]);
+    const tree = run2(["write-tree"]);
+    const commit2 = run2(["commit-tree", tree, "-p", parent, "-m", message]);
+    run2(["update-ref", `refs/heads/${branch}`, commit2, parent]);
+    return commit2;
+  } finally {
+    rmSync8(dir, { recursive: true, force: true });
+  }
+}
+function startPlan(plan, gate) {
+  const spec = plan.spec;
+  const base = plan.base;
+  const root = plan.root;
+  const undo = new Rollback;
+  try {
+    createBranchAt(root, plan.runBranch, base.sha);
+    undo.add(`branch ${plan.runBranch}`, () => {
+      if (branchExists(root, plan.runBranch))
+        forceDeleteBranch(root, plan.runBranch);
+    });
+    const planCommit = commitSpecOnBranch(root, plan.runBranch, base.sha, plan.specPath, readFileSync17(plan.absPath), `sddx: plan ${plan.goalId}`);
+    const goalAssumptions = spec.design.assumptions;
+    const deps = {};
+    for (const t of spec.tasks) {
+      if (existsSync20(taskPath(root, t.id)))
+        throw new Error(`task ${t.id} already exists`);
+      undo.add(`task state ${t.id}`, () => rmSync8(taskPath(root, t.id), { force: true }));
+      createPlannedTask(root, {
+        id: t.id,
+        title: t.title,
+        goal_id: plan.goalId,
+        spec_path: plan.specPath,
+        oracle: t.oracle,
+        scope: t.scope,
+        assumptions: mergeAssumptions(goalAssumptions, t.assumptions),
+        depends_on: t.depends_on,
+        ...t.on_dependency_failure ? { on_dependency_failure: t.on_dependency_failure } : {},
+        ...t.retry ? { retry: t.retry } : {}
+      });
+      if (t.depends_on.length > 0)
+        deps[t.id] = t.depends_on;
+    }
+    const goal = createGoal(root, spec.title, spec.tasks.map((t) => t.id), {
+      id: plan.goalId,
+      specPath: plan.specPath,
+      runBranch: plan.runBranch,
+      baseSha: base.sha,
+      deps,
+      approval: {
+        mode: gate.mode,
+        authorization: gate.mode === "human" ? "human-approval" : "auto",
+        plan_sha256: gate.hash,
+        at: new Date().toISOString()
+      }
+    });
+    undo.add(`goal record ${plan.goalId}`, () => deleteCreatedGoal(root, goal));
+    const wroteConfig = ensureConfig(root);
+    return {
+      goalId: plan.goalId,
+      runBranch: plan.runBranch,
+      baseSha: base.sha,
+      planCommit,
+      taskIds: spec.tasks.map((t) => t.id),
+      wroteConfig
+    };
+  } catch (e) {
+    const stuck = undo.run();
+    const suffix = stuck.length > 0 ? ` Rollback could not remove: ${stuck.join("; ")}. Remove them by hand before retrying.` : " Everything this attempt created was rolled back.";
+    throw new Error(`plan start failed: ${e.message}.${suffix}`);
+  }
+}
+
+// src/lib/review.ts
+import { readFileSync as readFileSync18 } from "node:fs";
+import { isAbsolute as isAbsolute5, join as join24, relative as relative4, resolve as resolve5 } from "node:path";
+
+// src/lib/finalize.ts
+import { existsSync as existsSync21 } from "node:fs";
+
+// src/lib/envinfo.ts
+import { spawnSync as spawnSync15 } from "node:child_process";
+import { arch, platform } from "node:os";
+function captureEnv(cwd) {
+  const bun = globalThis.Bun;
+  const status = spawnSync15("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
   return {
-    exitCode: r2.status ?? -1,
-    durationMs: Date.now() - started,
-    stdout: r2.stdout ?? Buffer.alloc(0),
-    stderr: r2.stderr ?? Buffer.alloc(0)
+    os: platform(),
+    arch: arch(),
+    runtime: bun ? "bun" : "unknown",
+    runtime_version: bun ? bun.version : "unknown",
+    dirty_tree: status.status === 0 && (status.stdout ?? "").trim() !== ""
   };
 }
 
-// src/lib/redcheck.ts
-function redCheck(cwd, id) {
-  const task = readTask(cwd, id);
-  assertAdvanceable(task);
-  if (task.phase !== "RED") {
-    throw new Error(`task ${id} is in ${task.phase}; red-check requires phase RED (a recorded failing test)`);
-  }
-  if (task.oracle.type === "manual") {
-    throw new Error("manual oracles cannot be red-checked");
-  }
-  const run2 = runOracle(cwd, task.oracle.run);
-  const exitCode = run2.exitCode;
-  if (exitCode === 0)
-    return { ok: false, exitCode };
-  task.evidence.oracle_red = {
-    exit_code: exitCode,
-    at: new Date().toISOString(),
-    stdout_sha256: sha256(run2.stdout),
-    stderr_sha256: sha256(run2.stderr)
+// src/lib/finalize.ts
+function approvalBinding(root, planSha) {
+  const token = readApproval(root, planSha);
+  if (!token)
+    return { binding: "unsigned" };
+  const harness = token.harness_reported ? { harness_reported: token.harness_reported } : {};
+  if (!token.signature || !token.signer)
+    return { binding: "unsigned", ...harness };
+  const sig = { signature: token.signature, signer: token.signer };
+  return verifySignature(root, planSha, sig, "sddx-approval") === "valid" ? { binding: "signed", ...harness, ...sig } : { binding: "unsigned", ...harness };
+}
+function receiptApproval(root, goal, task) {
+  const a = goal.approval;
+  if (!a)
+    throw new Error(`goal ${goal.id} has no approval record`);
+  return {
+    mode: a.mode,
+    ...a.authorization ? { authorization: a.authorization } : {},
+    plan_sha256: a.plan_sha256,
+    ...a.at ? { at: a.at } : {},
+    assumptions: [...task.assumptions ?? []],
+    amendments: [],
+    ...a.mode === "human" ? approvalBinding(root, a.plan_sha256) : { binding: "unsigned" }
   };
-  writeTask(cwd, task);
-  return { ok: true, exitCode };
+}
+var json = (v) => `${JSON.stringify(v, null, 2)}
+`;
+function finalizeTask(root, worktree, task, review, proof, opts) {
+  const workspace = task.workspace;
+  if (!workspace)
+    throw new Error(`task ${task.id} has no worktree`);
+  if (existsSync21(receiptPath(worktree, task.id))) {
+    throw new Error(`receipt for ${task.id} already exists; receipts are immutable`);
+  }
+  const goal = findGoalForTask(root, task.id);
+  if (!goal)
+    throw new Error(`task ${task.id} belongs to no goal`);
+  const holder = checkedOutAt(root, goal.run_branch);
+  if (holder && !isRunBranchScratch(holder)) {
+    throw new Error(`run branch ${goal.run_branch} is checked out at ${holder}, so sddx cannot merge into it. Nothing was committed; switch that checkout to another branch, then record the review again`);
+  }
+  task.verified = {
+    base_sha: proof.base_sha,
+    tree_sha: proof.tree_sha,
+    test_files: proof.test_files,
+    red: proof.red,
+    green: proof.green,
+    at: proof.at
+  };
+  transition(task, "DONE");
+  task.updated_at = new Date().toISOString();
+  const taskRel = `.sddx/tasks/${task.id}.json`;
+  const receiptRel = `.sddx/receipts/${task.id}.json`;
+  const taskBytes = json(task);
+  const treeSha = treeWith(worktree, proof.tree_sha, { [taskRel]: taskBytes });
+  const reviewRecord = {
+    verdict: "pass",
+    diff_sha256: review.diff_sha256,
+    reviewer: review.reviewer,
+    ...review.findings_sha256 ? { findings_sha256: review.findings_sha256 } : {},
+    at: review.at
+  };
+  const head = chainHead(worktree);
+  const profile2 = task.profile ?? "default";
+  const receipt = {
+    version: 5,
+    task_id: task.id,
+    seq: head.seq + 1,
+    prev: head.prevHash,
+    harness: opts.harness ?? "unknown",
+    model: opts.model ?? null,
+    plugin_version: opts.sddxVersion,
+    oracle: { run: proof.oracle.run, expect: proof.oracle.expect },
+    runs: proof.green,
+    env: captureEnv(worktree),
+    base_sha: proof.base_sha,
+    tree_sha: treeSha,
+    verdict: "pass",
+    verified_at: proof.at,
+    allow: [...task.allow],
+    approval: receiptApproval(root, goal, task),
+    spec: { path: task.spec_path, goal_id: task.goal_id },
+    boundary: {
+      base_sha: proof.base_sha,
+      tree_sha: proof.tree_sha,
+      test_files: proof.test_files,
+      red: proof.red
+    },
+    review: reviewRecord,
+    profile: profile2,
+    ...profile2 === "strict" ? { strict_runs: [...task.strict?.runs ?? []] } : {}
+  };
+  const sig = signPayload(worktree, sha256(json(receipt)));
+  if (sig) {
+    receipt.signature = sig.signature;
+    receipt.signer = sig.signer;
+  }
+  const invalid = validateReceipt(receipt);
+  if (invalid.length > 0) {
+    throw new Error(`refusing to write invalid receipt: ${invalid.join("; ")}`);
+  }
+  const commitSha = commitOnBranch({
+    worktree,
+    branch: workspace.branch,
+    baseTree: proof.tree_sha,
+    files: { [taskRel]: taskBytes, [receiptRel]: json(receipt) },
+    readOnly: [receiptRel],
+    message: `sddx(${task.id}): ${task.task}`
+  });
+  let integration;
+  try {
+    integration = integrateTaskIntoRunBranch(worktree, task.id);
+  } catch (e) {
+    integration = {
+      result: "none",
+      reason: "error",
+      error: e.message,
+      runBranch: goal.run_branch
+    };
+  }
+  return { receiptPath: receiptPath(worktree, task.id), commitSha, integration };
+}
+
+// src/lib/review.ts
+function recordReview(id, input) {
+  const root = resolveMainRepoRoot(input.cwd);
+  const home = taskHome(root, id);
+  if (!home)
+    throw new Error(`no such task: ${id}`);
+  const task = readTask(home, id);
+  assertV6(task);
+  if (task.phase !== "IN_REVIEW") {
+    throw new Error(`task ${id} is ${task.phase}; review record requires IN_REVIEW`);
+  }
+  if (!task.workspace)
+    throw new Error(`task ${id} has no worktree`);
+  const proof = readProofRecord(root, id, task.attempt_count);
+  if (!proof) {
+    throw new Error(`task ${id} has no boundary proof recorded by sddx verify for its current attempt; run sddx verify ${id}`);
+  }
+  const worktree = join24(root, task.workspace.path);
+  const current = worktreeTree(worktree);
+  if (current !== proof.tree_sha) {
+    clearProofRecord(root, id);
+    task.verified = undefined;
+    transition(task, "IN_PROGRESS", "work changed after verify; verify again");
+    writeTask(home, task);
+    return { kind: "changed", task };
+  }
+  const entry = {
+    verdict: input.verdict,
+    diff_sha256: diffSha256(root, proof.base_sha, proof.tree_sha),
+    tree_sha: proof.tree_sha,
+    reviewer: input.reviewer ?? null,
+    at: new Date().toISOString()
+  };
+  if (input.findings) {
+    const abs = resolve5(input.cwd, input.findings);
+    entry.findings_sha256 = sha256(readFileSync18(abs));
+    const rel = relative4(root, abs);
+    entry.findings_path = rel.startsWith("..") || isAbsolute5(rel) ? abs : rel;
+  }
+  task.reviews.push(entry);
+  if (input.verdict === "fail") {
+    clearProofRecord(root, id);
+    task.iterations += 1;
+    transition(task, "IN_PROGRESS", "review failed");
+    writeTask(home, task);
+    return { kind: "failed", task, entry };
+  }
+  const finalized = finalizeTask(root, worktree, task, entry, proof, input);
+  clearProofRecord(root, id);
+  return { kind: "finalized", task, entry, ...finalized };
 }
 
 // src/lib/runreport.ts
-function generateRunReport(cwd, goalId2, targetBranch) {
-  const goal = readGoal(cwd, goalId2);
+function generateRunReport(cwd, goalId, targetBranch) {
+  const goal = readGoal(cwd, goalId);
   const merged = currentlyMergedTaskIds(goal);
-  const failed = goal.task_ids.filter((id) => !merged.includes(id) && resolveTaskState(cwd, id)?.phase === "ABANDONED");
-  const outstanding = goal.task_ids.filter((id) => !merged.includes(id) && !failed.includes(id));
+  const failed = goal.task_ids.filter((id) => {
+    const t = resolveTaskState(cwd, id);
+    return !merged.includes(id) && t?.phase === "ABANDONED" && t.skipped_on === undefined;
+  });
   const diffStat = git(resolveMainRepoRoot(cwd), "diff", "--stat", `${goal.base_sha}...${goal.run_branch}`);
   const oracles = [];
-  const tasks2 = [];
+  const tasks = [];
   const assumptions = [];
   const latestMerge = new Map;
   for (const e of goal.merges)
     latestMerge.set(e.task_id, e);
   for (const id of goal.task_ids) {
     const task = resolveTaskState(cwd, id);
-    for (const a2 of task?.assumptions ?? [])
-      if (!assumptions.includes(a2))
-        assumptions.push(a2);
+    for (const a of task?.assumptions ?? [])
+      if (!assumptions.includes(a))
+        assumptions.push(a);
     const receiptPath2 = resolveReceiptPath(cwd, id);
     const oracle = {
       taskId: id,
@@ -14866,19 +12485,22 @@ function generateRunReport(cwd, goalId2, targetBranch) {
     };
     oracles.push(oracle);
     const entry = latestMerge.get(id) ?? null;
-    const skipper = task ? skippedOn(cwd, task) : null;
-    const blocker = task ? blockedOn(cwd, task) : null;
+    const skipper = task?.phase === "ABANDONED" && task.skipped_on !== undefined ? task.skipped_on : task ? skippedOn(cwd, task) : null;
+    const blocker = task?.phase === "PLANNED" ? blockedOn(cwd, task) : null;
     const status = merged.includes(id) ? "merged" : failed.includes(id) ? "failed" : entry?.result === "conflict" ? "conflicted" : skipper ? "skipped" : blocker ? "blocked" : "outstanding";
-    tasks2.push({
+    tasks.push({
       taskId: id,
       status,
+      state: task?.phase ?? "missing",
+      attempt: task?.attempt_count ?? null,
+      reason: task?.phase === "ABANDONED" ? task.abandon_reason ?? null : null,
       oracle,
       receiptPath: receiptPath2,
       integration: entry?.result ?? null,
       because: skipper ?? blocker ?? null
     });
   }
-  const count = (s) => tasks2.filter((t2) => t2.status === s).length;
+  const count = (s) => tasks.filter((t) => t.status === s).length;
   return {
     goalId: goal.id,
     goal: goal.goal,
@@ -14893,7 +12515,7 @@ function generateRunReport(cwd, goalId2, targetBranch) {
     outstanding: count("outstanding"),
     total: goalCounts(goal).total,
     diffStat,
-    tasks: tasks2,
+    tasks,
     oracles,
     assumptions,
     interactionMode: goal.approval?.mode ?? null,
@@ -14906,217 +12528,235 @@ function generateRunReport(cwd, goalId2, targetBranch) {
     ]
   };
 }
-function approvalLines(a2) {
+function approvalLines(a) {
   const lines = [
     "Approval",
-    `- interaction mode: ${a2.mode}`,
-    ...a2.authorization ? [`- authorization: ${a2.authorization}`] : [],
-    `- plan: ${a2.plan_sha256.slice(0, 12)}`
+    `- interaction mode: ${a.mode}`,
+    ...a.authorization ? [`- authorization: ${a.authorization}`] : [],
+    `- plan: ${a.plan_sha256.slice(0, 12)}`
   ];
-  if (a2.requested_mode && a2.requested_mode !== a2.mode) {
-    lines.push(`- requested ${a2.requested_mode}, ran as ${a2.mode}`);
-    if (a2.degraded_reason)
-      lines.push(`- reason: ${a2.degraded_reason}`);
+  if (a.requested_mode && a.requested_mode !== a.mode) {
+    lines.push(`- requested ${a.requested_mode}, ran as ${a.mode}`);
+    if (a.degraded_reason)
+      lines.push(`- reason: ${a.degraded_reason}`);
   }
   return [...lines, ""];
 }
-function renderRunReport(r2) {
-  const done = r2.merged === r2.total;
-  const stalled = r2.outstanding === 0 && !done;
+function renderRunReport(r) {
+  const done = r.merged === r.total;
+  const stalled = r.outstanding === 0 && !done;
   const lines = [
     done ? "Run completed" : stalled ? "Run finished with unresolved tasks" : "Run in progress",
     "",
-    `Goal: ${r2.goal}`,
-    `Review branch: ${r2.runBranch}`,
-    `Target branch remains unchanged: ${r2.targetBranch}`,
+    `Goal: ${r.goal}`,
+    `Review branch: ${r.runBranch}`,
+    `Target branch remains unchanged: ${r.targetBranch}`,
     "",
-    ...r2.approval ? approvalLines(r2.approval) : [],
+    ...r.approval ? approvalLines(r.approval) : [],
     "Summary",
-    `- ${r2.merged} of ${r2.total} task(s) merged`,
-    ...r2.failed > 0 ? [`- ${r2.failed} task(s) failed`] : [],
-    ...r2.conflicted > 0 ? [`- ${r2.conflicted} task(s) verified but not integrated`] : [],
-    ...r2.skipped > 0 ? [`- ${r2.skipped} task(s) skipped`] : [],
-    ...r2.blocked > 0 ? [`- ${r2.blocked} task(s) blocked`] : [],
-    ...r2.outstanding > 0 ? [`- ${r2.outstanding} task(s) outstanding`] : [],
-    ...r2.diffStat ? r2.diffStat.split(`
-`).map((l2) => `- ${l2.trim()}`) : [],
+    `- ${r.merged} of ${r.total} task(s) merged`,
+    ...r.failed > 0 ? [`- ${r.failed} task(s) failed`] : [],
+    ...r.conflicted > 0 ? [`- ${r.conflicted} task(s) verified but not integrated`] : [],
+    ...r.skipped > 0 ? [`- ${r.skipped} task(s) skipped`] : [],
+    ...r.blocked > 0 ? [`- ${r.blocked} task(s) blocked`] : [],
+    ...r.outstanding > 0 ? [`- ${r.outstanding} task(s) outstanding`] : [],
+    ...r.diffStat ? r.diffStat.split(`
+`).map((l) => `- ${l.trim()}`) : [],
     "",
     "Tasks",
-    ...r2.tasks.map((t2) => {
-      const why = t2.because ? ` (${t2.because})` : "";
-      const receipt = t2.receiptPath ? ` — receipt ${t2.receiptPath}` : "";
-      return `- ${t2.taskId}: ${t2.status}${why}${receipt}`;
+    ...r.tasks.map((t) => {
+      const why = t.because ? ` (${t.because})` : "";
+      const state = `[${t.state}${t.attempt ? `, attempt ${t.attempt}` : ""}${t.reason ? `: ${t.reason}` : ""}]`;
+      const receipt = t.receiptPath ? `, receipt ${t.receiptPath}` : "";
+      return `- ${t.taskId}: ${t.status}${why} ${state}${receipt}`;
     }),
     "",
     "Oracle results",
-    ...r2.oracles.map((o2) => `- ${o2.taskId}: ${o2.verdict} — ${o2.run} (expect ${o2.expect})`),
+    ...r.oracles.map((o) => `- ${o.taskId}: ${o.verdict}, ${o.run} (expect ${o.expect})`),
     "",
-    ...r2.assumptions.length > 0 ? ["Assumptions", ...r2.assumptions.map((a2) => `- ${a2}`), ""] : [],
+    ...r.assumptions.length > 0 ? ["Assumptions", ...r.assumptions.map((a) => `- ${a}`), ""] : [],
     "Review commands",
-    ...r2.reviewCommands
+    ...r.reviewCommands
   ];
   return lines.join(`
 `);
 }
 
-// src/lib/envinfo.ts
-import { spawnSync as spawnSync13 } from "node:child_process";
-import { arch, platform } from "node:os";
-function captureEnv(cwd) {
-  const bun = globalThis.Bun;
-  const status = spawnSync13("git", ["status", "--porcelain"], { cwd, encoding: "utf8" });
-  return {
-    os: platform(),
-    arch: arch(),
-    runtime: bun ? "bun" : "unknown",
-    runtime_version: bun ? bun.version : "unknown",
-    dirty_tree: status.status === 0 && (status.stdout ?? "").trim() !== ""
-  };
-}
-
 // src/lib/verify.ts
-function expectedExit(expect) {
-  const m3 = /^exit\s+(\d+)$/.exec(expect.trim());
-  if (!m3) {
-    throw new Error(`unsupported oracle.expect: "${expect}" (M1 supports "exit <code>")`);
-  }
-  return Number(m3[1]);
+import { spawnSync as spawnSync16 } from "node:child_process";
+import { join as join25 } from "node:path";
+function outOfScope(task, paths, root) {
+  if (task.scope.length === 0)
+    return [];
+  const cfg = classifyConfig(root);
+  return paths.filter((p) => {
+    if (classify(p, task.allow, cfg).rule !== "implementation")
+      return false;
+    const path = normalizeRelPath(p);
+    return !task.scope.some((g) => globMatch(normalizeRelPath(g), path));
+  });
 }
-function verifyTask(cwd, id, opts) {
-  const task = readTask(cwd, id);
-  assertAdvanceable(task);
-  if (task.phase !== "VERIFY") {
-    throw new Error(`task ${id} is in ${task.phase}; verify requires phase VERIFY`);
+function assertMatchesApprovedSpec(root, task) {
+  const goal = readGoal(root, task.goal_id);
+  const approved = goal.approval?.plan_sha256;
+  if (!approved)
+    throw new Error(`goal ${goal.id} has no approval record`);
+  const shown = spawnSync16("git", ["show", `${goal.run_branch}:${goal.spec_path}`], {
+    cwd: root,
+    maxBuffer: 64 * 1024 * 1024
+  });
+  if (shown.status !== 0) {
+    throw new Error(`cannot read the approved spec ${goal.spec_path} from run branch ${goal.run_branch}: ${shown.stderr.toString().trim()}`);
+  }
+  if (sha256(shown.stdout) !== approved) {
+    throw new Error(`the spec on ${goal.run_branch} (${goal.spec_path}) no longer matches the approved plan ${approved.slice(0, 12)}`);
+  }
+  const spec = parseGoalSpec(shown.stdout.toString("utf8")).spec;
+  const planned = spec?.tasks.find((t) => t.id === task.id);
+  if (!planned)
+    throw new Error(`task ${task.id} is not in the approved spec ${goal.spec_path}`);
+  for (const key of ["oracle", "scope"]) {
+    if (JSON.stringify(planned[key]) !== JSON.stringify(task[key])) {
+      throw new Error(`task ${task.id}'s ${key} in its state file differs from the approved spec ${goal.spec_path}; the approved plan decides what verify runs`);
+    }
+  }
+}
+function loadForVerify(cwd, id) {
+  const root = resolveMainRepoRoot(cwd);
+  const home = taskHome(root, id);
+  if (!home)
+    throw new Error(`no such task: ${id}`);
+  const task = readTask(home, id);
+  assertV6(task);
+  if (task.phase !== "IN_PROGRESS") {
+    throw new Error(`task ${id} is ${task.phase}; verify requires IN_PROGRESS`);
   }
   if (task.oracle.type === "manual") {
-    throw new Error("manual oracles need a human decision; M1 verify supports command oracles");
+    throw new Error(`task ${id} has a manual oracle, which needs a human to observe the result; sddx verify only runs executable oracles`);
   }
-  const redEvidence = task.evidence.oracle_red;
-  if (!redEvidence || redEvidence.exit_code === undefined || redEvidence.exit_code === 0) {
-    throw new Error(`task ${id} has no failing-oracle evidence — an oracle that never failed proves nothing. ` + `In RED, run \`sddx red-check ${id}\`. A task already past RED (e.g. created before sddx 0.2) ` + `cannot be red-checked retroactively: abandon it (sddx task phase ${id} ABANDONED) and recreate`);
+  if (!task.workspace)
+    throw new Error(`task ${id} has no worktree; run sddx task start ${id}`);
+  const current = profile(root);
+  if (task.profile !== undefined && task.profile !== current) {
+    throw new Error(`task ${id} was started under the ${task.profile} profile but the config now says ${current}; a task is gated by one profile from start to finish. Restore the profile, or abandon the task and start it again`);
   }
-  const firstGreen = task.history.find((h2) => h2.phase === "GREEN");
-  if (firstGreen && Date.parse(redEvidence.at) > Date.parse(firstGreen.at)) {
-    throw new Error(`oracle_red (${redEvidence.at}) was recorded after the first GREEN (${firstGreen.at}) — the red-check must precede implementation; abandon and restart the task`);
-  }
-  const want = expectedExit(task.oracle.expect);
-  const wanted = oracleRuns(cwd, task.oracle.runs);
-  const runs = [];
-  const started = Date.now();
-  let exitCode = 0;
-  for (let i2 = 0;i2 < wanted; i2 += 1) {
-    const run2 = runOracle(cwd, task.oracle.run);
-    exitCode = run2.exitCode;
-    runs.push({
-      exit_code: run2.exitCode,
-      duration_ms: run2.durationMs,
-      stdout_sha256: sha256(run2.stdout),
-      stderr_sha256: sha256(run2.stderr)
-    });
-    if (exitCode !== want)
-      break;
-  }
-  const durationMs = Date.now() - started;
+  assertMatchesApprovedSpec(root, task);
+  return { root, home, task };
+}
+function verifyTask(cwd, id) {
+  const { root, home, task } = loadForVerify(cwd, id);
+  clearProofRecord(root, id);
+  const workspace = task.workspace;
+  const worktree = join25(root, workspace.path);
+  const treeSha = worktreeTree(worktree);
+  const base = workspace.base_sha;
+  const now = new Date().toISOString();
   task.iterations += 1;
-  if (exitCode !== want) {
-    task.evidence.last_verify = { exit_code: exitCode, at: new Date().toISOString() };
-    writeTask(cwd, task);
-    return { verdict: "fail", exitCode, durationMs };
-  }
-  const env = captureEnv(cwd);
-  transition(task, "DONE", { internal: true });
-  task.evidence.verify = { exit_code: exitCode, at: new Date().toISOString() };
-  writeTask(cwd, task);
-  stageAll(cwd);
-  const treeSha = writeTree(cwd);
-  const goalApproval = findGoalForTask(resolveMainRepoRoot(cwd), id)?.approval;
-  const head = chainHead(cwd);
-  const receipt = {
-    version: 4,
-    task_id: id,
-    seq: head.seq + 1,
-    prev: head.prevHash,
-    harness: opts.harness ?? "claude-code",
-    model: opts.model ?? null,
-    plugin_version: opts.pluginVersion,
-    oracle: { run: task.oracle.run, expect: task.oracle.expect },
-    runs,
-    env,
-    base_sha: task.workspace.base_sha,
-    tree_sha: treeSha,
-    verdict: "pass",
-    verified_at: new Date().toISOString(),
-    allow: [...task.allow],
-    ...goalApproval ? {
-      approval: {
-        mode: goalApproval.mode,
-        ...goalApproval.authorization ? { authorization: goalApproval.authorization } : {},
-        ...goalApproval.requested_mode ? { requested_mode: goalApproval.requested_mode } : {},
-        ...goalApproval.degraded_reason ? { degraded_reason: goalApproval.degraded_reason } : {},
-        plan_sha256: goalApproval.plan_sha256,
-        ...goalApproval.at ? { at: goalApproval.at } : {},
-        assumptions: [...task.assumptions ?? []],
-        amendments: []
-      }
-    } : {}
+  const limitReached = task.iterations >= maxIterations(root);
+  const finishFail = (half, exitCode, message, fingerprint) => {
+    task.last_failure = { half, exit_code: exitCode, message, at: now };
+    task.stuck = task.stuck?.fingerprint === fingerprint ? { ...task.stuck, count: task.stuck.count + 1 } : { fingerprint, count: 1, since: now };
+    const stuck = task.stuck.count >= stuckThreshold(root);
+    writeTask(home, task);
+    return { verdict: "fail", task, treeSha, message, stuck, limitReached };
   };
-  const sig = signPayload(cwd, sha256(`${JSON.stringify(receipt, null, 2)}
-`));
-  if (sig) {
-    receipt.signature = sig.signature;
-    receipt.signer = sig.signer;
+  const stateChanges = sddxChanges(root, base, treeSha);
+  if (stateChanges.length > 0) {
+    return finishFail("scope", 1, `changes under .sddx/ are sddx's own state and never part of a task: ${stateChanges.join(", ")}`, `sddx\x00${stateChanges.join("\x00")}`);
   }
-  const receiptPath2 = writeReceipt(cwd, receipt);
-  stageAll(cwd);
-  const commitSha = commit(cwd, `sddx(${id}): ${task.task}`);
-  const integration = integrateTaskIntoRunBranch(cwd, id);
-  return { verdict: "pass", exitCode, durationMs, receiptPath: receiptPath2, commitSha, integration };
+  const offScope = outOfScope(task, changedFiles(root, base, treeSha).map((f) => f.path), root);
+  if (offScope.length > 0) {
+    return finishFail("scope", 1, `changes outside task ${id}'s scope (${task.scope.join(", ")}): ${offScope.join(", ")}`, `scope\x00${offScope.join("\x00")}`);
+  }
+  const result = runBoundaryProof({
+    root,
+    id,
+    base,
+    tree: treeSha,
+    oracle: task.oracle,
+    runs: oracleRuns(root, task.oracle.runs),
+    classify: classifyConfig(root)
+  });
+  if (!result.ok)
+    return finishFail(result.half, result.exitCode, result.message, result.fingerprint);
+  task.verified = {
+    base_sha: base,
+    tree_sha: treeSha,
+    test_files: result.testFiles,
+    red: result.red,
+    green: result.green,
+    at: now
+  };
+  writeProofRecord(root, {
+    task_id: id,
+    attempt: task.attempt_count,
+    oracle: task.oracle,
+    ...task.verified
+  });
+  task.last_failure = undefined;
+  task.stuck = undefined;
+  transition(task, "IN_REVIEW");
+  writeTask(home, task);
+  return {
+    verdict: "pass",
+    task,
+    treeSha,
+    message: `boundary proof passed: RED exit ${result.red.exit_code} on the base plus ${result.testFiles.length} test file(s), GREEN ${result.green.length} run(s) on tree ${treeSha}`,
+    stuck: false,
+    limitReached
+  };
 }
 
 // src/cli.ts
 var USAGE = `usage:
-  sddx init [--runtime <global|project>] [--package-manager <npm|bun>]
-            [--adapter <name>]... [--interaction-mode <human|auto>]
-            [--yes] [--dry-run] [--force]
-  sddx doctor
-  sddx sync --adapter <name> [--yes] [--force]
-  sddx uninstall --adapter <name>
-  sddx task phase <id> <PHASE> [--test-exit <n>]
-  sddx task allow <id> <path>
+  sddx spec check <spec.md>
+  sddx plan check <spec.md>
+  sddx plan approve <spec.md> [--harness <name>]
+  sddx plan start <spec.md>
+  sddx task ready --goal <goal-id>
+  sddx task start <id>
+  sddx task abandon <id> --reason <text>
   sddx task show <id>
-  sddx task materialize <id>
-  sddx red-check <id>
-  sddx verify <id> [--model <m>] [--harness <h>]
-  sddx goal show <id>
-  sddx intake check --batch <path>
-  sddx graph create --graph <path> [--dry-run]
-  sddx graph approve --graph <path>
-  sddx graph regenerate --graph <path>
-  sddx graph cancel --graph <path>
-  sddx pr create --goal <goal-id> [--title <title>]
+  sddx verify <id>
+  sddx review record <id> --verdict <pass|fail> [--findings <file>] [--reviewer <name>]
+                     [--harness <name>] [--model <name>]
+  sddx goal show <goal-id>
   sddx run report --goal <goal-id>
+  sddx pr create --goal <goal-id> [--title <title>]
+  sddx next-actions --goal <goal-id> [--select <reply>]
   sddx board
   sddx audit [--signatures] [--ci]
   sddx cleanup <id>
   sddx sweep
-  sddx next-actions --goal <goal-id> [--select <reply>]
-  sddx config show [--json (deprecated, use --output json)]
+  sddx config show
   sddx config validate
-
+  sddx doctor
+  sddx migrate [--yes]
+strict profile only:
+  sddx task phase <id> <RED|GREEN> --test-exit <n>
+  sddx task allow <id> <path>
 global flags (any command):
   --output <terminal|json|markdown|all>  (default: terminal)
   --no-color`;
 var currentFormat = "terminal";
 var currentNoColor = false;
 var currentCommand = "sddx";
+function sddxVersion() {
+  try {
+    const manifest = new URL("../package.json", import.meta.url);
+    return JSON.parse(readFileSync19(manifest, "utf8")).version;
+  } catch {
+    return "unknown";
+  }
+}
 function failWith(messages, code = 1, data = null) {
   if (currentFormat === "terminal") {
-    for (const m3 of messages)
-      printError(m3);
+    for (const m of messages)
+      printError(m);
   } else {
     const reporter = makeReporter(currentCommand, currentFormat, currentNoColor);
-    for (const m3 of messages)
-      reporter.error(m3);
+    for (const m of messages)
+      reporter.error(m);
     reporter.finish(data, { status: "error" });
   }
   process.exit(code);
@@ -15131,14 +12771,14 @@ function makeReporter(command, format, noColor) {
   return new Reporter(command, format, {
     noColor,
     pluginVersion: sddxVersion(),
-    harness: "claude-code"
+    harness: process.env.SDDX_HARNESS ?? "unknown"
   });
 }
 function flag(args, name) {
-  const i2 = args.indexOf(name);
-  if (i2 === -1)
+  const i = args.indexOf(name);
+  if (i === -1)
     return;
-  const v = args[i2 + 1];
+  const v = args[i + 1];
   if (v === undefined)
     fail2(`${name} requires a value`, 2);
   return v;
@@ -15156,626 +12796,483 @@ var REMOVED_FLAGS = new Map([
 function rejectRemovedFlags(args) {
   for (const [flagName, why] of REMOVED_FLAGS) {
     if (args.includes(flagName)) {
-      failWith([`\`${flagName}\` was removed: ${why}`, "See docs/how-to/migrate-to-v4.md."], 2);
+      failWith([`\`${flagName}\` was removed: ${why}`, "Drop the flag."], 2);
     }
   }
 }
-function sddxVersion() {
+var REMOVED_COMMANDS = [
+  {
+    match: (c) => c === "init" || c === "sync" || c === "uninstall",
+    text: "was removed in sddx 6: harness integration is installed by the sddx plugin (for Claude Code: /plugin install sddx), and the repository needs no setup. To clean up a sddx 5 install run: sddx migrate"
+  },
+  {
+    match: (c) => c === "graph",
+    text: "was removed in sddx 6: a goal is one markdown spec in .sddx/specs/. Use: sddx plan check <spec>, sddx plan approve <spec>, sddx plan start <spec>"
+  },
+  {
+    match: (c) => c === "intake",
+    text: "was removed in sddx 6: requirements are gathered by the brainstorm skill and checked with: sddx spec check <spec>"
+  },
+  {
+    match: (c) => c === "red-check",
+    text: "was removed in sddx 6: sddx verify <id> now proves the oracle fails without the change and passes with it"
+  },
+  {
+    match: (c, s) => c === "task" && s === "materialize",
+    text: "was removed in sddx 6: use sddx task start <id>"
+  },
+  {
+    match: (c, s) => (c === "task" || c === "goal") && s === "create",
+    text: "was removed: write a goal spec in .sddx/specs/ and run sddx plan start <spec>"
+  }
+];
+function refuseOnV5State(cwd) {
+  let root;
   try {
-    const manifest = new URL("../package.json", import.meta.url);
-    return JSON.parse(readFileSync17(manifest, "utf8")).version;
+    root = resolveMainRepoRoot(cwd);
   } catch {
-    return "unknown";
+    return;
   }
+  const blockers = v5Blockers(detectV5State(root));
+  if (blockers.length === 0)
+    return;
+  failWith([
+    "this repository still holds sddx 5 state, which sddx 6 cannot act on:",
+    ...blockers.map((b) => `  ${b}`),
+    "Run `sddx migrate` to preview the move, then `sddx migrate --yes`."
+  ]);
 }
-
-class Rollback {
-  steps = [];
-  branch(name) {
-    this.steps.push({
-      describe: `branch ${name}`,
-      undo: (cwd) => {
-        if (branchExists(cwd, name))
-          forceDeleteBranch(cwd, name);
-      }
-    });
-  }
-  worktree(absPath) {
-    this.steps.push({
-      describe: `worktree ${absPath}`,
-      undo: (cwd) => {
-        if (existsSync20(absPath))
-          removeWorktreeForced(cwd, absPath);
-      }
-    });
-  }
-  taskState(id) {
-    this.steps.push({
-      describe: `task state ${id}`,
-      undo: (cwd) => {
-        for (const p3 of [
-          join22(sddxDir(cwd), "tasks", `${id}.json`),
-          join22(sddxDir(cwd), "specs", `${id}.yaml`)
-        ]) {
-          if (existsSync20(p3))
-            rmSync5(p3, { force: true });
-        }
-      }
-    });
-  }
-  run(cwd) {
-    const stuck = [];
-    for (const step of [...this.steps].reverse()) {
-      try {
-        step.undo(cwd);
-      } catch (e) {
-        stuck.push(`${step.describe} (${e.message})`);
-      }
-    }
-    return stuck;
-  }
-}
-function createRootTask(cwd, spec, specSrc, reporter, forkSha) {
-  const id = taskId(spec.task);
-  let baseSha;
-  if (forkSha) {
-    baseSha = forkSha;
-  } else {
-    const base = resolveBaseRef(cwd);
-    if (base.source === "HEAD")
-      reporter.success("no origin remote — forking from local HEAD");
-    baseSha = base.sha;
-  }
-  const wtPath = createWorktree(cwd, id, baseSha);
-  const relPath = join22(".sddx-worktrees", id);
-  mkdirSync11(join22(sddxDir(wtPath), "specs"), { recursive: true });
-  const specPath = join22(".sddx", "specs", `${id}.yaml`);
-  copyFileSync2(specSrc, join22(wtPath, specPath));
-  createTask(wtPath, spec, specPath, {
-    mode: "worktree",
-    branch: `sddx/${id}`,
-    base_sha: baseSha,
-    path: relPath
-  });
-  return {
-    id,
-    line: `created ${id} phase=PLAN worktree=${relPath} branch=sddx/${id} base=${baseSha}`
-  };
-}
-function createDeferredTask(cwd, spec, specSrc, dependsOn) {
-  const id = taskId(spec.task);
-  mkdirSync11(join22(sddxDir(cwd), "specs"), { recursive: true });
-  const specPath = join22(".sddx", "specs", `${id}.yaml`);
-  copyFileSync2(specSrc, join22(cwd, specPath));
-  createTask(cwd, spec, specPath, {
-    mode: "deferred",
-    materialize_as: "worktree",
-    branch: null,
-    base_sha: `pending:${dependsOn.join(",")}`
-  }, { dependsOn });
-  return id;
-}
-function topoOrder(nodes) {
-  const out = [];
-  const emitted = new Set;
-  let remaining = [...nodes];
-  while (remaining.length > 0) {
-    const ready = remaining.filter((n3) => n3.depends_on.every((d) => emitted.has(d)));
-    if (ready.length === 0)
-      break;
-    for (const n3 of ready) {
-      out.push(n3);
-      emitted.add(n3.alias);
-    }
-    remaining = remaining.filter((n3) => !emitted.has(n3.alias));
-  }
-  return out;
-}
-function resolvePlan(cwd, graphArg) {
-  let graphText;
-  try {
-    graphText = readFileSync17(join22(cwd, graphArg), "utf8");
-  } catch {
-    fail2(`cannot read graph file: ${graphArg}`);
-  }
-  const { graph, errors: graphErrors } = parseGraph(graphText);
-  if (!graph) {
-    failWith(graphErrors.map((e) => `graph error: ${e}`));
-  }
-  const graphDir = dirname9(join22(cwd, graphArg));
-  const errs = [];
-  const loaded = new Map;
-  const idByAlias = new Map;
-  for (const node of graph.tasks) {
-    const src = resolve4(graphDir, node.spec);
-    let text2;
-    try {
-      text2 = readFileSync17(src, "utf8");
-    } catch {
-      errs.push(`${node.alias}: cannot read spec ${node.spec}`);
-      continue;
-    }
-    const { spec, errors: errors2 } = parseSpec(text2);
-    if (!spec) {
-      for (const e of errors2)
-        errs.push(`${node.alias}: spec error: ${e}`);
-      continue;
-    }
-    const id = taskId(spec.task);
-    if (resolveTaskState(cwd, id))
-      errs.push(`${node.alias}: task ${id} already exists`);
-    for (const [otherAlias, otherId] of idByAlias) {
-      if (otherId === id)
-        errs.push(`${node.alias}: task id ${id} collides with ${otherAlias}`);
-    }
-    idByAlias.set(node.alias, id);
-    loaded.set(node.alias, {
-      spec: { ...spec, assumptions: mergeAssumptions(briefAssumptions(graph), spec.assumptions) },
-      src
-    });
-  }
-  errs.push(...validateSchedule(graph.tasks.map((n3) => ({
-    id: n3.alias,
-    dependsOn: n3.depends_on,
-    scope: loaded.get(n3.alias)?.spec.scope ?? []
-  }))));
-  const gid = goalId(graph.goal);
-  if (existsSync20(goalPath(cwd, gid)))
-    errs.push(`goal error: goal ${gid} already exists`);
-  const notices = [];
-  const base = resolveBaseRef(cwd);
-  if (base.source === "HEAD")
-    notices.push("no origin remote — forking from local HEAD");
-  if (!worktreeAvailable(cwd)) {
-    errs.push("worktree unavailable: git cannot create worktrees for this repository. No run was started. Use a checkout where `git worktree list` succeeds.");
-  }
-  for (const c3 of submoduleScopeConflicts(cwd, base.sha, graph.tasks.map((n3) => ({ alias: n3.alias, scope: loaded.get(n3.alias)?.spec.scope ?? [] })))) {
-    errs.push(c3.scope ? `unsupported layout: task "${c3.alias}" declares scope ${c3.scope}, which reaches the submodule ${c3.submodule}. A worktree crossing a submodule boundary is unsafe, and no run was started.` : `unsupported layout: task "${c3.alias}" declares no scope, so it cannot be proven disjoint from the submodule ${c3.submodule}. Declare a scope, or use a checkout without submodules. No run was started.`);
-  }
-  const runBranch = runBranchName(gid);
-  if (branchExists(cwd, runBranch)) {
-    errs.push(`run branch ${runBranch} already exists — remove it or choose a different goal`);
-  }
-  for (const [alias, id] of idByAlias) {
-    if (branchExists(cwd, `sddx/${id}`)) {
-      errs.push(`${alias}: task branch sddx/${id} already exists`);
-    }
-    if (existsSync20(join22(worktreesDir(resolveMainRepoRoot(cwd)), id))) {
-      errs.push(`${alias}: worktree destination .sddx-worktrees/${id} already exists`);
-    }
-  }
-  return { graph, loaded, idByAlias, goalId: gid, base, notices, errors: errs };
-}
-function planNodeSummary(plan, alias) {
-  const node = plan.graph.tasks.find((n3) => n3.alias === alias);
-  const spec = plan.loaded.get(alias)?.spec;
-  const shown = {
-    task: spec?.task ?? "(unreadable)",
-    oracle: spec ? `${spec.oracle.type}: ${spec.oracle.run} (expect ${spec.oracle.expect})` : "-",
-    scope: (spec?.scope ?? []).join(", ") || "(unscoped)",
-    depends_on: (node?.depends_on ?? []).join(", ") || "(root)"
-  };
-  return {
-    ...shown,
-    success_criteria: (spec?.success_criteria ?? []).join(" | ") || "(none)",
-    assumptions: (spec?.assumptions ?? []).join(" | ") || "(none)",
-    out_of_scope: (spec?.out_of_scope ?? []).join(" | ") || "(none)",
-    stop_rules: JSON.stringify(spec?.stop_rules ?? []),
-    rest: spec ? sha256(JSON.stringify({
-      ...spec,
-      task: undefined,
-      oracle: undefined,
-      scope: undefined,
-      success_criteria: undefined,
-      assumptions: undefined,
-      out_of_scope: undefined,
-      stop_rules: undefined
-    })).slice(0, 12) : "-"
-  };
-}
-function planBriefSummary(graph) {
-  const list = (xs) => xs.join(" | ") || "(none)";
-  return {
-    goal: graph.goal,
-    answers: list(graph.answers.map((a2) => `${a2.question} → ${a2.answer}`)),
-    assumptions: list(graph.assumptions),
-    constraints: list(graph.constraints),
-    acceptance_criteria: list(graph.acceptance_criteria),
-    out_of_scope: list(graph.out_of_scope),
-    unresolved: list(graph.unresolved)
-  };
-}
-var PLAN_ACTIONS = ["Approve", "Edit", "Regenerate", "Cancel"];
-var draftsDir = (cwd) => join22(sddxDir(cwd), "drafts");
-function within(dir, path2) {
-  const rel = relative3(dir, path2);
-  return rel !== "" && !rel.startsWith("..") && !isAbsolute5(rel);
-}
-var renderCachePath = (cwd, gid) => join22(draftsDir(cwd), `.render-${gid}.json`);
-function dropRenderCache(cwd, gid) {
-  if (gid !== null)
-    rmSync5(renderCachePath(cwd, gid), { force: true });
-}
-function renderPlan(cwd, graphArg, plan, reporter) {
-  const mode = gateInteractionMode(cwd);
-  const order = topoOrder(plan.graph.tasks).map((n3) => n3.alias);
-  const current = {};
-  for (const alias of order)
-    current[alias] = planNodeSummary(plan, alias);
-  const currentBrief = planBriefSummary(plan.graph);
-  const { hash: hash2 } = planHash(join22(cwd, graphArg));
-  const targetBranch = defaultBranch(cwd);
-  const runBranch = runBranchName(plan.goalId);
-  const worktreeCount = plan.graph.tasks.filter((n3) => n3.depends_on.length === 0).length;
-  const lines = [
-    `goal: ${plan.graph.goal}`,
-    `plan: ${hash2.slice(0, 12)} (${order.length} node${order.length === 1 ? "" : "s"})`,
-    `target branch: ${targetBranch}`,
-    `run branch: ${runBranch} (not created yet)`,
-    `worktrees: ${worktreeCount} at creation, ${order.length} once every dependent materializes`,
-    `base: ${plan.base.sha} (${plan.base.source})`,
-    "validation: passed",
-    ""
-  ];
-  const brief = plan.graph;
-  const modeDiverges = brief.interaction_mode !== mode;
-  if (modeDiverges) {
-    lines.push(`planned under interaction_mode: ${brief.interaction_mode}, configured mode is ${mode} — the configured mode governs this run`, "");
-  }
-  if (brief.answers.length > 0) {
-    lines.push("answered:");
-    for (const a2 of brief.answers)
-      lines.push(`  ${a2.question} → ${a2.answer}`);
-    lines.push("");
-  }
-  if (brief.assumptions.length > 0) {
-    lines.push("assumptions:");
-    for (const a2 of brief.assumptions)
-      lines.push(`  ${a2}`);
-    lines.push("");
-  }
-  if (brief.constraints.length > 0) {
-    lines.push("constraints:");
-    for (const c3 of brief.constraints)
-      lines.push(`  ${c3}`);
-    lines.push("");
-  }
-  if (brief.acceptance_criteria.length > 0) {
-    lines.push("acceptance criteria:");
-    for (const a2 of brief.acceptance_criteria)
-      lines.push(`  ${a2}`);
-    lines.push("");
-  }
-  if (brief.out_of_scope.length > 0) {
-    lines.push("out of scope:");
-    for (const o2 of brief.out_of_scope)
-      lines.push(`  ${o2}`);
-    lines.push("");
-  }
-  if (brief.unresolved.length > 0) {
-    lines.push("unresolved:");
-    for (const u5 of brief.unresolved)
-      lines.push(`  ${u5}`);
-    lines.push("");
-  }
-  let previous = null;
-  let previousBrief = null;
-  try {
-    const parsed = JSON.parse(readFileSync17(renderCachePath(cwd, plan.goalId), "utf8"));
-    const versioned = "nodes" in parsed && "brief" in parsed;
-    previous = versioned ? parsed.nodes : parsed;
-    previousBrief = versioned ? parsed.brief : null;
-  } catch {
-    previous = null;
-  }
-  lines.push("execution order:");
-  for (const alias of order) {
-    const s = current[alias];
-    lines.push(`  ${alias}: ${s.task}`);
-    lines.push(`      criteria:   ${s.success_criteria}`);
-    lines.push(`      oracle:     ${s.oracle}`);
-    lines.push(`      scope:      ${s.scope}`);
-    lines.push(`      depends_on: ${s.depends_on}`);
-  }
-  if (previous) {
-    const changed = [];
-    const beforeBrief = previousBrief;
-    if (beforeBrief) {
-      const fields = Object.keys(currentBrief).filter((f2) => beforeBrief[f2] !== currentBrief[f2]);
-      if (fields.length > 0) {
-        changed.push("  ~ goal brief");
-        for (const f2 of fields)
-          changed.push(`      ${f2}: ${beforeBrief[f2]} → ${currentBrief[f2]}`);
-      }
-    }
-    for (const alias of order) {
-      const before = previous[alias];
-      const after = current[alias];
-      if (!before) {
-        changed.push(`  + ${alias} (new)`);
-        continue;
-      }
-      const fields = Object.keys(after).filter((k) => before[k] !== after[k]);
-      if (fields.length > 0) {
-        changed.push(`  ~ ${alias}`);
-        for (const f2 of fields)
-          changed.push(`      ${f2}: ${before[f2]} → ${after[f2]}`);
-      }
-    }
-    for (const alias of Object.keys(previous)) {
-      if (!current[alias])
-        changed.push(`  - ${alias} (removed)`);
-    }
-    lines.push("", changed.length > 0 ? "changes since last render:" : "changes since last render: none", ...changed);
-  }
-  const actions = mode === "human" ? PLAN_ACTIONS : [];
-  if (actions.length > 0) {
-    lines.push("", "actions:");
-    lines.push(`  Approve    — ... graph approve --graph ${graphArg}`);
-    lines.push("  Edit       — revise the drafts, then re-render (any edit re-arms the gate)");
-    lines.push(`  Regenerate — ... graph regenerate --graph ${graphArg} (keeps the Goal Brief)`);
-    lines.push(`  Cancel     — ... graph cancel --graph ${graphArg}`);
-  }
-  lines.push("", "nothing written — this is a dry run");
-  reporter.success(lines.join(`
-`));
-  try {
-    mkdirSync11(dirname9(renderCachePath(cwd, plan.goalId)), { recursive: true });
-    writeFileSync12(renderCachePath(cwd, plan.goalId), JSON.stringify({ nodes: current, brief: currentBrief }));
-  } catch {}
-  reporter.finish({
-    dryRun: true,
-    goal: plan.graph.goal,
-    goalId: plan.goalId,
-    planSha256: hash2,
-    workspaceMode: "worktree",
-    baseSha: plan.base.sha,
-    runBranch,
-    aliasToId: Object.fromEntries(plan.idByAlias),
-    taskIds: [...plan.idByAlias.values()],
-    executionOrder: order,
-    nodes: current,
-    targetBranch,
-    worktreeCount,
-    taskCount: order.length,
-    interactionMode: mode,
-    actions,
-    interactionModeDiverges: modeDiverges,
-    brief: {
-      interactionMode: brief.interaction_mode,
-      answers: brief.answers,
-      assumptions: brief.assumptions,
-      constraints: brief.constraints,
-      acceptanceCriteria: brief.acceptance_criteria,
-      outOfScope: brief.out_of_scope,
-      unresolved: brief.unresolved
-    }
-  });
-}
-function gateNodes(plan) {
-  return plan.graph.tasks.map((n3) => ({
-    alias: n3.alias,
-    scope: plan.loaded.get(n3.alias)?.spec.scope ?? [],
-    oracleType: plan.loaded.get(n3.alias)?.spec.oracle.type ?? "command"
-  }));
-}
-function resolveApproval(cwd, graphArg, plan) {
-  return decideGate(cwd, join22(cwd, graphArg), gateNodes(plan), gateInteractionMode(cwd), autoMaxTasks(cwd), scopesOverlap);
-}
-function cmdGraphApprove(cwd, args, format, noColor) {
-  const reporter = makeReporter("graph approve", format, noColor);
-  const graphArg = flag(args, "--graph");
-  if (!graphArg)
+function cmdPlanCheck(cwd, args, format, noColor) {
+  const reporter = makeReporter("plan check", format, noColor);
+  const specArg = args.find((a) => !a.startsWith("-"));
+  if (!specArg)
     fail2(USAGE, 2);
-  const plan = resolvePlan(cwd, graphArg);
+  const plan = resolvePlan(cwd, specArg);
   if (plan.errors.length > 0) {
-    failWith(plan.errors.map((e) => `graph approve: ${e}`));
+    failWith(plan.errors.map((e) => `plan check: ${e}`), 1, { specPath: plan.specPath, planSha256: plan.hash, errors: plan.errors });
   }
-  const { hash: hash2, errors: errors2 } = planHash(join22(cwd, graphArg));
-  if (hash2 === "")
-    failWith(errors2.map((e) => `graph approve: ${e}`));
-  const decision = decideGate(cwd, join22(cwd, graphArg), gateNodes(plan), gateInteractionMode(cwd), autoMaxTasks(cwd), scopesOverlap);
-  if (decision.refusal) {
-    failWith([`graph approve: ${decision.refusal}`], 1, { blocker: decision.blocker });
+  const spec = plan.spec;
+  const base = plan.base;
+  for (const n of plan.notices)
+    reporter.success(n);
+  const approved = findApproval(plan.root, plan.absPath).ok;
+  const mode = gateInteractionMode(plan.root);
+  reporter.success(`plan ${plan.hash} (${plan.specPath})`);
+  reporter.success(`goal ${plan.goalId}: ${spec.title}`);
+  reporter.success(`base ${base.sha} (${base.source}), run branch ${plan.runBranch}`);
+  reporter.success(`${spec.tasks.length} task(s):`);
+  for (const t of spec.tasks) {
+    const deps = t.depends_on.length > 0 ? ` after ${t.depends_on.join(", ")}` : "";
+    const scope = t.scope.length > 0 ? t.scope.join(", ") : "(unconfined)";
+    reporter.success(`  ${t.id} ${t.title}${deps}; scope ${scope}; oracle ${t.oracle.run || t.oracle.type}`);
   }
-  const approval = writeApproval(cwd, {
-    plan_sha256: hash2,
-    mode: "human",
-    workspace_mode: "worktree"
+  reporter.success(`mode ${mode}; ${approved ? "approved" : `not approved (approve with: sddx plan approve ${specArg})`}`);
+  reporter.finish({
+    specPath: plan.specPath,
+    planSha256: plan.hash,
+    goalId: plan.goalId,
+    runBranch: plan.runBranch,
+    baseSha: base.sha,
+    baseSource: base.source,
+    taskCount: spec.tasks.length,
+    tasks: spec.tasks.map((t) => ({
+      id: t.id,
+      title: t.title,
+      dependsOn: t.depends_on,
+      scope: t.scope,
+      oracle: t.oracle
+    })),
+    mode,
+    approved
   });
-  reporter.success(`approved plan ${hash2} (mode ${approval.mode})`);
-  reporter.success(`token: ${approvalPath(cwd, hash2)}`);
+}
+function cmdPlanApprove(cwd, args, format, noColor) {
+  const reporter = makeReporter("plan approve", format, noColor);
+  const harness = flag(args, "--harness");
+  const specArg = args.find((a, i) => !a.startsWith("-") && args[i - 1] !== "--harness");
+  if (!specArg)
+    fail2(USAGE, 2);
+  const plan = resolvePlan(cwd, specArg);
+  if (plan.errors.length > 0)
+    failWith(plan.errors.map((e) => `plan approve: ${e}`));
+  const gate = decidePlanGate(plan);
+  if (gate.refusal)
+    failWith([`plan approve: ${gate.refusal}`], 1, { blocker: gate.blocker });
+  const approval = writeApproval(plan.root, {
+    plan_sha256: plan.hash,
+    mode: "human",
+    ...harness ? { harness_reported: harness } : {}
+  });
+  reporter.success(`approved plan ${plan.hash}`);
+  reporter.success(`token: ${relative5(cwd, approvalPath(plan.root, plan.hash))}`);
   if (approval.signature)
     reporter.success(`signed by ${approval.signer}`);
   reporter.finish({
-    planSha256: hash2,
-    mode: approval.mode,
-    tokenPath: approvalPath(cwd, hash2),
+    planSha256: plan.hash,
+    tokenPath: approvalPath(plan.root, plan.hash),
     signed: Boolean(approval.signature),
-    nodes: plan.graph.tasks.length
+    tasks: plan.spec?.tasks.length ?? 0
   });
 }
-function cmdGraphCreate(cwd, args, format, noColor) {
-  const dryRun = args.includes("--dry-run");
-  const reporter = makeReporter(dryRun ? "graph create --dry-run" : "graph create", format, noColor);
-  const graphArg = flag(args, "--graph");
-  if (!graphArg)
+function cmdPlanStart(cwd, args, format, noColor) {
+  const reporter = makeReporter("plan start", format, noColor);
+  const specArg = args.find((a) => !a.startsWith("-"));
+  if (!specArg)
     fail2(USAGE, 2);
-  const plan = resolvePlan(cwd, graphArg);
-  const { graph, loaded, base } = plan;
-  const gid = plan.goalId;
-  const errs = plan.errors;
-  if (errs.length > 0) {
-    failWith(errs.map((e) => `graph error: ${e}`));
-  }
-  for (const n3 of plan.notices)
-    reporter.success(n3);
-  if (dryRun) {
-    renderPlan(cwd, graphArg, plan, reporter);
-    return;
-  }
-  const gate = resolveApproval(cwd, graphArg, plan);
+  const plan = resolvePlan(cwd, specArg);
+  if (plan.errors.length > 0)
+    failWith(plan.errors.map((e) => `plan start: ${e}`));
+  const gate = decidePlanGate(plan);
   if (gate.refusal)
-    failWith([`graph create: ${gate.refusal}`], 1, { blocker: gate.blocker });
+    failWith([`plan start: ${gate.refusal}`], 1, { blocker: gate.blocker });
   if (!gate.ok) {
-    failWith([`graph create: ${gate.reason}`], 3);
-  }
-  const undo = new Rollback;
-  const mainRepoRoot = resolveMainRepoRoot(cwd);
-  const aliasToId = new Map;
-  const deps = {};
-  const created = [];
-  let g2;
-  const runBranch = runBranchName(gid);
-  try {
-    createBranchAt(cwd, runBranch, base.sha);
-    undo.branch(runBranch);
-    reporter.success(`created run branch ${runBranch} at ${base.sha}`);
-    for (const node of topoOrder(graph.tasks)) {
-      const { spec, src } = loaded.get(node.alias);
-      if (node.depends_on.length === 0) {
-        const id = plan.idByAlias.get(node.alias);
-        undo.branch(`sddx/${id}`);
-        undo.worktree(join22(worktreesDir(mainRepoRoot), id));
-        undo.taskState(id);
-        const created0 = createRootTask(cwd, spec, src, reporter, base.sha);
-        aliasToId.set(node.alias, created0.id);
-        created.push(created0.id);
-        reporter.success(created0.line);
-      } else {
-        const parentIds = node.depends_on.map((alias) => aliasToId.get(alias));
-        const id = plan.idByAlias.get(node.alias);
-        undo.taskState(id);
-        createDeferredTask(cwd, spec, src, parentIds);
-        aliasToId.set(node.alias, id);
-        created.push(id);
-        deps[id] = parentIds;
-        reporter.success(`created ${id} phase=PLAN depends_on=${parentIds.join(",")} workspace=deferred(worktree)`);
-      }
-    }
-    g2 = createGoal(cwd, graph.goal, created, {
-      deps,
-      id: gid,
-      runBranch,
-      baseSha: base.sha,
-      approval: {
-        mode: gate.mode,
-        authorization: gate.mode === "human" ? "human-approval" : "auto",
-        plan_sha256: gate.hash,
-        at: new Date().toISOString()
-      }
-    });
-  } catch (e) {
-    const stuck = undo.run(mainRepoRoot);
     failWith([
-      `graph create: initialization failed — ${e.message}`,
-      ...stuck.length > 0 ? [
-        "graph create: rollback could not remove the following; remove them by hand before retrying:",
-        ...stuck.map((s) => `  ${s}`)
-      ] : ["graph create: everything this attempt created was rolled back; no run was started."]
-    ]);
+      `plan start: no approval on file for plan ${plan.hash}`,
+      `review it with: sddx plan check ${specArg}`,
+      `then approve it with: sddx plan approve ${specArg}`
+    ], 3, { planSha256: plan.hash });
   }
-  reporter.success(`created goal ${g2.id} tasks=[${g2.task_ids.join(", ")}] run_branch=${runBranch}`);
-  for (const [alias, id] of aliasToId)
-    reporter.success(`  ${alias} → ${id}`);
-  reporter.finish({
-    goalId: g2.id,
-    taskIds: g2.task_ids,
-    aliasToId: Object.fromEntries(aliasToId),
-    runBranch,
-    baseSha: base.sha
-  });
+  for (const n of plan.notices)
+    reporter.success(n);
+  const started = startPlan(plan, gate);
+  try {
+    rememberProject(plan.root);
+  } catch {}
+  reporter.success(`started goal ${started.goalId} (mode ${gate.mode})`);
+  reporter.success(`run branch ${started.runBranch} at ${started.planCommit} (plan commit on ${started.baseSha})`);
+  reporter.success(`tasks: ${started.taskIds.join(", ")}`);
+  if (started.wroteConfig)
+    reporter.success("wrote .sddx/config.json with defaults");
+  reporter.finish({ ...started, mode: gate.mode, planSha256: plan.hash });
 }
-function cmdTaskPhase(cwd, args, format, noColor) {
-  const reporter = makeReporter("task phase", format, noColor);
-  const [id, phase] = args;
-  if (!id || !phase)
-    fail2(USAGE, 2);
-  const testExitRaw = flag(args, "--test-exit");
-  const task = readTask(cwd, id);
-  if (phase === "ABANDONED") {
-    const outcome = abandonOrRetry(task);
-    if (outcome.retried) {
-      retryWorkspace(cwd, task);
-      writeTask(cwd, task);
-      reporter.success(`${id} retry ${outcome.attempt_count}/${outcome.max_attempts} → phase=PLAN`);
-      reporter.finish({
-        id,
-        phase: task.phase,
-        retried: true,
-        attempt_count: outcome.attempt_count,
-        max_attempts: outcome.max_attempts
-      });
-      return;
-    }
-    writeTask(cwd, task);
-    reporter.success(`${id} phase=${task.phase}`);
-    reporter.finish({ id, phase: task.phase, retried: false });
-    return;
-  }
-  transition(task, phase, {
-    testExit: testExitRaw === undefined ? undefined : Number(testExitRaw)
-  });
-  writeTask(cwd, task);
-  reporter.success(`${id} phase=${task.phase}`);
-  reporter.finish({ id, phase: task.phase });
-}
-function cmdRedCheck(cwd, args, format, noColor) {
-  const reporter = makeReporter("red-check", format, noColor);
-  const [id] = args;
+function cmdTaskStart(cwd, args, format, noColor) {
+  const reporter = makeReporter("task start", format, noColor);
+  const id = args[0];
   if (!id)
     fail2(USAGE, 2);
-  const res = redCheck(cwd, id);
-  if (!res.ok) {
-    fail2(`red-check: oracle exited 0 while task ${id} is RED — the oracle does not discriminate; fix the spec's oracle before implementing`);
+  const s = startTask(cwd, id);
+  reporter.success(`${id} IN_PROGRESS (profile ${s.task.profile})`);
+  reporter.success(s.path);
+  reporter.finish({
+    id,
+    path: s.path,
+    branch: `sddx/${id}`,
+    baseSha: s.baseSha,
+    reused: s.reused,
+    profile: s.task.profile
+  });
+}
+function cmdTaskReady(cwd, args, format, noColor) {
+  const reporter = makeReporter("task ready", format, noColor);
+  const goal = flag(args, "--goal");
+  if (!goal)
+    fail2(USAGE, 2);
+  const ids = readyTasks(cwd, goal);
+  reporter.success(ids.length > 0 ? ids.join(`
+`) : "(no task can start right now)");
+  reporter.finish({ goal, ready: ids });
+}
+function cmdTaskAbandon(cwd, args, format, noColor) {
+  const reporter = makeReporter("task abandon", format, noColor);
+  const id = args[0];
+  const reason = flag(args, "--reason");
+  if (!id || !reason)
+    fail2(USAGE, 2);
+  const res = abandonTask(cwd, id, reason);
+  if (res.retried) {
+    reporter.success(`${id} retry ${res.attempt_count}/${res.max_attempts}: back to PLANNED`);
+  } else {
+    reporter.success(`${id} ABANDONED: ${reason}`);
+    for (const s of res.skipped)
+      reporter.success(`${s} ABANDONED: skipped`);
   }
-  reporter.success(`red-check: oracle failed as required (exit ${res.exitCode}) — recorded oracle_red`);
-  reporter.finish({ id, exitCode: res.exitCode });
+  reporter.finish({
+    id,
+    phase: res.task.phase,
+    retried: res.retried,
+    attempt_count: res.attempt_count,
+    max_attempts: res.max_attempts,
+    skipped: res.skipped
+  });
+}
+function requireStrict(cwd, command) {
+  const root = resolveMainRepoRoot(cwd);
+  if (profile(root) !== "strict") {
+    failWith([
+      `${command} exists only in the strict profile; this repository uses the default profile.`,
+      'In the default profile, sddx verify proves the change. To opt in, set "profile": "strict" in .sddx/config.json.'
+    ], 2);
+  }
+  return root;
+}
+function cmdTaskPhase(cwd, args, format, noColor) {
+  const root = requireStrict(cwd, "sddx task phase");
+  const reporter = makeReporter("task phase", format, noColor);
+  const [id, phase] = args;
+  const exitRaw = flag(args, "--test-exit");
+  if (!id || phase !== "RED" && phase !== "GREEN" || exitRaw === undefined)
+    fail2(USAGE, 2);
+  const home = taskHome(root, id);
+  if (!home)
+    fail2(`no such task: ${id}`);
+  const task = readTask(home, id);
+  recordManualRun(task, phase, Number(exitRaw));
+  writeTask(home, task);
+  reporter.success(`${id} recorded ${phase} (test exit ${exitRaw})`);
+  reporter.finish({ id, strictPhase: phase });
+}
+function cmdTaskAllow(cwd, args, format, noColor) {
+  const root = requireStrict(cwd, "sddx task allow");
+  const [id, path] = args;
+  if (!id || !path)
+    fail2(USAGE, 2);
+  if (gateInteractionMode(root) === "auto") {
+    fail2(`task allow: refused in auto mode; a gate exemption always needs a person. Set "interaction_mode": "human" in .sddx/config.json to grant "${path}" on ${id}.`);
+  }
+  const home = taskHome(root, id);
+  if (!home)
+    fail2(`no such task: ${id}`);
+  const task = readTask(home, id);
+  allowPath(task, path);
+  writeTask(home, task);
+  const reporter = makeReporter("task allow", format, noColor);
+  reporter.success(`${id} allow=[${task.allow.join(", ")}]`);
+  reporter.finish({ id, allow: task.allow });
 }
 function cmdVerify(cwd, args, format, noColor) {
   currentCommand = "verify";
-  const [id] = args;
+  const id = args[0];
   if (!id)
     fail2(USAGE, 2);
   const reporter = makeReporter("verify", format, noColor);
-  reporter.progress(`running oracle for ${id}...`);
-  const res = verifyTask(cwd, id, {
-    model: flag(args, "--model") ?? null,
-    harness: flag(args, "--harness"),
-    pluginVersion: sddxVersion()
-  });
+  reporter.progress(`verifying ${id}...`);
+  const res = verifyTask(cwd, id);
+  const data = {
+    id,
+    verdict: res.verdict,
+    phase: res.task.phase,
+    treeSha: res.treeSha,
+    message: res.message,
+    iterations: res.task.iterations,
+    stuck: res.stuck,
+    limitReached: res.limitReached,
+    ...res.task.last_failure ? { failure: res.task.last_failure } : {}
+  };
   if (res.verdict === "pass") {
-    const integration = res.integration ?? { result: "none" };
-    reporter.success(`verdict=pass receipt=${res.receiptPath} commit=${res.commitSha} duration_ms=${res.durationMs}`);
-    if (integration.result === "merged") {
-      reporter.success(`integrated: merged into ${integration.runBranch} (${integration.mergeCommit})`);
-    } else if (integration.result === "conflict") {
-      reporter.error(`integration conflict: ${id} passed its oracle but could not be merged into ${integration.runBranch} — resolve manually`, { stream: "stdout" });
-    } else if (integration.reason === "no-branch") {
-      reporter.error(`warning: ${id} belongs to goal (run branch ${integration.runBranch}) but records no branch of its own — it can never be merged into the run branch. This shape is only produced by sddx 3.x in-place mode; see docs/how-to/migrate-to-v4.md`, { stream: "stdout" });
-    }
-    reporter.finish({
-      id,
-      verdict: "pass",
-      receiptPath: res.receiptPath,
-      commitSha: res.commitSha,
-      durationMs: res.durationMs,
-      exitCode: res.exitCode,
-      integration
-    });
+    reporter.success(`verdict=pass ${res.message}`);
+    reporter.success(`${id} IN_REVIEW; record a review with: sddx review record ${id} --verdict pass|fail`);
+    reporter.finish(data);
     return;
   }
-  const iterations = readTask(cwd, id).iterations;
-  reporter.error(`verdict=fail oracle_exit=${res.exitCode} duration_ms=${res.durationMs} iterations=${iterations}`);
+  reporter.error(`verdict=fail ${res.message}`);
+  if (res.stuck) {
+    reporter.error(`${id} is stuck: the same failure repeated; escalate to a person instead of iterating`);
+  }
+  if (res.limitReached) {
+    reporter.error(`${id} reached its iteration limit (${res.task.iterations}); escalate, or abandon it`);
+  }
+  reporter.finish(data, { status: "error" });
+  process.exit(1);
+}
+function cmdReviewRecord(cwd, args, format, noColor) {
+  currentCommand = "review record";
+  const id = args[0];
+  const verdict = flag(args, "--verdict");
+  const findings = flag(args, "--findings");
+  if (!id || verdict !== "pass" && verdict !== "fail")
+    fail2(USAGE, 2);
+  if (verdict === "fail" && !findings) {
+    fail2("review record: a fail verdict needs --findings <file> naming what must change", 2);
+  }
+  const reporter = makeReporter("review record", format, noColor);
+  const harness = flag(args, "--harness");
+  const reviewer = flag(args, "--reviewer");
+  const res = recordReview(id, {
+    cwd,
+    verdict,
+    ...findings ? { findings } : {},
+    ...reviewer ? { reviewer } : {},
+    ...harness ? { harness } : {},
+    model: flag(args, "--model") ?? null,
+    sddxVersion: sddxVersion()
+  });
+  if (res.kind === "changed") {
+    failWith([
+      `review record: the work changed after verify, so this review would not cover what gets merged. ${id} is IN_PROGRESS again; run sddx verify ${id} first.`
+    ], 1, { id, phase: res.task.phase });
+  }
+  if (res.kind === "failed") {
+    reporter.success(`${id} review failed; back to IN_PROGRESS (findings: ${res.entry.findings_path})`);
+    reporter.finish({ id, verdict: "fail", phase: res.task.phase, review: res.entry });
+    return;
+  }
+  reporter.success(`${id} DONE: receipt ${relative5(cwd, res.receiptPath)}, commit ${res.commitSha}`);
+  const integration = res.integration;
+  if (integration.result === "merged") {
+    reporter.success(`merged into ${integration.runBranch} (${integration.mergeCommit})`);
+  } else if (integration.result === "conflict") {
+    reporter.error(`integration conflict: ${id} could not be merged into ${integration.runBranch}; the run branch is unchanged. Conflicting paths: ${(integration.conflicts ?? []).join(", ") || "(unknown)"}`, { stream: "stdout" });
+  } else if (integration.reason === "error") {
+    reporter.error(`integration failed: ${integration.error}. ${id} is DONE and committed on sddx/${id}; the run branch ${integration.runBranch} is unchanged. Merge it by hand with: git merge --no-ff sddx/${id}`, { stream: "stdout" });
+  }
   reporter.finish({
     id,
-    verdict: "fail",
-    receiptPath: null,
-    exitCode: res.exitCode,
-    durationMs: res.durationMs,
-    iterations
-  }, { status: "error" });
-  process.exit(1);
+    verdict: "pass",
+    phase: res.task.phase,
+    review: res.entry,
+    receiptPath: res.receiptPath,
+    commitSha: res.commitSha,
+    integration
+  });
+}
+function cmdTaskShow(cwd, args, format, noColor) {
+  currentCommand = "task show";
+  const id = args[0];
+  if (!id)
+    fail2(USAGE, 2);
+  const task = resolveTaskState(resolveMainRepoRoot(cwd), id);
+  if (!task)
+    fail2(`no such task: ${id}`);
+  const reporter = makeReporter("task show", format, noColor);
+  if (format === "terminal")
+    printLine(JSON.stringify(task, null, 2));
+  else
+    reporter.success(`task ${id}`);
+  reporter.finish(task);
+}
+function cmdGoalShow(cwd, args, format, noColor) {
+  currentCommand = "goal show";
+  const id = args[0];
+  if (!id)
+    fail2(USAGE, 2);
+  const goal = readGoal(cwd, id);
+  const reporter = makeReporter("goal show", format, noColor);
+  if (format === "terminal")
+    printLine(JSON.stringify(goal, null, 2));
+  else
+    reporter.success(`goal ${id}`);
+  reporter.finish(goal);
+}
+function cmdBoard(cwd, format, noColor) {
+  const res = computeBoard(resolveMainRepoRoot(cwd));
+  const reporter = makeReporter("board", format, noColor);
+  reporter.success(`${res.path}${res.changed ? "" : " (unchanged)"}`);
+  reporter.finish(res.data);
+}
+function cmdAudit(cwd, args, format, noColor) {
+  currentCommand = "audit";
+  const unknown = args.filter((a) => a !== "--signatures" && a !== "--ci");
+  if (unknown.length > 0)
+    fail2(USAGE, 2);
+  const withSignatures = args.includes("--signatures");
+  const reporter = makeReporter("audit", format, noColor);
+  reporter.progress(`auditing receipts${withSignatures ? " (with signature verification)" : ""}...`);
+  const res = auditReceipts(cwd, { signatures: withSignatures, ci: args.includes("--ci") });
+  for (const n of res.notes)
+    reporter.success(n);
+  for (const f of res.findings)
+    reporter.error(f);
+  if (res.findings.length > 0) {
+    reporter.error(`audit: ${res.findings.length} finding(s)`);
+    reporter.finish({ receipts: res.receipts, findings: res.findings, notes: res.notes }, { status: "error" });
+    process.exit(1);
+  }
+  reporter.success(`audit: ${res.receipts} receipt(s) verified, chain intact`);
+  reporter.finish({ receipts: res.receipts, findings: [], notes: res.notes });
+}
+function cmdDoctor(cwd, format, noColor) {
+  currentCommand = "doctor";
+  const reporter = makeReporter("doctor", format, noColor);
+  let root = null;
+  try {
+    const r = resolveMainRepoRoot(cwd);
+    root = existsSync22(join26(r, ".git")) ? r : null;
+  } catch {
+    root = null;
+  }
+  const report = runDoctor({ cwd, root, runningVersion: sddxVersion() });
+  for (const check of report.checks) {
+    const line = `${check.status.toUpperCase().padEnd(4)} ${check.id}: ${check.detail}`;
+    if (check.status === "fail")
+      reporter.error(line);
+    else if (check.status === "warn")
+      reporter.warn(line);
+    else
+      reporter.success(line);
+    if (check.fix)
+      reporter.success(`     fix: ${check.fix}`);
+  }
+  const failures = report.checks.filter((c) => c.status === "fail").length;
+  const warnings = report.checks.filter((c) => c.status === "warn").length;
+  reporter.success(`${report.checks.length} check(s): ${failures} failed, ${warnings} warning(s)`);
+  reporter.finish(report, report.failed ? { status: "error" } : {});
+  if (report.failed)
+    process.exit(1);
+}
+function cmdMigrate(cwd, args, format, noColor) {
+  currentCommand = "migrate";
+  const reporter = makeReporter("migrate", format, noColor);
+  const apply = args.includes("--yes");
+  const root = resolveMainRepoRoot(cwd);
+  const state = detectV5State(root);
+  const busy = inFlight(state);
+  if (busy.length > 0) {
+    failWith([
+      "migrate: sddx 5 work is still in flight, and migrating would strand it:",
+      ...busy.map((b) => `  ${b}`),
+      "Finish it with sddx 5 (npx @glapsfun/sddx@5 ...), or close it out with sddx 5's `task phase <id> ABANDONED`, then run migrate again."
+    ], 1, { inFlight: busy });
+  }
+  const actions = planMigration(state);
+  if (nothingToDo(actions)) {
+    for (const a of actions)
+      reporter.warn(`${a.kind} ${a.path}: ${a.detail}`);
+    reporter.success("migrate: nothing to do; this repository holds no sddx 5 state");
+    reporter.finish({ applied: false, actions });
+    return;
+  }
+  for (const a of actions) {
+    const line = `${a.kind.padEnd(7)} ${a.path}: ${a.detail}`;
+    if (a.kind === "keep" || a.kind === "manual")
+      reporter.warn(line);
+    else
+      reporter.success(line);
+  }
+  if (!apply) {
+    reporter.success("migrate: preview only, nothing was written. Apply with: sddx migrate --yes");
+    reporter.finish({ applied: false, actions });
+    return;
+  }
+  applyMigration(root, state);
+  reporter.success('migrate: done. Receipts, approval tokens and goal refs were not touched. Commit the result as one commit, so `git revert` can undo it: git add -A .sddx .claude && git commit -m "chore: migrate sddx 5 to 6"');
+  reporter.finish({ applied: true, actions });
+}
+function cmdSpecCheck(cwd, args, format, noColor) {
+  const reporter = makeReporter("spec check", format, noColor);
+  const file = args[0];
+  if (!file)
+    fail2(USAGE, 2);
+  let text;
+  try {
+    text = readFileSync19(resolve6(cwd, file), "utf8");
+  } catch {
+    fail2(`spec check: cannot read ${file}`);
+  }
+  const { spec, errors: errors2 } = parseGoalSpec(text);
+  if (!spec) {
+    failWith(errors2.map((e) => formatSpecError(file, e)), 1, { path: file, errors: errors2.map((e) => ({ message: e.message, path: file, line: e.line })) });
+  }
+  reporter.success(`${file}: valid, status ${spec.status}, ${spec.tasks.length} task(s)`);
+  for (const d of spec.design.openDecisions)
+    reporter.warn(`open decision: ${d}`);
+  reporter.finish({
+    path: file,
+    status: spec.status,
+    title: spec.title,
+    tasks: spec.tasks.map((t) => ({ id: t.id, title: t.title })),
+    openDecisions: spec.design.openDecisions,
+    errors: []
+  });
 }
 function cmdCleanup(cwd, args, format, noColor) {
   const reporter = makeReporter("cleanup", format, noColor);
@@ -15783,13 +13280,32 @@ function cmdCleanup(cwd, args, format, noColor) {
   if (!id)
     fail2(USAGE, 2);
   const branch = `sddx/${id}`;
-  const wtPath = join22(worktreesDir(cwd), id);
-  if (existsSync20(wtPath)) {
+  const wtPath = join26(worktreesDir(cwd), id);
+  const task = resolveTaskState(cwd, id);
+  if (existsSync22(wtPath)) {
+    if (task && !isTerminal(task.phase)) {
+      fail2(`refusing: task ${id} is ${task.phase} and its worktree holds its only state; finish it, or abandon it first (sddx task abandon ${id} --reason <text>)`);
+    }
     if (isDirty(wtPath)) {
-      fail2(`refusing: worktree ${join22(".sddx-worktrees", id)} has uncommitted changes`);
+      fail2(`refusing: worktree ${join26(".sddx-worktrees", id)} has uncommitted changes`);
     }
     removeWorktree(cwd, wtPath);
-    reporter.success(`removed worktree ${join22(".sddx-worktrees", id)}`);
+    reporter.success(`removed worktree ${join26(".sddx-worktrees", id)}`);
+  }
+  if (task?.phase === "ABANDONED" && task.workspace && branchExists(cwd, branch)) {
+    const ahead = spawnSync17("git", ["rev-list", "--count", `${task.workspace.base_sha}..${branch}`], {
+      cwd,
+      encoding: "utf8"
+    });
+    if (ahead.status === 0 && ahead.stdout.trim() === "0" && currentBranch(cwd) !== branch) {
+      forceDeleteBranch(cwd, branch);
+      reporter.success(`deleted branch ${branch} (abandoned, no commits beyond its base)`);
+      reporter.finish({ id, branch, removed: true, abandoned: true });
+      return;
+    }
+    reporter.success(`kept branch ${branch}: the abandoned task committed work there`);
+    reporter.finish({ id, branch, removed: false, abandoned: true });
+    return;
   }
   if (!branchExists(cwd, branch)) {
     reporter.success(`no branch ${branch} — nothing to clean up`);
@@ -15840,8 +13356,8 @@ function cmdSweep(cwd, format, noColor) {
     reporter.finish({ locked: true, removed: [], skipped: [] });
     return;
   }
-  for (const path2 of res.removed)
-    reporter.success(`swept ${path2}`);
+  for (const path of res.removed)
+    reporter.success(`swept ${path}`);
   for (const s of res.skipped)
     reporter.success(`skipped ${s.path} (${s.reason})`);
   reporter.success(`sweep: ${res.removed.length} removed, ${res.skipped.length} skipped`);
@@ -15851,7 +13367,7 @@ function cmdNextActionsRun(cwd, goalArg, selectArg, reporter) {
   if (selectArg === undefined) {
     const visible = runActions(cwd, detectRunState(cwd, goalArg));
     reporter.success(renderMenu(visible));
-    reporter.finish({ selected: null, nextActions: visible.map((a2) => a2.label) });
+    reporter.finish({ selected: null, nextActions: visible.map((a) => a.label) });
     return;
   }
   const fresh = detectRunState(cwd, goalArg);
@@ -15929,10 +13445,8 @@ function cmdConfigShow(cwd, args, format, noColor) {
     `verbose: ${cfg.verbose}`,
     `interaction_mode: ${cfg.interaction_mode}`,
     `auto_max_tasks: ${cfg.auto_max_tasks}`,
-    `runtime_scope: ${cfg.runtime_scope}`,
-    `package_manager: ${cfg.package_manager}`,
-    `adapters: ${cfg.adapters.length > 0 ? cfg.adapters.join(",") : "(none)"}`,
-    `schema_version: ${cfg.schema_version ?? "(unset — predates sddx init)"}`
+    `profile: ${cfg.profile}`,
+    `schema_version: ${cfg.schema_version ?? "(unset: defaults apply)"}`
   ];
   reporter.success(lines.join(`
 `));
@@ -15947,325 +13461,17 @@ function cmdConfigShow(cwd, args, format, noColor) {
   }
   reporter.finish(cfg);
 }
-var ADAPTERS = { claude: claudeAdapter };
-function adapterContext(root, override) {
-  const cfg = resolveConfig(root);
-  return {
-    runtimeScope: cfg.runtime_scope,
-    packageManager: cfg.package_manager,
-    invocation: sddxCommand(cfg.runtime_scope, cfg.package_manager),
-    sddxVersion: sddxVersion(),
-    ...override
-  };
-}
-function requireAdapter(name) {
-  if (name === undefined)
-    fail2(`--adapter requires a value (one of ${Object.keys(ADAPTERS).join(", ")})`, 2);
-  const adapter = ADAPTERS[name];
-  if (!adapter) {
-    fail2(`unknown adapter "${name}" — known adapters: ${Object.keys(ADAPTERS).join(", ")}`, 2);
-  }
-  return adapter;
-}
-function cmdSync(cwd, args, format, noColor) {
-  currentCommand = "sync";
-  const adapter = requireAdapter(flag(args, "--adapter"));
-  const root = repositoryRoot(cwd);
-  const ctx = adapterContext(root);
-  const reporter = makeReporter("sync", format, noColor);
-  const plan = planAdapter(root, adapter, ctx);
-  const changing = plan.dispositions.filter((d) => d.kind === "create" || d.kind === "update");
-  for (const d of plan.dispositions) {
-    if (d.kind === "conflict")
-      reporter.warn(`conflict  ${d.path} — ${d.reason}`);
-    else if (d.kind !== "unchanged")
-      reporter.success(`${d.kind.padEnd(9)} ${d.path}`);
-  }
-  if (planHasConflicts(plan)) {
-    failWith(new AdapterConflictError(plan.conflicts).message.split(`
-`), 3, { plan });
-  }
-  if (changing.length === 0) {
-    reporter.success(`${adapter.name}: already up to date`);
-    reporter.finish({ adapter: adapter.name, changed: [] });
-    return;
-  }
-  if (!args.includes("--yes")) {
-    reporter.success(`${changing.length} file(s) would change — re-run with --yes to apply`);
-    reporter.finish({
-      adapter: adapter.name,
-      changed: changing.map((d) => d.path),
-      applied: false
-    });
-    return;
-  }
-  const result = applyAdapter(root, adapter, ctx, { force: args.includes("--force") });
-  reporter.success(`${adapter.name}: updated ${result.written.length} file(s)`);
-  reporter.finish({ adapter: adapter.name, changed: result.written, applied: true });
-}
-function cmdDoctor(cwd, format, noColor) {
-  currentCommand = "doctor";
-  const reporter = makeReporter("doctor", format, noColor);
-  let root = null;
-  try {
-    root = repositoryRoot(cwd);
-  } catch {
-    root = null;
-  }
-  const config = root === null ? null : resolveConfig(root);
-  const report = runDoctor({
-    cwd,
-    root,
-    config,
-    adapters: ADAPTERS,
-    adapterContext: root === null ? null : adapterContext(root),
-    runningVersion: sddxVersion()
-  });
-  for (const check of report.checks) {
-    const line = `${check.status.toUpperCase().padEnd(4)} ${check.id}: ${check.detail}`;
-    if (check.status === "fail")
-      reporter.error(line);
-    else if (check.status === "warn")
-      reporter.warn(line);
-    else
-      reporter.success(line);
-    if (check.fix)
-      reporter.success(`     fix: ${check.fix}`);
-  }
-  const failures = report.checks.filter((c3) => c3.status === "fail").length;
-  const warnings = report.checks.filter((c3) => c3.status === "warn").length;
-  reporter.success(`${report.checks.length} check(s): ${failures} failed, ${warnings} warning(s)`);
-  reporter.finish(report, report.failed ? { status: "error" } : {});
-  if (report.failed)
-    process.exit(1);
-}
-function cmdUninstall(cwd, args, format, noColor) {
-  currentCommand = "uninstall";
-  const adapter = requireAdapter(flag(args, "--adapter"));
-  const root = repositoryRoot(cwd);
-  const reporter = makeReporter("uninstall", format, noColor);
-  const result = uninstallAdapter(root, adapter, adapterContext(root));
-  for (const p3 of result.removed)
-    reporter.success(`removed   ${p3}`);
-  for (const p3 of result.keptModified) {
-    reporter.warn(`kept      ${p3} — modified after sddx wrote it, remove it by hand if you meant to`);
-  }
-  reporter.success(`${adapter.name}: removed ${result.removed.length} path(s), kept ${result.keptModified.length} modified`);
-  reporter.finish(result);
-}
-function adapterPlanFiles(root, opts) {
-  const files = [];
-  const ctx = {
-    runtimeScope: opts.runtimeScope,
-    packageManager: opts.packageManager,
-    invocation: sddxCommand(opts.runtimeScope, opts.packageManager),
-    sddxVersion: sddxVersion()
-  };
-  for (const name of opts.adapters) {
-    const adapter = ADAPTERS[name];
-    if (!adapter)
-      continue;
-    for (const d of planAdapter(root, adapter, ctx).dispositions) {
-      if (d.kind === "unchanged") {
-        files.push({ path: d.path, kind: "unchanged", reason: `${name} adapter` });
-      } else if (d.kind === "conflict") {
-        files.push({
-          path: d.path,
-          kind: "modify",
-          reason: `${name} adapter — CONFLICT: ${d.reason}`
-        });
-      } else {
-        files.push({
-          path: d.path,
-          kind: d.kind === "create" ? "create" : "modify",
-          reason: `${name} adapter`
-        });
-      }
-    }
-  }
-  return files;
-}
-var RUNTIME_CHOICE = { flag: "--runtime", values: RUNTIME_SCOPES };
-var PM_CHOICE = {
-  flag: "--package-manager",
-  values: PACKAGE_MANAGERS
-};
-var MODE_CHOICE = {
-  flag: "--interaction-mode",
-  values: INTERACTION_MODES2
-};
-function choice(args, spec) {
-  const raw = flag(args, spec.flag);
-  if (raw === undefined)
-    return;
-  if (!spec.values.includes(raw)) {
-    fail2(`${spec.flag} must be one of ${spec.values.join("|")} — got "${raw}"`, 2);
-  }
-  return raw;
-}
-function adapterFlags(args) {
-  const adapters = [];
-  for (let i2 = 0;i2 < args.length; i2++) {
-    if (args[i2] === "--adapter") {
-      const v = args[i2 + 1];
-      if (v === undefined)
-        fail2("--adapter requires a value", 2);
-      adapters.push(v);
-    }
-  }
-  return [...new Set(adapters)];
-}
-var KNOWN_ADAPTERS = ["claude"];
-function renderInitPlan(plan) {
-  const lines = [];
-  const changing = plan.files.filter((f2) => f2.kind !== "unchanged");
-  lines.push(`repository: ${plan.root}`, "");
-  lines.push("files:");
-  if (changing.length === 0) {
-    lines.push("  (none — everything is already in place)");
-  } else {
-    for (const f2 of changing)
-      lines.push(`  ${f2.kind.padEnd(6)} ${f2.path}    # ${f2.reason}`);
-  }
-  const unchanged = plan.files.length - changing.length;
-  if (unchanged > 0)
-    lines.push(`  (${unchanged} already up to date)`);
-  lines.push("", "package manager:");
-  if (plan.packageOps.length === 0) {
-    lines.push("  (nothing to run)");
-  } else {
-    for (const op of plan.packageOps)
-      lines.push(`  ${op.command.join(" ")}    # ${op.reason}`);
-  }
-  lines.push("", "config (.sddx/config.json):");
-  for (const [key, value] of Object.entries(plan.config)) {
-    lines.push(`  ${key}: ${JSON.stringify(value)}`);
-  }
-  return lines.join(`
-`);
-}
-async function cmdInit(cwd, args, format, noColor) {
-  currentCommand = "init";
-  const dryRun = args.includes("--dry-run");
-  const assumeYes = args.includes("--yes");
-  const force = args.includes("--force");
-  const interactive = isInteractive() && !assumeYes && format === "terminal";
-  const runtimeScope = choice(args, RUNTIME_CHOICE);
-  const packageManager = choice(args, PM_CHOICE);
-  const interactionMode2 = choice(args, MODE_CHOICE);
-  const adapters = adapterFlags(args);
-  for (const a2 of adapters) {
-    if (!KNOWN_ADAPTERS.includes(a2)) {
-      failWith([
-        `unknown adapter "${a2}" — known adapters: ${KNOWN_ADAPTERS.join(", ")}`,
-        "An adapter sddx does not implement cannot be installed, synced, or removed safely."
-      ], 2);
-    }
-  }
-  if (!interactive && runtimeScope === undefined && !dryRun) {
-    failWith([
-      "sddx init needs its choices as flags when stdin/stdout is not an interactive terminal.",
-      "Required: --runtime <global|project>",
-      "Optional: --package-manager <npm|bun> (project scope), --adapter <name> (repeatable), --interaction-mode <human|auto>",
-      "Add --yes to skip the confirmation, or --dry-run to preview without writing.",
-      "Example: sddx init --yes --runtime global --adapter claude"
-    ], 2);
-  }
-  let opts = {
-    runtimeScope: runtimeScope ?? "global",
-    packageManager: packageManager ?? "npm",
-    adapters,
-    interactionMode: interactionMode2 ?? "human"
-  };
-  if (interactive) {
-    try {
-      opts = await promptInitOptions({
-        ...runtimeScope !== undefined ? { runtimeScope } : {},
-        ...packageManager !== undefined ? { packageManager } : {},
-        ...interactionMode2 !== undefined ? { interactionMode: interactionMode2 } : {},
-        ...adapters.length > 0 ? { adapters } : {}
-      }, KNOWN_ADAPTERS);
-    } catch (e) {
-      if (e instanceof InitCancelled) {
-        printLine("cancelled — nothing was changed");
-        return;
-      }
-      throw e;
-    }
-  }
-  const reporter = makeReporter("init", format, noColor);
-  let plan;
-  try {
-    plan = planInit(cwd, opts, adapterPlanFiles);
-  } catch (e) {
-    if (e instanceof NotAGitRepositoryError)
-      failWith(e.message.split(`
-`), 1);
-    throw e;
-  }
-  reporter.success(renderInitPlan(plan));
-  if (dryRun) {
-    reporter.success("dry run: nothing was written");
-    reporter.finish({ plan, applied: false, dryRun: true });
-    return;
-  }
-  if (planIsNoop(plan)) {
-    reporter.success("already initialized — no changes");
-    reporter.finish({ plan, applied: false, dryRun: false });
-    return;
-  }
-  if (interactive && !await confirmPlan(renderInitPlan(plan))) {
-    printLine("cancelled — nothing was changed");
-    return;
-  }
-  try {
-    const result = applyInit(plan, {
-      runAdapters: (applied, record) => {
-        const written = [];
-        for (const name of opts.adapters) {
-          const adapter = ADAPTERS[name];
-          const ctx = adapterContext(applied.root);
-          record(declarationPath(name));
-          record(manifestPath(name));
-          for (const d of planAdapter(applied.root, adapter, ctx).dispositions) {
-            if (d.kind !== "unchanged")
-              record(d.path);
-          }
-          writeDeclaration(applied.root, name, {
-            schema_version: ADAPTER_SCHEMA_VERSION,
-            adapter: name
-          });
-          written.push(declarationPath(name));
-          const result2 = applyAdapter(applied.root, adapter, ctx, { force });
-          written.push(...result2.written);
-        }
-        return written;
-      }
-    });
-    rememberProject(plan.root);
-    reporter.success(`initialized: ${result.written.length} file(s) written${result.packageOps.length > 0 ? `, ran ${result.packageOps.join(", ")}` : ""}`);
-    reporter.finish({ plan, applied: true, dryRun: false, result });
-  } catch (e) {
-    if (e instanceof InitApplyError) {
-      failWith([
-        e.message,
-        ...e.rolledBack.length > 0 ? ["rolled back:", ...e.rolledBack.map((s) => `  ${s}`)] : ["nothing had been written yet"]
-      ], 1);
-    }
-    throw e;
-  }
-}
 function cmdConfigValidate(cwd, format, noColor) {
   const reporter = makeReporter("config validate", format, noColor);
-  const path2 = join22(sddxDir(cwd), "config.json");
-  if (!existsSync20(path2)) {
-    reporter.success("config validate: no .sddx/config.json — using built-in defaults");
+  const path = join26(sddxDir(cwd), "config.json");
+  if (!existsSync22(path)) {
+    reporter.success("config validate: no .sddx/config.json, built-in defaults apply");
     reporter.finish({ hasConfig: false, warnings: [] });
     return;
   }
   let parsed;
   try {
-    parsed = JSON.parse(readFileSync17(path2, "utf8"));
+    parsed = JSON.parse(readFileSync19(path, "utf8"));
   } catch (e) {
     fail2(`config validate: .sddx/config.json is not valid JSON: ${e.message}`);
   }
@@ -16274,96 +13480,17 @@ function cmdConfigValidate(cwd, format, noColor) {
   }
   const warnings = validateConfigObject(parsed);
   if (warnings.length === 0) {
-    reporter.success("config validate: .sddx/config.json OK — no issues found");
-  } else {
-    for (const w of warnings)
-      reporter.warn(`warning: ${w}`);
-    reporter.success(`config validate: ${warnings.length} warning(s)`);
+    reporter.success("config validate: .sddx/config.json OK, no issues found");
+    reporter.finish({ hasConfig: true, warnings });
+    return;
   }
-  reporter.finish({ hasConfig: true, warnings });
+  for (const w of warnings)
+    reporter.error(w);
+  reporter.error(`config validate: ${warnings.length} issue(s)`);
+  reporter.finish({ hasConfig: true, warnings }, { status: "error" });
+  process.exit(1);
 }
-function cmdIntakeCheck(cwd, args, format, noColor) {
-  const reporter = makeReporter("intake check", format, noColor);
-  const path2 = flag(args, "--batch");
-  if (!path2)
-    fail2("intake check: --batch <path> is required");
-  const abs = resolve4(cwd, path2);
-  let text2;
-  try {
-    text2 = readFileSync17(abs, "utf8");
-  } catch (e) {
-    fail2(`intake check: cannot read ${path2}: ${e.message}`);
-  }
-  const { questions, errors: errors2 } = parseQuestionBatch(text2);
-  if (!questions)
-    failWith(errors2.map((e) => `intake check: ${e}`), 2);
-  reporter.success(`intake check: ${questions.length} question${questions.length === 1 ? "" : "s"} (cap ${QUESTION_CAP})`);
-  reporter.finish({ count: questions.length, cap: QUESTION_CAP, questions });
-}
-function draftPlan(cwd, args, action) {
-  const graphArg = flag(args, "--graph");
-  if (!graphArg)
-    fail2(`graph ${action}: --graph <path> is required`);
-  const abs = resolve4(cwd, graphArg);
-  const drafts = draftsDir(cwd);
-  if (!within(drafts, abs)) {
-    fail2(`graph ${action}: ${graphArg} is not under ${relative3(cwd, drafts)}/ — ${action} only ever removes plan drafts, and refuses any path outside the drafts directory`, 2);
-  }
-  let text2;
-  try {
-    text2 = readFileSync17(abs, "utf8");
-  } catch (e) {
-    fail2(`graph ${action}: cannot read ${graphArg}: ${e.message}`);
-  }
-  const { graph, errors: errors2 } = parseGraph(text2);
-  const goal = graph ? graph.goal : (/^goal:\s*(.+)$/m.exec(text2)?.[1] ?? "").trim();
-  const gid = goal === "" ? null : goalId(goal);
-  if (gid !== null && goalExists(cwd, gid)) {
-    fail2(`graph ${action}: goal ${gid} has already been created from this plan — ${action} only applies while it is still a draft. Use cleanup/next-actions to unwind a materialized run.`, 3);
-  }
-  const specs = (graph?.tasks ?? []).map((n3) => resolve4(dirname9(abs), n3.spec));
-  for (const spec of specs) {
-    if (!within(drafts, spec)) {
-      fail2(`graph ${action}: ${relative3(cwd, spec)} is outside ${relative3(cwd, drafts)}/ — a node's spec path may not escape the drafts directory`, 2);
-    }
-  }
-  return { graphArg, abs, text: text2, graph, errors: errors2, specs, goalId: gid };
-}
-function cmdGraphRegenerate(cwd, args, format, noColor) {
-  const reporter = makeReporter("graph regenerate", format, noColor);
-  const { graphArg, abs, text: text2, specs, goalId: gid } = draftPlan(cwd, args, "regenerate");
-  const header = truncateToHeader(text2);
-  writeFileSync12(abs, header);
-  const removed = [];
-  for (const spec of specs) {
-    if (!existsSync20(spec))
-      continue;
-    rmSync5(spec, { force: true });
-    removed.push(relative3(cwd, spec));
-  }
-  dropRenderCache(cwd, gid);
-  reporter.success([
-    `graph regenerate: ${graphArg} truncated to its Goal Brief header — every recorded answer kept`,
-    `removed ${removed.length} node spec draft${removed.length === 1 ? "" : "s"}`,
-    "re-run the orchestrator over this header to produce a new decomposition"
-  ].join(`
-`));
-  reporter.finish({ graph: graphArg, removedSpecs: removed, headerBytes: header.length });
-}
-function cmdGraphCancel(cwd, args, format, noColor) {
-  const reporter = makeReporter("graph cancel", format, noColor);
-  const { graphArg, abs, specs, goalId: gid } = draftPlan(cwd, args, "cancel");
-  const removed = [];
-  for (const path2 of [...specs, abs]) {
-    if (!existsSync20(path2))
-      continue;
-    rmSync5(path2, { force: true });
-    removed.push(relative3(cwd, path2));
-  }
-  dropRenderCache(cwd, gid);
-  reporter.success(`graph cancel: removed ${removed.length} draft${removed.length === 1 ? "" : "s"} for ${graphArg} — no branch, worktree, task, goal, or approval token existed to undo`);
-  reporter.finish({ removed });
-}
+var V5_SAFE = new Set(["migrate", "audit", "doctor", "config"]);
 async function main(argv) {
   const cwd = process.cwd();
   if (argv[0] === "hook")
@@ -16376,193 +13503,69 @@ async function main(argv) {
     printLine(sddxVersion());
     return;
   }
-  if (cmd === "--help" || cmd === "-h") {
+  if (cmd === "--help" || cmd === "-h" || cmd === undefined) {
     printLine(USAGE);
     return;
   }
   rejectRemovedFlags(rest);
+  const sub = rest[0];
+  const removed = REMOVED_COMMANDS.find((r) => r.match(cmd, sub));
+  if (removed) {
+    const name = ["task", "goal"].includes(cmd) ? `${cmd} ${sub}` : cmd;
+    failWith([`\`sddx ${name}\` ${removed.text}`], 2);
+  }
   try {
-    if (cmd === "task" && rest[0] === "create") {
-      failWith([
-        "`sddx task create` was removed: it produced a task with no goal and no run branch, outside the canonical lifecycle.",
-        "Use a one-node graph instead — a single task is a one-node run:",
-        "",
-        "  goal: <one sentence>",
-        "  tasks:",
-        "    - alias: <name>",
-        "      spec: <path-to-spec.yaml>",
-        "",
-        "then: sddx graph create --graph <path-to-graph.yaml>"
-      ], 2);
-    }
-    if (cmd === "task" && rest[0] === "phase") {
-      cmdTaskPhase(cwd, rest.slice(1), format, noColor);
-      return;
-    }
-    if (cmd === "task" && rest[0] === "allow") {
-      currentCommand = "task allow";
-      const [id, path2] = rest.slice(1);
-      if (!id || !path2)
-        fail2(USAGE, 2);
-      if (gateInteractionMode(resolveMainRepoRoot(cwd)) === "auto") {
-        fail2(`task allow: refused in auto mode — a TDD-gate exemption always requires a human. Mode is read from reviewed configuration only: set "interaction_mode": "human" in .sddx/config.json to grant "${path2}" on ${id}.`);
-      }
-      const task = readTask(cwd, id);
-      allowPath(task, path2);
-      writeTask(cwd, task);
-      const reporter = makeReporter("task allow", format, noColor);
-      reporter.success(`${id} allow=[${task.allow.join(", ")}]`);
-      reporter.finish({ id, allow: task.allow });
-      return;
-    }
-    if (cmd === "task" && rest[0] === "show") {
-      currentCommand = "task show";
-      if (!rest[1])
-        fail2(USAGE, 2);
-      const task = readTask(cwd, rest[1]);
-      const reporter = makeReporter("task show", format, noColor);
-      if (format === "terminal")
-        printLine(JSON.stringify(task, null, 2));
-      else
-        reporter.success(`task ${rest[1]}`);
-      reporter.finish(task);
-      return;
-    }
-    if (cmd === "task" && rest[0] === "materialize") {
-      currentCommand = "task materialize";
-      if (!rest[1])
-        fail2(USAGE, 2);
-      const { path: path2, baseSha, mode } = materializeDependent(cwd, rest[1]);
-      const where = path2 ? `worktree=${relative3(cwd, path2)}` : `branch=sddx/${rest[1]}`;
-      const reporter = makeReporter("task materialize", format, noColor);
-      reporter.success(`materialized ${rest[1]} ${mode} ${where} base=${baseSha}`);
-      reporter.finish({ id: rest[1], mode, baseSha, path: path2 ? relative3(cwd, path2) : null });
-      return;
-    }
-    if (cmd === "red-check") {
-      cmdRedCheck(cwd, rest, format, noColor);
-      return;
-    }
-    if (cmd === "verify") {
-      cmdVerify(cwd, rest, format, noColor);
-      return;
-    }
-    if (cmd === "board") {
-      const res = computeBoard(cwd);
-      const reporter = makeReporter("board", format, noColor);
-      reporter.success(`${res.path}${res.changed ? "" : " (unchanged)"}`);
-      reporter.finish(res.data);
-      return;
-    }
-    if (cmd === "audit") {
-      currentCommand = "audit";
-      const unknown = rest.filter((a2) => a2 !== "--signatures" && a2 !== "--ci");
-      if (unknown.length > 0)
-        fail2(USAGE, 2);
-      const withSignatures = rest.includes("--signatures");
-      const reporter = makeReporter("audit", format, noColor);
-      reporter.progress(`auditing receipts${withSignatures ? " (with signature verification)" : ""}...`);
-      const res = auditReceipts(cwd, { signatures: withSignatures, ci: rest.includes("--ci") });
-      if (withSignatures)
-        for (const n3 of res.notes)
-          reporter.success(n3);
-      for (const f2 of res.findings)
-        reporter.error(f2);
-      if (res.findings.length > 0) {
-        reporter.error(`audit: ${res.findings.length} finding(s)`);
-        reporter.finish({ receipts: res.receipts, findings: res.findings, notes: res.notes }, { status: "error" });
-        process.exit(1);
-      }
-      reporter.success(`audit: ${res.receipts} receipt(s) verified, chain intact`);
-      reporter.finish({ receipts: res.receipts, findings: [], notes: res.notes });
-      return;
-    }
-    if (cmd === "goal" && rest[0] === "create") {
-      failWith([
-        "`sddx goal create` was removed: it assembled already-created tasks into a goal after execution had begun, producing a run branch that did not exist when those tasks started.",
-        "Goals are materialized before their tasks. `sddx graph create --graph <path>` creates the run branch first, then every task's workspace, and registers the goal with its dependency edges atomically."
-      ], 2);
-    }
-    if (cmd === "goal" && rest[0] === "show") {
-      currentCommand = "goal show";
-      if (!rest[1])
-        fail2(USAGE, 2);
-      const goal = readGoal(cwd, rest[1]);
-      const reporter = makeReporter("goal show", format, noColor);
-      if (format === "terminal")
-        printLine(JSON.stringify(goal, null, 2));
-      else
-        reporter.success(`goal ${rest[1]}`);
-      reporter.finish(goal);
-      return;
-    }
-    if (cmd === "intake" && rest[0] === "check") {
-      cmdIntakeCheck(cwd, rest.slice(1), format, noColor);
-      return;
-    }
-    if (cmd === "graph" && rest[0] === "approve") {
-      cmdGraphApprove(cwd, rest.slice(1), format, noColor);
-      return;
-    }
-    if (cmd === "graph" && rest[0] === "create") {
-      cmdGraphCreate(cwd, rest.slice(1), format, noColor);
-      return;
-    }
-    if (cmd === "graph" && rest[0] === "regenerate") {
-      cmdGraphRegenerate(cwd, rest.slice(1), format, noColor);
-      return;
-    }
-    if (cmd === "graph" && rest[0] === "cancel") {
-      cmdGraphCancel(cwd, rest.slice(1), format, noColor);
-      return;
-    }
-    if (cmd === "pr" && rest[0] === "create") {
-      cmdPrCreate(cwd, rest.slice(1), format, noColor);
-      return;
-    }
-    if (cmd === "run" && rest[0] === "report") {
-      cmdRunReport(cwd, rest.slice(1), format, noColor);
-      return;
-    }
-    if (cmd === "cleanup") {
-      cmdCleanup(cwd, rest, format, noColor);
-      return;
-    }
-    if (cmd === "sweep") {
-      cmdSweep(cwd, format, noColor);
-      return;
-    }
-    if (cmd === "next-actions") {
-      cmdNextActions(cwd, rest, format, noColor);
-      return;
-    }
-    if (cmd === "hook") {
-      runHook(rest[0]);
-    }
-    if (cmd === "init") {
-      await cmdInit(cwd, rest, format, noColor);
-      return;
-    }
-    if (cmd === "doctor") {
-      cmdDoctor(cwd, format, noColor);
-      return;
-    }
-    if (cmd === "sync") {
-      cmdSync(cwd, rest, format, noColor);
-      return;
-    }
-    if (cmd === "uninstall") {
-      cmdUninstall(cwd, rest, format, noColor);
-      return;
-    }
-    if (cmd === "config" && rest[0] === "show") {
-      cmdConfigShow(cwd, rest.slice(1), format, noColor);
-      return;
-    }
-    if (cmd === "config" && rest[0] === "validate") {
-      cmdConfigValidate(cwd, format, noColor);
-      return;
-    }
+    if (!V5_SAFE.has(cmd))
+      refuseOnV5State(cwd);
+    const args = rest.slice(1);
+    if (cmd === "spec" && sub === "check")
+      return cmdSpecCheck(cwd, args, format, noColor);
+    if (cmd === "plan" && sub === "check")
+      return cmdPlanCheck(cwd, args, format, noColor);
+    if (cmd === "plan" && sub === "approve")
+      return cmdPlanApprove(cwd, args, format, noColor);
+    if (cmd === "plan" && sub === "start")
+      return cmdPlanStart(cwd, args, format, noColor);
+    if (cmd === "task" && sub === "start")
+      return cmdTaskStart(cwd, args, format, noColor);
+    if (cmd === "task" && sub === "ready")
+      return cmdTaskReady(cwd, args, format, noColor);
+    if (cmd === "task" && sub === "abandon")
+      return cmdTaskAbandon(cwd, args, format, noColor);
+    if (cmd === "task" && sub === "show")
+      return cmdTaskShow(cwd, args, format, noColor);
+    if (cmd === "task" && sub === "phase")
+      return cmdTaskPhase(cwd, args, format, noColor);
+    if (cmd === "task" && sub === "allow")
+      return cmdTaskAllow(cwd, args, format, noColor);
+    if (cmd === "verify")
+      return cmdVerify(cwd, rest, format, noColor);
+    if (cmd === "review" && sub === "record")
+      return cmdReviewRecord(cwd, args, format, noColor);
+    if (cmd === "goal" && sub === "show")
+      return cmdGoalShow(cwd, args, format, noColor);
+    if (cmd === "board")
+      return cmdBoard(cwd, format, noColor);
+    if (cmd === "audit")
+      return cmdAudit(cwd, rest, format, noColor);
+    if (cmd === "pr" && sub === "create")
+      return cmdPrCreate(cwd, args, format, noColor);
+    if (cmd === "run" && sub === "report")
+      return cmdRunReport(cwd, args, format, noColor);
+    if (cmd === "cleanup")
+      return cmdCleanup(cwd, rest, format, noColor);
+    if (cmd === "sweep")
+      return cmdSweep(cwd, format, noColor);
+    if (cmd === "next-actions")
+      return cmdNextActions(cwd, rest, format, noColor);
+    if (cmd === "config" && sub === "show")
+      return cmdConfigShow(cwd, args, format, noColor);
+    if (cmd === "config" && sub === "validate")
+      return cmdConfigValidate(cwd, format, noColor);
+    if (cmd === "doctor")
+      return cmdDoctor(cwd, format, noColor);
+    if (cmd === "migrate")
+      return cmdMigrate(cwd, rest, format, noColor);
     fail2(USAGE, 2);
   } catch (e) {
     fail2(e.message);

@@ -1,150 +1,124 @@
-# Hooks and the TDD gate
+# Hooks
 
-Hook enforcement is the identity of sddx: Red → Green → Refactor is a rule the
-harness enforces, not a request the model can skip. This page documents what
-each hook does, how the gate decides, and the one escape hatch.
+sddx's guarantees live in the CLI and git: `plan start` refuses an unapproved
+plan, `verify` runs the boundary proof, `review record` binds a review to the
+proven diff, and every receipt is hash-chained. Those hold in any harness, or
+with no harness at all.
 
-All hooks run one dependency-free bundle (`dist/hooks.mjs`) through the
-Bun-required launcher, with a 10-second timeout.
+Hooks add early feedback and the one thing a CLI cannot do on its own: raise
+the user's own permission dialog. Each harness plugin registers them; the
+handlers are `sddx hook <name>`, which read the harness event as JSON on stdin,
+write a decision as JSON on stdout, and always exit 0, so a bug in sddx can
+never brick a session.
 
-## The hooks
+## The handlers
 
-| Event          | Matcher                              | Mode           | Job                                                                                       |
-| -------------- | ------------------------------------ | -------------- | ----------------------------------------------------------------------------------------- |
-| `SessionStart` | —                                    | `session-start` | Bootstrap: orphan-worktree sweep, board refresh, active tasks surfaced as session context |
-| `PreToolUse`   | `Edit\|Write\|MultiEdit\|NotebookEdit` | `tdd-gate`     | **TDD gate** — before GREEN (phases PLAN/RED), writes to implementation paths are denied  |
-| `PreToolUse`   | `Bash`                               | `bash-gate`    | **Bash gate** — pre-GREEN, only allow-listed test/read commands run (see below)           |
-| `PreToolUse`   | `Bash`                               | `approval-gate`| **Approval gate** — raises the user's permission dialog on `graph create` when the plan needs approval |
-| `PostToolUse`  | `Bash`                               | `record-test`  | Test-result recorder: observed test-runner exit codes drive PLAN→RED→GREEN                |
-| `Stop`         | —                                    | `stop-gate`    | Refuses to conclude a session whose task lacks a verified receipt                         |
-| `SubagentStop` | —                                    | `stop-gate`    | Same refusal for subagents                                                                |
+| Handler | Event | Default profile | Strict profile |
+| --- | --- | --- | --- |
+| `session-start` | session start | sweeps orphan worktrees, refreshes the board, lists unfinished tasks | same |
+| `approval-gate` | before Bash and file-tool calls | asks on `plan approve` / `plan start`; denies writes to `.sddx/approvals/**`, `.sddx/config.json` and `.git/sddx-proofs/**` | same |
+| `tdd-gate` | before file-tool writes | pass-through, never reads task state | denies implementation writes before a failing test is recorded; denies implementation writes outside the task's scope |
+| `bash-gate` | before Bash | pass-through | before a failing test is recorded, only allow-listed test and read commands run |
+| `record-test` | after Bash | ignored | records test-runner exit codes as the task's RED and GREEN evidence |
+| `stop-gate` | session and subagent stop | blocks stopping while the governing task is `IN_PROGRESS` without a proof (allows it when stuck, at the iteration limit, or once `IN_REVIEW`) | same |
 
-## Gate classification
+## The profile
 
-For every Edit/Write in phases PLAN or RED, the gate classifies the target
-path in strict order — first match wins, and every decision names the rule
-that made it:
+`"profile"` in `.sddx/config.json` selects `default` or `strict`. It is
+config-only and fails closed: an invalid value means `strict`. `sddx task start`
+records the profile on the task, and `sddx verify` refuses a task whose recorded
+profile differs from the current one, so a task is never verified under a gate
+it was not held to. The receipt records the profile.
 
-1. **Task `allow` list** — exact paths granted via `sddx task allow` (see below).
-2. **Exempt globs** — built-ins plus userConfig `exempt_globs`.
-3. **Test globs** — built-ins plus userConfig `test_globs`.
-4. **Otherwise: implementation** — blocked pre-GREEN. Hard-block, no soft mode.
+The strict profile needs blocking pre-tool hooks, so it is available only on
+harnesses that have them. On a harness without them the same repository simply
+gets the default behavior plus the boundary proof, which is the guarantee in
+every profile.
 
-The gate resolves its governing task from the written file's own workspace, so
-it behaves identically in the main checkout, task worktrees, and subagents.
+## The approval gate
 
-A blocked write gets an actionable message naming the task, the phase, and the
-rule, then tells the model exactly what to do instead:
+This is the one permission gate. The prohibition gates deny a write or say
+nothing; they never emit "allow", because auto-approving would bypass the
+user's own permission flow. The approval gate does the opposite: it emits
+`permissionDecision: "ask"`, which raises the user's dialog even when the
+session auto-accepts permissions. A model can type `sddx plan approve`, so a
+CLI-only check proves only that the plan started is the plan approved; the
+dialog is the signal a model cannot produce for itself.
+
+- `sddx plan approve <spec>` always asks, whatever the mode and whatever tokens
+  exist: recording approval is the act a person must perform.
+- `sddx plan start <spec>` asks when no valid token covers the plan's current
+  hash, and passes when one does or when `auto` mode authorizes it. A hard
+  refusal is left to the CLI, which exits 1.
+- Only an sddx invocation's `plan` subcommand is gated (`terraform plan` is not).
+  The command line is lexed quote-aware, compound lines are split, and wrappers
+  (`sh -c`, `eval`, `xargs`, `env` and similar) are unwrapped. A line using an
+  expansion the lexer cannot read, and naming both sddx and plan, asks.
+- A write to `.sddx/approvals/**` (a forged approval), `.sddx/config.json` (a
+  flipped mode or profile) or `.git/sddx-proofs/**` (a forged boundary proof,
+  see [verification.md](verification.md)) is denied, by a file tool or by a
+  shell command. The
+  shell check is textual: it sees `..` and doubled slashes but not shell
+  expansion, so it raises the bar behind the file-tool block rather than sealing
+  it. Reading those files is allowed.
+- It fails closed: any error resolves to `ask`.
+
+## The strict TDD gate
+
+For a write by a file tool, under the strict profile, for a task that is
+`IN_PROGRESS` and was started under strict, the target is classified in order,
+first match wins:
+
+1. the task's allow list (`sddx task allow`);
+2. exempt globs (built-ins plus `exempt_globs`);
+3. test globs (built-ins plus `test_globs`);
+4. otherwise implementation.
+
+An implementation write is denied until a failing test run is recorded for the
+task, and is denied whenever it falls outside the task's `scope`. Built-in globs
+come from `src/lib/classify.ts`:
 
 ```
-sddx TDD gate: blocked write to <path> — task <id> is in RED (rule: implementation path).
-Before GREEN, only test files may change. Do this instead:
-  1. Write a failing test for "<task sentence>" under a test path (**/*.test.*, **/*.spec.*, …).
-  2. Run the test runner so the failure is recorded (the gate lifts in GREEN).
-  3. Only for files that genuinely cannot be test-driven: sddx task allow <id> <path> — the exemption is audited in the receipt.
+exempt:  .sddx/**   docs/**   **/*.md   package.json   tsconfig.json
+         .github/**   openspec/**   .claude/**
+tests:   **/*.test.*   **/*.spec.*   **/*_test.*   **/test_*.py
+         tests/**   test/**   __tests__/**   spec/**
 ```
 
-## Default globs
+The same classification decides which changed files the boundary proof applies
+in its RED half, in every profile.
 
-From `src/lib/classify.ts` — the source of truth.
+## The strict Bash gate
 
-Built-in **exempt** globs (state, docs, and config are never gated):
+Before a failing test is recorded, every segment of a Bash command (split on
+pipes, `&&`, `;` and newlines) must start with an allow-listed command: test
+runners and runtimes (`bun`, `npm`, `npx`, `pnpm`, `yarn`, `pytest`, `go`,
+`cargo`, `make`, `node`, `python`, `python3`), read tools (`ls`, `cat`, `grep`,
+`rg`, `find`, `head`, `tail`, `wc`), `git status|diff|log|show`, and the sddx CLI
+itself. Redirection with `>`, command or process substitution, and the runtimes'
+eval flags are refused outright. `red_bash_allow` extends the list.
 
+## The recorder and `task phase`
+
+Under strict, the recorder watches Bash commands that start with a known test
+runner (`bun test`, `npm test`, `pnpm test`, `yarn test`, `npx vitest`,
+`npx jest`, `pytest`, `go test`, `cargo test`). The first failing run records
+RED, which lifts both gates; a passing run after it records GREEN. Every run is
+kept, and a strict receipt lists them. For a runner the recorder does not
+recognize, record the run by hand; the exit code is checked, not trusted:
+
+```sh
+sddx task phase <id> RED --test-exit 1
+sddx task phase <id> GREEN --test-exit 0
 ```
-.sddx/**   docs/**   **/*.md   package.json   tsconfig.json
-.github/**   openspec/**   .claude/**
-```
-
-Built-in **test** globs (per-language defaults):
-
-```
-**/*.test.*   **/*.spec.*   **/*_test.*   **/test_*.py
-tests/**   test/**   __tests__/**   spec/**
-```
-
-Both lists extend via the plugin settings `exempt_globs` and `test_globs`
-(space-separated; see [../how-to/install-sddx.md](../how-to/install-sddx.md)). Paths are
-normalized to forward slashes before matching, so the gate classifies
-identically on Windows.
-
-## RED-phase Bash gate
-
-`PreToolUse` on Bash: while the governing task is pre-GREEN (PLAN or RED),
-a command runs only if the first word of **every** segment (split on pipes,
-`&&`, `;`, and newlines) is on the allow-list — test runners and runtimes
-(`bun`, `npm`, `npx`, `pnpm`, `yarn`, `pytest`, `go`, `cargo`, `make`,
-`node`, `python`, `python3`), read tools (`ls`, `cat`, `grep`, `rg`, `find`,
-`head`, `tail`, `wc`), `git status|diff|log|show`, and the sddx CLI itself
-(`sddx-run`/`sddx` — recording phases must never be gated out). Blocked
-outright, with no target parsing: `>` redirection (fd duplication like `2>&1`
-is fine), command/process substitution (`$(…)`, backticks, `<(…)`), and
-eval/print flags (`-e`, `-c`, `-p`, …) on the runtimes. Extend (never
-replace) the list with userConfig `red_bash_allow`. This closes the classic
-`sed -i`/`tee` bypass around the Edit/Write gate.
-
-## Stuck-loop escalation
-
-The PostToolUse recorder fingerprints every failing test run (exit code +
-normalized output tail). Reaching `stuck_threshold` (default 3) consecutive
-identical failures marks the task `stuck`: the recorder tells the model to
-stop and escalate, the Stop gate permits concluding the session (escalation
-beats spinning), and `BOARD.md` shows `⚠stuck`. Any pass or a *different*
-failure resets the counter — progress is allowed, spinning is not.
 
 ## The allow escape hatch
-
-The only way past the gate is per-file and audited:
 
 ```sh
 sddx task allow <id> <path>
 ```
 
-This appends the exact path to the task file's allow list. It is visible on
-the board, and at verification the whole list is copied into the receipt
-(`allow` field, receipt v2) — so every exemption a task ever used is part of
-its tamper-evident record. See
-[receipts-schema.md](receipts-schema.md).
-
-There is no global off-switch and no soft mode. Use `allow` for files that
-genuinely cannot be test-driven (generated code, vendored assets), not to
-skip the loop.
-
-## Phase transitions are evidence
-
-Phases move on observed exit codes, never on claims:
-
-- The **recorder** (`PostToolUse` on Bash) parses test-runner exit codes from
-  commands matching the test globs: a non-zero exit in PLAN moves the task to
-  RED; a zero exit in RED moves it to GREEN. The evidence (`--test-exit <n>`)
-  is recorded in the task file.
-- The **stop gate** refuses to conclude a session or subagent while its task
-  lacks a verified receipt — "done" requires the verifier to have executed the
-  oracle and written the chained receipt
-  ([receipts-schema.md](receipts-schema.md)).
-- A broken or unreadable task state file **blocks writes** rather than
-  silently disabling the gate.
-
-## The approval gate is the one *permission* gate
-
-The TDD and Bash gates are **prohibition** gates: they emit
-`permissionDecision: "deny"` to block, and otherwise emit **no** permission
-decision at all — never `"allow"`, because auto-approving would hand a tool past
-the user's own permission flow.
-
-The approval gate is the opposite shape and must do what they must not: emit
-`permissionDecision: "ask"`, which raises the user's permission dialog. Per the
-hook API this fires **even when the session is in an auto-accept permission
-mode**, so a permissive session config cannot silently disable `human` mode.
-
-This asymmetry is deliberate and load-bearing. A model can type `sddx graph
-approve`, so a CLI-only check proves only that the plan is the approved plan —
-the dialog is the one signal a model cannot produce for itself. A regression test
-asserts this gate emits `ask` and not a pass-through, so a future "consistency"
-cleanup toward the prohibition-gate shape fails loudly.
-
-**It fails closed.** Any error — unreadable config, corrupt token, an unexpected
-throw — resolves to `ask`. A prohibition gate that fails open loses one
-assertion; a permission gate that fails open disables the mode the user chose.
-
-The gate is registered on `PreToolUse` only and adds nothing to `SessionStart` or
-any other hot path, so the always-on token and latency budgets are unchanged.
+Exempts one exact path for one task, under strict only, and never in `auto`
+mode, where nobody is present to grant it. Every exemption appears on the board
+and in the receipt's `allow` list. Use it for files that genuinely cannot be
+test-driven, such as generated code.

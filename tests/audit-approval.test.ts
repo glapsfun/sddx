@@ -1,85 +1,70 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import {
-  chmodSync,
-  mkdirSync,
-  mkdtempSync,
-  readdirSync,
-  readFileSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { auditReceipts } from "../src/audit";
 import { writeApproval } from "../src/lib/approval";
-import { headSha } from "../src/lib/git";
-import { createGoal } from "../src/lib/goal";
-import { parseSpec } from "../src/lib/spec";
-import { createTask, transition, writeTask } from "../src/lib/task";
-import { verifyTask } from "../src/lib/verify";
-import { fixtureRepo } from "./fixtures";
-import { mutateGoal } from "./helpers";
-
-const SPEC = `task: do the widget work
-success_criteria:
-  - "it works"
-oracle:
-  type: command
-  run: "true"
-`;
+import { type Receipt, sha256 } from "../src/lib/receipt";
+import { signPayload } from "../src/lib/sign";
+import { fixtureRepo, signingRepo, writeConfig } from "./fixtures";
+import { completeTask, createRun, mutateGoal } from "./helpers";
 
 const PLAN = "a".repeat(64);
+const REL = join(".sddx", "receipts", "T1.json");
 
-/** A repo with one verified task belonging to an approved goal. */
-function verifiedRepo(approval?: { mode: "human" | "auto"; plan_sha256?: string }): {
-  cwd: string;
-  id: string;
-  rel: string;
-} {
+/** The worktree of one finished task of a goal run under `mode`, plus that plan's hash. */
+function verifiedRepo(mode: "human" | "auto"): { cwd: string; wt: string; plan: string } {
   const cwd = fixtureRepo();
-  const parsed = parseSpec(SPEC);
-  const t = createTask(cwd, parsed.spec as NonNullable<typeof parsed.spec>, ".sddx/specs/x.yaml", {
-    mode: "worktree",
-    branch: null,
-    base_sha: headSha(cwd),
-  });
-  let cur = transition(t, "RED", { testExit: 1 });
-  cur = transition(cur, "GREEN", { testExit: 0 });
-  cur = transition(cur, "VERIFY");
-  cur.evidence.oracle_red = { exit_code: 1, at: new Date(0).toISOString() };
-  writeTask(cwd, cur);
-
-  if (approval) {
-    createGoal(cwd, "ship the widget", [cur.id], {
-      runBranch: "sddx/run-x",
-      baseSha: headSha(cwd),
-      approval: {
-        mode: approval.mode,
-        plan_sha256: approval.plan_sha256 ?? PLAN,
-        at: new Date().toISOString(),
-      },
-    });
-  }
-  verifyTask(cwd, cur.id, { harness: "test", model: null, pluginVersion: "test" });
-  return { cwd, id: cur.id, rel: join(".sddx", "receipts", `${cur.id}.json`) };
+  if (mode === "auto") writeConfig(cwd, { interaction_mode: "auto" });
+  const run = createRun(cwd, { tasks: [{ id: "T1" }], approve: mode === "human" });
+  const { worktree } = completeTask(cwd, "T1");
+  return { cwd, wt: worktree, plan: sha256(readFileSync(join(cwd, run.specPath))) };
 }
 
 /** Rewrites a receipt in place and re-commits, so only the targeted field
  * differs (chain/commit-binding findings would otherwise mask the approval one). */
-function editReceipt(cwd: string, id: string, mutate: (r: Record<string, unknown>) => void): void {
-  const path = join(cwd, ".sddx", "receipts", `${id}.json`);
+function editReceipt(wt: string, mutate: (r: Record<string, unknown>) => void): void {
+  const path = join(wt, REL);
   chmodSync(path, 0o644);
   const r = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
   mutate(r);
   writeFileSync(path, `${JSON.stringify(r, null, 2)}\n`);
+  spawnSync("git", ["add", "-A"], { cwd: wt });
+  spawnSync("git", ["commit", "-qm", "tamper"], { cwd: wt });
+}
+
+/** A repository whose only receipt is a committed version 3 one, written before
+ * approval provenance existed. */
+function legacyRepo(): string {
+  const cwd = fixtureRepo();
+  const r: Receipt = {
+    version: 3,
+    task_id: "old",
+    seq: 1,
+    prev: "genesis",
+    harness: "claude-code",
+    model: null,
+    plugin_version: "2.0.0",
+    oracle: { run: "true", expect: "exit 0" },
+    runs: [{ exit_code: 0, duration_ms: 1, stdout_sha256: PLAN, stderr_sha256: PLAN }],
+    env: { os: "linux", arch: "x64", runtime: "bun", runtime_version: "1.2.0", dirty_tree: false },
+    base_sha: "1".repeat(40),
+    tree_sha: "2".repeat(40),
+    verdict: "pass",
+    verified_at: "2025-01-01T00:00:00.000Z",
+    allow: [],
+  };
+  mkdirSync(join(cwd, ".sddx", "receipts"), { recursive: true });
+  writeFileSync(join(cwd, ".sddx", "receipts", "old.json"), `${JSON.stringify(r, null, 2)}\n`);
   spawnSync("git", ["add", "-A"], { cwd });
-  spawnSync("git", ["commit", "-qm", "tamper"], { cwd });
+  spawnSync("git", ["commit", "-qm", "legacy receipt"], { cwd });
+  return cwd;
 }
 
 describe("approval provenance audit", () => {
   test("consistent provenance produces no approval finding", () => {
-    const { cwd } = verifiedRepo({ mode: "auto" });
-    const res = auditReceipts(cwd);
+    const { wt } = verifiedRepo("auto");
+    const res = auditReceipts(wt);
     expect(res.findings.filter((f) => f.includes("approval"))).toEqual([]);
   });
 
@@ -88,71 +73,57 @@ describe("approval provenance audit", () => {
     // untrusted input. Dereferencing it unguarded threw a TypeError out of
     // auditReceipts and killed the whole report — the command whose job is to
     // detect tampering, disabled by the tampering.
-    const { cwd, rel } = verifiedRepo({ mode: "human" });
+    const { cwd, wt } = verifiedRepo("human");
     mutateGoal(cwd, (g) => {
       g.approval = { mode: "human" }; // plan_sha256 dropped
     });
-    const res = auditReceipts(cwd);
-    const finding = res.findings.find((f) => f.includes(rel) && f.includes("malformed"));
+    const res = auditReceipts(wt);
+    const finding = res.findings.find((f) => f.includes(REL) && f.includes("malformed"));
     expect(finding).toBeDefined();
     // and the rest of the audit still ran
     expect(res.receipts).toBeGreaterThan(0);
   });
 
   test("a receipt whose mode disagrees with its goal is a finding naming both values", () => {
-    const { cwd, id, rel } = verifiedRepo({ mode: "auto" });
-    editReceipt(cwd, id, (r) => {
+    const { wt } = verifiedRepo("auto");
+    editReceipt(wt, (r) => {
       (r.approval as Record<string, unknown>).mode = "human";
     });
-    const res = auditReceipts(cwd);
-    const finding = res.findings.find((f) => f.includes("approval") && f.includes(rel));
+    const res = auditReceipts(wt);
+    const finding = res.findings.find((f) => f.includes("approval") && f.includes(REL));
     expect(finding).toBeDefined();
     expect(finding).toContain("human");
     expect(finding).toContain("auto");
   });
 
   test("a receipt whose plan hash disagrees with its goal is a finding", () => {
-    const { cwd, id } = verifiedRepo({ mode: "human" });
-    editReceipt(cwd, id, (r) => {
+    const { wt, plan } = verifiedRepo("human");
+    editReceipt(wt, (r) => {
       (r.approval as Record<string, unknown>).plan_sha256 = "b".repeat(64);
     });
-    const finding = auditReceipts(cwd).findings.find((f) => f.includes("approval"));
+    const finding = auditReceipts(wt).findings.find((f) => f.includes("approval"));
     expect(finding).toBeDefined();
-    expect(finding).toContain(PLAN.slice(0, 12));
+    expect(finding).toContain(plan.slice(0, 12));
   });
 
   test("legacy receipts with no approval block are skipped silently", () => {
-    const { cwd } = verifiedRepo();
-    const res = auditReceipts(cwd);
+    const res = auditReceipts(legacyRepo());
+    expect(res.receipts).toBe(1);
     expect(res.findings.filter((f) => f.includes("approval"))).toEqual([]);
   });
 
   test("a receipt with approval whose goal has none is not a finding", () => {
-    // a goal created before provenance existed, or via standalone `goal create`
-    const { cwd, id } = verifiedRepo({ mode: "human" });
+    // a goal written before approval provenance existed
+    const { cwd, wt } = verifiedRepo("human");
     mutateGoal(cwd, (g) => {
       delete g.approval;
     });
-    expect(auditReceipts(cwd).findings.filter((f) => f.includes("approval"))).toEqual([]);
-    expect(id).toBeTruthy();
+    const res = auditReceipts(wt);
+    expect(res.findings.filter((f) => f.includes("approval"))).toEqual([]);
+    // not silent either: a skipped cross-check must not read as a passed one
+    expect(res.notes.join("\n")).toContain("NOT cross-checked");
   });
 });
-
-/** fixtureRepo + a throwaway SSH signing identity. */
-function signingRepo(): string {
-  const cwd = fixtureRepo();
-  const keyDir = mkdtempSync(join(tmpdir(), "sddx-aud-key-"));
-  const key = join(keyDir, "id_ed25519");
-  expect(spawnSync("ssh-keygen", ["-t", "ed25519", "-N", "", "-q", "-f", key]).status).toBe(0);
-  const pub = readFileSync(`${key}.pub`, "utf8").trim();
-  const allowed = join(keyDir, "allowed_signers");
-  writeFileSync(allowed, `fixture@example.invalid ${pub}\n`);
-  const g = (...a: string[]) => spawnSync("git", a, { cwd });
-  g("config", "gpg.format", "ssh");
-  g("config", "user.signingkey", key);
-  g("config", "gpg.ssh.allowedSignersFile", allowed);
-  return cwd;
-}
 
 describe("approval signature verification", () => {
   test("a valid approval signature verifies and names its signer", () => {
@@ -195,7 +166,6 @@ describe("approval signature verification", () => {
     const cwd = signingRepo();
     const token = writeApproval(cwd, { plan_sha256: PLAN, mode: "human" });
     // swap in a signature made under the receipt namespace over the same payload
-    const { signPayload } = require("../src/lib/sign") as typeof import("../src/lib/sign");
     const wrong = signPayload(cwd, PLAN, "sddx-receipt");
     expect(wrong).not.toBeNull();
     const p = join(cwd, ".sddx", "approvals", `${PLAN}.json`);
@@ -211,8 +181,8 @@ describe("approval signature verification", () => {
 
 describe("audit claims are bounded", () => {
   test("a passing approval audit names the plan and mode, and never asserts who approved", () => {
-    const { cwd } = verifiedRepo({ mode: "human" });
-    const res = auditReceipts(cwd);
+    const { wt } = verifiedRepo("human");
+    const res = auditReceipts(wt);
     const summary = [...res.findings, ...res.notes].join("\n").toLowerCase();
     expect(summary).not.toContain("approved by a human");
     expect(summary).not.toContain("human approved");

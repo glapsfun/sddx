@@ -3,7 +3,7 @@
 // workspace's own .sddx/ (worktrees carry their copy — see cli task create).
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve as resolvePath } from "node:path";
-import { isDeferred, isTerminal, type TaskState } from "./task";
+import { isStarted, isTerminal, type TaskState } from "./task";
 
 export type Resolution =
   | { kind: "none" }
@@ -59,12 +59,12 @@ function readTaskFile(root: string, id: string): Resolution | null {
 export function resolutionFailureReason(res: Resolution, action: string): string | null {
   if (res.kind === "ambiguous") {
     return (
-      `sddx TDD gate: ambiguous governing task — ${res.ids.join(" and ")} are both active in this workspace. ` +
+      `sddx: ambiguous governing task: ${res.ids.join(" and ")} are both active in this workspace. ` +
       "The gate refuses to guess. Abandon or finish one, or work in each task's own worktree."
     );
   }
   if (res.kind === "corrupt") {
-    return `sddx TDD gate: task state at ${res.path} is unreadable (${res.error}). Fix or remove it before ${action} — a broken state file must not silently disable the gate.`;
+    return `sddx: task state at ${res.path} is unreadable (${res.error}). Fix or remove it before ${action}; a broken state file must not silently disable the gate.`;
   }
   return null;
 }
@@ -98,11 +98,10 @@ export function resolveTask(startPath: string): Resolution {
     } catch (e) {
       return { kind: "corrupt", root, path, error: (e as Error).message };
     }
-    // A deferred dependent has no workspace, so it governs none. Its state sits
-    // here only because the main checkout is the one place it can live until its
-    // parents finish; counting it made a task the user never started claim their
-    // own checkout, and two of them made it "ambiguous".
-    if (!isTerminal(task.phase) && !isDeferred(task)) candidates.push(task);
+    // A PLANNED task has no worktree, so it governs none. Its state sits in the
+    // main checkout only until `task start`; counting it would make a task the
+    // user never started claim their own checkout.
+    if (!isTerminal(task.phase) && isStarted(task)) candidates.push(task);
   }
   if (candidates.length === 0) return { kind: "none" };
   if (candidates.length === 1) return { kind: "task", root, task: candidates[0] as TaskState };

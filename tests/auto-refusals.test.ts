@@ -1,83 +1,66 @@
 // Autonomy bounds as HARD REFUSALS, not gate arming.
 //
 // The bounds used to degrade `auto` into `human`: the run halted and told the
-// user to `graph approve`. That halt was already terminal, but it recorded a
-// hybrid — a run configured `auto` whose token said a human approved it — and
+// user to approve. That halt was already terminal, but it recorded a hybrid, a
+// run configured `auto` whose token said a human approved it, and
 // `requested_mode`/`degraded_reason` existed only to describe that hybrid.
 // Removing the degradation removes the hybrid, so a bound now fails outright
 // and names the reviewed-configuration edit instead of offering a token.
 //
 // The protected-path bound is the reason this matters. The autonomous blocker
-// rule cannot rest on the intake role reporting its own uncertainty — that is a
-// model claim of the class this project replaced with exit codes everywhere
-// else. SENSITIVE_SEGMENTS and SENSITIVE_GLOBS are the deterministic half: code
+// rule cannot rest on a model reporting its own uncertainty; that is a model
+// claim of the class this project replaced with exit codes everywhere else.
+// SENSITIVE_SEGMENTS and SENSITIVE_GLOBS are the deterministic half: code
 // constants, unit tested, that fire whether or not anything self-reported a
 // problem.
 import { describe, expect, test } from "bun:test";
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { decideGate, readApproval, SENSITIVE_GLOBS, SENSITIVE_SEGMENTS } from "../src/lib/approval";
 import { approvalGate } from "../src/lib/approvalgate";
 import { scopesOverlap } from "../src/lib/glob-overlap";
-import { fixtureClone, fixtureRepo } from "./fixtures";
-import { GRAPH_HEADER_LINES, repoRoot } from "./helpers";
+import { fixtureClone, fixtureRepo, writeConfig } from "./fixtures";
+import { goalIds, goalSpec, repoRoot, sddx, writeSpec } from "./helpers";
 
-const CLI_SRC = join(repoRoot, "src/cli.ts");
-const cli = (cwd: string, ...args: string[]) =>
-  spawnSync("bun", [CLI_SRC, ...args], { cwd, encoding: "utf8", env: process.env });
-
-// Mode is config-only by design (config.ts interactionMode) — the environment is
+// Mode is config-only by design (config.ts interactionMode): the environment is
 // part of the command line the agent composes, so tests write config as a user does.
 function withMode(cwd: string, mode: "human" | "auto", autoMaxTasks?: number): void {
-  mkdirSync(join(cwd, ".sddx"), { recursive: true });
-  writeFileSync(
-    join(cwd, ".sddx", "config.json"),
-    JSON.stringify({
-      interaction_mode: mode,
-      ...(autoMaxTasks ? { auto_max_tasks: autoMaxTasks } : {}),
-    }),
-  );
+  writeConfig(cwd, {
+    interaction_mode: mode,
+    ...(autoMaxTasks ? { auto_max_tasks: autoMaxTasks } : {}),
+  });
 }
 
-const SPEC = (task: string, scope?: string) => `task: ${task}
-success_criteria:
-  - "it works"
-${scope ? `scope:\n  - "${scope}"\n` : ""}oracle:
-  type: command
-  run: "true"
-`;
-
-function planRepo(cwd: string, scopes: (string | undefined)[]): string {
-  const drafts = join(cwd, ".sddx", "drafts");
-  mkdirSync(drafts, { recursive: true });
-  const lines = [...GRAPH_HEADER_LINES, "goal: ship the widget", "tasks:"];
-  scopes.forEach((scope, i) => {
-    writeFileSync(join(drafts, `n${i}.yaml`), SPEC(`build part ${i}`, scope));
-    lines.push(`  - alias: n${i}`, `    spec: n${i}.yaml`);
-  });
-  const rel = join(".sddx", "drafts", "graph.yaml");
-  writeFileSync(join(cwd, rel), `${lines.join("\n")}\n`);
-  return rel;
+/** A spec with one task per entry; `null` declares no scope at all. */
+function planRepo(cwd: string, scopes: (string | null)[]): string {
+  return writeSpec(
+    cwd,
+    "2026-01-01-ship-the-widget",
+    goalSpec({
+      title: "ship the widget",
+      tasks: scopes.map((scope, i) => ({ id: `n${i}`, scope: scope === null ? null : [scope] })),
+    }),
+  );
 }
 
 const nodesFor = (scopes: string[][]) =>
   scopes.map((scope, i) => ({ alias: `n${i}`, scope, oracleType: "command" }));
 
+/** decideGate over a throwaway spec, so the hash is real and only `scopes` vary. */
+function gate(scopes: string[][], mode: "human" | "auto" = "auto") {
+  const cwd = fixtureRepo();
+  const spec = join(cwd, planRepo(cwd, ["x"]));
+  return decideGate(cwd, spec, nodesFor(scopes), mode, 99, scopesOverlap, []);
+}
+
 const tokens = (cwd: string): string[] => {
   const dir = join(cwd, ".sddx", "approvals");
-  return existsSync(dir) ? readdirSync(dir) : [];
-};
-const goals = (cwd: string): string[] => {
-  const dir = join(cwd, ".sddx", "goals");
   return existsSync(dir) ? readdirSync(dir) : [];
 };
 
 describe("protected-path bound", () => {
   test("a scope naming a protected area refuses in auto mode", () => {
-    const cwd = fixtureRepo();
-    const g = join(cwd, planRepo(cwd, ["src/auth/**"]));
-    const d = decideGate(cwd, g, nodesFor([["src/auth/**"]]), "auto", 99, scopesOverlap);
+    const d = gate([["src/auth/**"]]);
     expect(d.ok).toBe(false);
     expect(d.refusal).toBeDefined();
     expect(d.refusal).toContain("n0");
@@ -88,21 +71,16 @@ describe("protected-path bound", () => {
     // The reason this is a segment-name rule and not glob overlap: overlap
     // against an any-depth pattern refuses every scope ending in a doubled
     // star, which turns auto mode off instead of bounding it.
-    const cwd = fixtureRepo();
-    const g = join(cwd, planRepo(cwd, ["x"]));
     for (const scope of ["auth/**", "src/auth/**", "services/api/auth/**"]) {
-      const d = decideGate(cwd, g, nodesFor([[scope]]), "auto", 99, scopesOverlap);
-      expect(d.refusal, `${scope} should refuse`).toBeDefined();
+      expect(gate([[scope]]).refusal, `${scope} should refuse`).toBeDefined();
     }
   });
 
   test("naming the area as a file or a suffixed directory still refuses", () => {
     // Whole-segment equality caught `src/auth/**` but let `src/auth.ts` and
-    // `src/auth-service/**` through — scopes that name the protected area MORE
+    // `src/auth-service/**` through: scopes that name the protected area MORE
     // precisely than the directory form that was refused. Word-wise comparison
     // closes that, and the suffix form (`user-auth.ts`) with it.
-    const cwd = fixtureRepo();
-    const g = join(cwd, planRepo(cwd, ["x"]));
     for (const scope of [
       "src/auth.ts",
       "lib/billing.ts",
@@ -110,8 +88,7 @@ describe("protected-path bound", () => {
       "src/auth-service/**",
       "lib/user-auth.ts",
     ]) {
-      const d = decideGate(cwd, g, nodesFor([[scope]]), "auto", 99, scopesOverlap);
-      expect(d.refusal, `${scope} should refuse`).toBeDefined();
+      expect(gate([[scope]]).refusal, `${scope} should refuse`).toBeDefined();
     }
   });
 
@@ -119,16 +96,13 @@ describe("protected-path bound", () => {
     // SENSITIVE_FILENAMES are anchored with `^`, so testing them against the
     // raw segment made the refusal depend on how the planner spelled the glob:
     // `ops/.env*` refused, `ops/*.env` did not. Wildcards are stripped first.
-    const cwd = fixtureRepo();
-    const g = join(cwd, planRepo(cwd, ["x"]));
     for (const scope of [
       "ops/*.env",
       "deploy/*Dockerfile",
       "deploy/Docker*file",
       "x/*docker-compose*",
     ]) {
-      const d = decideGate(cwd, g, nodesFor([[scope]]), "auto", 99, scopesOverlap);
-      expect(d.refusal, `${scope} should refuse`).toBeDefined();
+      expect(gate([[scope]]).refusal, `${scope} should refuse`).toBeDefined();
     }
   });
 
@@ -136,60 +110,41 @@ describe("protected-path bound", () => {
     // The cost of word-wise matching would be refusing every scope that merely
     // starts with a protected name. It does not: these share a prefix, not a
     // word, and auto mode must still be usable.
-    const cwd = fixtureRepo();
-    const g = join(cwd, planRepo(cwd, ["x"]));
     for (const scope of ["authors/**", "authority/**", "src/authorship.ts"]) {
-      const d = decideGate(cwd, g, nodesFor([[scope]]), "auto", 99, scopesOverlap);
-      expect(d.refusal, `${scope} should pass`).toBeUndefined();
+      expect(gate([[scope]]).refusal, `${scope} should pass`).toBeUndefined();
     }
   });
 
   test("every protected segment is matched", () => {
-    const cwd = fixtureRepo();
-    const g = join(cwd, planRepo(cwd, ["x"]));
     for (const seg of SENSITIVE_SEGMENTS) {
-      const d = decideGate(cwd, g, nodesFor([[`src/${seg}/**`]]), "auto", 99, scopesOverlap);
-      expect(d.refusal, `${seg} should refuse`).toBeDefined();
+      expect(gate([[`src/${seg}/**`]]).refusal, `${seg} should refuse`).toBeDefined();
     }
   });
 
   test("every root-anchored protected glob is matched", () => {
-    const cwd = fixtureRepo();
-    const g = join(cwd, planRepo(cwd, ["x"]));
     for (const glob of SENSITIVE_GLOBS) {
-      const d = decideGate(cwd, g, nodesFor([[glob]]), "auto", 99, scopesOverlap);
-      expect(d.refusal, `${glob} should refuse`).toBeDefined();
+      expect(gate([[glob]]).refusal, `${glob} should refuse`).toBeDefined();
     }
   });
 
-  test("an ordinary nested scope is NOT refused — the bound bounds, it does not veto", () => {
-    const cwd = fixtureRepo();
-    const g = join(cwd, planRepo(cwd, ["x"]));
+  test("an ordinary nested scope is NOT refused; the bound bounds, it does not veto", () => {
     for (const scope of ["src/**", "src/widget/**", "docs/**", "tests/unit/**"]) {
-      const d = decideGate(cwd, g, nodesFor([[scope]]), "auto", 99, scopesOverlap);
-      expect(d.refusal, `${scope} should pass`).toBeUndefined();
+      expect(gate([[scope]]).refusal, `${scope} should pass`).toBeUndefined();
     }
   });
 
-  test("an unconfined node refuses — an empty scope may write any protected path", () => {
-    const cwd = fixtureRepo();
-    const g = join(cwd, planRepo(cwd, [undefined]));
-    const d = decideGate(cwd, g, nodesFor([[]]), "auto", 99, scopesOverlap);
+  test("an unconfined task refuses; an empty scope may write any protected path", () => {
+    const d = gate([[]]);
     expect(d.ok).toBe(false);
     expect(d.refusal).toContain("unconfined");
   });
 
-  test("human mode is unaffected — explicit approval is already required there", () => {
-    const cwd = fixtureRepo();
-    const g = join(cwd, planRepo(cwd, ["src/auth/**"]));
-    const d = decideGate(cwd, g, nodesFor([["src/auth/**"]]), "human", 99, scopesOverlap);
-    expect(d.refusal).toBeUndefined();
+  test("human mode is unaffected; explicit approval is already required there", () => {
+    expect(gate([["src/auth/**"]], "human").refusal).toBeUndefined();
   });
 
   test("an ordinary scope is unaffected", () => {
-    const cwd = fixtureRepo();
-    const g = join(cwd, planRepo(cwd, ["src/widget/**"]));
-    const d = decideGate(cwd, g, nodesFor([["src/widget/**"]]), "auto", 99, scopesOverlap);
+    const d = gate([["src/widget/**"]]);
     expect(d.ok).toBe(true);
     expect(d.refusal).toBeUndefined();
   });
@@ -200,45 +155,49 @@ describe("bounds refuse rather than arm the gate", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, ["src/n0/**", "src/n1/**", "src/n2/**", "src/n3/**"]);
     withMode(cwd, "auto", 3);
-    const r = cli(cwd, "graph", "create", "--graph", rel);
+    const r = sddx(cwd, "plan", "start", rel);
     expect(r.status).not.toBe(0);
-    // exit 3 is "approval required" — a refusal is not that
+    // exit 3 is "approval required"; a refusal is not that
     expect(r.status).not.toBe(3);
+    expect(r.stderr).toContain("auto_max_tasks");
     expect(tokens(cwd)).toEqual([]);
-    expect(goals(cwd)).toEqual([]);
+    expect(goalIds(cwd)).toEqual([]);
   });
 
   test("self-modifying scope: refusal, no token, no goal", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, ["hooks/**"]);
     withMode(cwd, "auto", 99);
-    const r = cli(cwd, "graph", "create", "--graph", rel);
+    const r = sddx(cwd, "plan", "start", rel);
     expect(r.status).not.toBe(0);
     expect(r.status).not.toBe(3);
+    expect(r.stderr).toContain("enforcement paths");
     expect(tokens(cwd)).toEqual([]);
-    expect(goals(cwd)).toEqual([]);
+    expect(goalIds(cwd)).toEqual([]);
   });
 
   test("protected path: refusal through the CLI, no token, no goal", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, ["db/migrations/**"]);
     withMode(cwd, "auto", 99);
-    const r = cli(cwd, "graph", "create", "--graph", rel);
+    const r = sddx(cwd, "plan", "start", rel);
     expect(r.status).not.toBe(0);
     expect(r.status).not.toBe(3);
+    expect(r.stderr).toContain('protected area "migrations"');
     expect(tokens(cwd)).toEqual([]);
-    expect(goals(cwd)).toEqual([]);
+    expect(goalIds(cwd)).toEqual([]);
   });
 
   test("auto cannot approve its way past a bound", () => {
-    // The degradation path used to let `graph approve` satisfy a bound in auto
+    // The degradation path used to let an approval satisfy a bound in auto
     // mode. That is the hybrid this change removes: approving is a human act,
     // so it belongs to human mode, reached by editing reviewed configuration.
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, ["src/n0/**", "src/n1/**", "src/n2/**", "src/n3/**"]);
     withMode(cwd, "auto", 3);
-    const r = cli(cwd, "graph", "approve", "--graph", rel);
+    const r = sddx(cwd, "plan", "approve", rel);
     expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("auto_max_tasks");
     expect(tokens(cwd)).toEqual([]);
   });
 
@@ -246,10 +205,7 @@ describe("bounds refuse rather than arm the gate", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, ["hooks/**"]);
     withMode(cwd, "auto", 99);
-    const out = cli(cwd, "graph", "create", "--graph", rel).stderr;
-    // The key named is the one that actually resolves the mode today. It
-    // becomes `interaction_mode` when the config rename lands; naming the new
-    // key before it works would send users to an edit that does nothing.
+    const out = sddx(cwd, "plan", "start", rel).stderr;
     expect(out).toContain("interaction_mode");
     expect(out).toContain(".sddx/config.json");
     expect(out).not.toContain("--mode");
@@ -262,7 +218,7 @@ describe("approval tokens", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, ["src/n0/**"]);
     withMode(cwd, "auto");
-    expect(cli(cwd, "graph", "approve", "--graph", rel).status).toBe(0);
+    expect(sddx(cwd, "plan", "approve", rel).status).toBe(0);
     const [name] = tokens(cwd);
     const token = JSON.parse(readFileSync(join(cwd, ".sddx", "approvals", name as string), "utf8"));
     expect(token.requested_mode).toBeUndefined();
@@ -296,7 +252,7 @@ describe("approval tokens", () => {
 
 describe("the CLI and the hook cannot disagree about a refusal", () => {
   // The hook raises the user's permission dialog; the CLI exits non-zero. A
-  // refusal must reach the user as a REFUSAL from exactly one of them — if the
+  // refusal must reach the user as a REFUSAL from exactly one of them. If the
   // hook asked, the human would be invited to approve something the CLI is
   // about to reject outright, which is the degraded-mode UX this change removes.
   for (const [name, scope] of [
@@ -309,13 +265,13 @@ describe("the CLI and the hook cannot disagree about a refusal", () => {
       const rel = planRepo(cwd, [scope]);
       withMode(cwd, "auto", 99);
 
-      const hook = approvalGate({ command: `sddx graph create --graph ${rel}`, cwd });
+      const hook = approvalGate({ command: `sddx plan start ${rel}`, cwd });
       expect(hook.decision).toBe("pass");
 
-      const r = cli(cwd, "graph", "create", "--graph", rel);
+      const r = sddx(cwd, "plan", "start", rel);
       expect(r.status).not.toBe(0);
       expect(r.status).not.toBe(3);
-      expect(goals(cwd)).toEqual([]);
+      expect(goalIds(cwd)).toEqual([]);
     });
   }
 
@@ -323,19 +279,16 @@ describe("the CLI and the hook cannot disagree about a refusal", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, ["src/widget/**"]);
     withMode(cwd, "auto", 99);
-    expect(approvalGate({ command: `sddx graph create --graph ${rel}`, cwd }).decision).toBe(
-      "pass",
-    );
-    expect(cli(cwd, "graph", "create", "--graph", rel).status).toBe(0);
+    expect(approvalGate({ command: `sddx plan start ${rel}`, cwd }).decision).toBe("pass");
+    expect(sddx(cwd, "plan", "start", rel).status).toBe(0);
   });
 });
 
 describe("mode is never presented as settable by flag or environment", () => {
   test("no CLI message offers --mode or an env var as the remedy", () => {
-    // The message at the TDD-gate exemption refusal used to name both
-    // `--mode human` and `SDDX_INTERACTION_MODE=human`. Neither has ever
-    // existed — mode is config-only by design — so it sent users to a fix
-    // that silently does nothing.
+    // A refusal message used to name both `--mode human` and
+    // `SDDX_INTERACTION_MODE=human`. Neither has ever existed (mode is
+    // config-only by design), so it sent users to a fix that silently does nothing.
     const src = readFileSync(join(repoRoot, "src", "cli.ts"), "utf8");
     expect(src).not.toContain("SDDX_INTERACTION_MODE");
     expect(src).not.toContain("--mode human");

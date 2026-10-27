@@ -1,69 +1,47 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { planHash } from "../src/lib/approval";
 import { approvalGate } from "../src/lib/approvalgate";
-import { fixtureClone } from "./fixtures";
-import { GRAPH_HEADER_LINES, goalIds, readGoalAnywhere, repoRoot } from "./helpers";
+import { fixtureClone, writeConfig } from "./fixtures";
+import {
+  commitSpec,
+  completeTask,
+  goalIds,
+  goalSpec,
+  readGoalAnywhere,
+  sddx,
+  writeSpec,
+} from "./helpers";
 
-const CLI = join(repoRoot, "src/cli.ts");
-const cli = (cwd: string, env: NodeJS.ProcessEnv, ...args: string[]) =>
-  spawnSync("bun", [CLI, ...args], { cwd, encoding: "utf8", env });
 const g = (cwd: string, ...args: string[]) =>
   spawnSync("git", args, { cwd, encoding: "utf8" }).stdout.trim();
 
 // Mode is config-only by design (config.ts interactionMode): the environment is
 // part of the command line the agent composes, so it must not switch the gate.
-const human = process.env;
-const auto = process.env;
-function withMode(cwd: string, mode: "human" | "auto", autoMaxTasks?: number): void {
-  mkdirSync(join(cwd, ".sddx"), { recursive: true });
-  writeFileSync(
-    join(cwd, ".sddx", "config.json"),
-    JSON.stringify({
-      interaction_mode: mode,
-      ...(autoMaxTasks ? { auto_max_tasks: autoMaxTasks } : {}),
-    }),
-  );
+type Mode = "human" | "auto";
+function withMode(cwd: string, mode: Mode, autoMaxTasks?: number): void {
+  writeConfig(cwd, {
+    interaction_mode: mode,
+    ...(autoMaxTasks ? { auto_max_tasks: autoMaxTasks } : {}),
+  });
 }
 
 /**
- * A two-root plan whose oracles pass once each task writes its own file, so a
- * full RED → GREEN → VERIFY cycle can be driven without a subagent.
+ * A plan of independent tasks whose oracles pass once each task writes its own
+ * file, so the full start, verify, review cycle can be driven without a subagent.
  */
-function planRepo(cwd: string, nodes = 2): string {
-  const drafts = join(cwd, ".sddx", "drafts");
-  mkdirSync(drafts, { recursive: true });
-  const lines = [
-    ...GRAPH_HEADER_LINES,
-    "goal: ship the widget",
-    "assumptions:",
-    '  - "the project uses Vite"',
-    "answers:",
-    "  - id: q1",
-    "    question: which bundler?",
-    "    answer: Vite 5",
-    "tasks:",
-  ];
-  for (let i = 0; i < nodes; i++) {
-    writeFileSync(
-      join(drafts, `n${i}.yaml`),
-      `task: build part ${i}
-success_criteria:
-  - "part ${i} exists"
-scope:
-  - "part${i}/**"
-oracle:
-  type: command
-  run: "test -f part${i}/out.txt"
-`,
-    );
-    lines.push(`  - alias: n${i}`, `    spec: n${i}.yaml`);
-  }
-  const rel = join(".sddx", "drafts", "graph.yaml");
-  writeFileSync(join(cwd, rel), `${lines.join("\n")}\n`);
-  return rel;
+function planRepo(cwd: string, tasks = 2): string {
+  return writeSpec(
+    cwd,
+    "2026-01-01-ship-the-widget",
+    goalSpec({
+      title: "ship the widget",
+      assumptions: ["the project uses Vite"],
+      tasks: Array.from({ length: tasks }, (_, i) => ({ id: `n${i}`, title: `build part ${i}` })),
+    }),
+  );
 }
 
 function materialized(cwd: string) {
@@ -75,123 +53,98 @@ function materialized(cwd: string) {
   };
 }
 
-/** Drives one worktree task through RED → GREEN → VERIFY using the real CLI. */
-function completeTask(cwd: string, env: NodeJS.ProcessEnv, id: string, part: string): void {
-  const wt = join(cwd, ".sddx-worktrees", id);
-  expect(existsSync(wt)).toBe(true);
-  // RED first (earned from a failing test exit), then red-check records that the
-  // oracle itself genuinely fails — red-check requires phase RED, not PLAN
-  expect(cli(wt, env, "task", "phase", id, "RED", "--test-exit", "1").status).toBe(0);
-  expect(cli(wt, env, "red-check", id).status).toBe(0);
-  mkdirSync(join(wt, part), { recursive: true });
-  writeFileSync(join(wt, part, "out.txt"), "done\n");
-  expect(cli(wt, env, "task", "phase", id, "GREEN", "--test-exit", "0").status).toBe(0);
-  expect(cli(wt, env, "task", "phase", id, "VERIFY").status).toBe(0);
-  const v = cli(wt, env, "verify", id);
-  expect(v.status).toBe(0);
+const NOTHING = { goals: [], branches: "", worktrees: [] };
+
+function start(cwd: string, rel: string): { goalId: string; taskIds: string[] } {
+  const r = sddx(cwd, "plan", "start", rel, "--output", "json");
+  expect(r.status).toBe(0);
+  return JSON.parse(r.stdout).data;
 }
 
-function aliasMap(stdout: string): Record<string, string> {
-  return JSON.parse(stdout).data.aliasToId as Record<string, string>;
-}
+const receipt = (path: string) => JSON.parse(readFileSync(path, "utf8"));
 
 describe("human mode end-to-end", () => {
   test("blocks the whole run before approval, then completes with matching provenance", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, 2);
 
-    // 1. nothing exists, and the gate refuses to create anything
-    const blocked = cli(cwd, human, "graph", "create", "--graph", rel);
+    // 1. nothing exists, and the gate refuses to start anything
+    const blocked = sddx(cwd, "plan", "start", rel);
     expect(blocked.status).toBe(3);
-    expect(materialized(cwd)).toEqual({ goals: [], branches: "", worktrees: [] });
+    expect(materialized(cwd)).toEqual(NOTHING);
 
     // 2. the plan renders without side effects
-    const dry = cli(cwd, human, "graph", "create", "--graph", rel, "--dry-run");
-    expect(dry.status).toBe(0);
-    expect(dry.stdout).toContain("nothing written");
-    expect(materialized(cwd)).toEqual({ goals: [], branches: "", worktrees: [] });
+    expect(sddx(cwd, "plan", "check", rel).status).toBe(0);
+    expect(materialized(cwd)).toEqual(NOTHING);
 
-    // 3. approve, then create
-    expect(cli(cwd, human, "graph", "approve", "--graph", rel).status).toBe(0);
-    const created = cli(cwd, human, "graph", "create", "--graph", rel, "--output", "json");
-    expect(created.status).toBe(0);
-    const map = aliasMap(created.stdout);
-    const goalId = JSON.parse(created.stdout).data.goalId as string;
+    // 3. approve, then start
+    expect(sddx(cwd, "plan", "approve", rel).status).toBe(0);
+    const { goalId, taskIds } = start(cwd, rel);
 
     // 4. drive both tasks to DONE
-    completeTask(cwd, human, map.n0, "part0");
-    completeTask(cwd, human, map.n1, "part1");
+    const receipts = taskIds.map((id) => completeTask(cwd, id).receiptPath);
 
     // 5. every receipt agrees with the goal on mode and plan hash
-    const goal = readGoalAnywhere(cwd, goalId) as any;
+    const goal = readGoalAnywhere(cwd, goalId) as {
+      approval: { mode: string; plan_sha256: string };
+    };
     expect(goal.approval.mode).toBe("human");
     expect(goal.approval.plan_sha256).toBe(planHash(join(cwd, rel)).hash);
-    for (const id of Object.values(map)) {
-      const r = JSON.parse(
-        readFileSync(join(cwd, ".sddx-worktrees", id, ".sddx", "receipts", `${id}.json`), "utf8"),
-      );
-      expect(r.version).toBe(4);
+    for (const path of receipts) {
+      const r = receipt(path);
+      expect(r.version).toBe(5);
       expect(r.approval.mode).toBe("human");
       expect(r.approval.plan_sha256).toBe(goal.approval.plan_sha256);
-      // the graph-level assumption reached every receipt, and so did what the
-      // user actually decided — a receipt that needs the graph draft to be
-      // interpreted stops being a receipt, and drafts are swept
+      // the goal-level assumption reached every receipt: a receipt that needs
+      // the spec to be interpreted stops being a receipt
       expect(r.approval.assumptions).toContain("the project uses Vite");
-      expect(r.approval.assumptions).toContain("answered: which bundler? → Vite 5");
     }
 
     // 6. the summary reports it, and the audit is clean
-    const report = cli(cwd, human, "run", "report", "--goal", goalId);
+    const report = sddx(cwd, "run", "report", "--goal", goalId);
     expect(report.status).toBe(0);
     expect(report.stdout).toContain("ship the widget");
     expect(report.stdout).toContain("mode: human");
     expect(report.stdout).toContain("2 of 2");
-    expect(cli(cwd, human, "audit").status).toBe(0);
+    expect(sddx(cwd, "audit").status).toBe(0);
   }, 60_000);
 
   test("an interrupted run resumes with no second approval", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, 2);
-    cli(cwd, human, "graph", "approve", "--graph", rel);
-    const created = cli(cwd, human, "graph", "create", "--graph", rel, "--output", "json");
-    const map = aliasMap(created.stdout);
-    const goalId = JSON.parse(created.stdout).data.goalId as string;
+    sddx(cwd, "plan", "approve", rel);
+    const { goalId, taskIds } = start(cwd, rel);
+    const [first, second] = taskIds as [string, string];
 
     // one task lands; the "session dies" here
-    completeTask(cwd, human, map.n0, "part0");
+    completeTask(cwd, first);
 
-    // resuming reads the board and finds the remaining task Ready — no gate,
-    // because the gate is armed on graph create only and that already happened
-    const board = cli(cwd, human, "board", "--output", "json");
-    expect(board.status).toBe(0);
-    completeTask(cwd, human, map.n1, "part1");
+    // resuming reads the board and finds the remaining task ready; no gate,
+    // because the gate is armed on plan start only and that already happened
+    expect(sddx(cwd, "board", "--output", "json").status).toBe(0);
+    completeTask(cwd, second);
 
-    const report = cli(cwd, human, "run", "report", "--goal", goalId);
+    const report = sddx(cwd, "run", "report", "--goal", goalId);
     expect(report.stdout).toContain("2 of 2");
     expect(report.stdout).toContain("Run completed");
+    expect(readdirSync(join(cwd, ".sddx", "approvals"))).toHaveLength(1);
   }, 60_000);
 
-  test("editing a spec after approval blocks creation with a hash mismatch", () => {
+  test("editing a task after approval blocks the start with a hash mismatch", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, 2);
-    cli(cwd, human, "graph", "approve", "--graph", rel);
+    sddx(cwd, "plan", "approve", rel);
 
-    writeFileSync(
-      join(cwd, ".sddx", "drafts", "n1.yaml"),
-      `task: build part 1 differently
-success_criteria:
-  - "part 1 exists"
-scope:
-  - "part1/**"
-oracle:
-  type: command
-  run: "test -f part1/out.txt"
-`,
-    );
-    const r = cli(cwd, human, "graph", "create", "--graph", rel);
+    const path = join(cwd, rel);
+    const text = readFileSync(path, "utf8");
+    expect(text).toContain('"test -f n1.done"');
+    writeFileSync(path, text.replace('"test -f n1.done"', '"test -f n1.done || true"'));
+    commitSpec(cwd, rel);
+
+    const r = sddx(cwd, "plan", "start", rel);
     expect(r.status).toBe(3);
     expect(r.stderr).toContain("no approval");
-    expect(materialized(cwd)).toEqual({ goals: [], branches: "", worktrees: [] });
+    expect(materialized(cwd)).toEqual(NOTHING);
   }, 30_000);
 });
 
@@ -202,73 +155,59 @@ describe("auto mode end-to-end", () => {
     withMode(cwd, "auto");
 
     // no approval step at all
-    const created = cli(cwd, auto, "graph", "create", "--graph", rel, "--output", "json");
-    expect(created.status).toBe(0);
-    const map = aliasMap(created.stdout);
-    const goalId = JSON.parse(created.stdout).data.goalId as string;
+    const { goalId, taskIds } = start(cwd, rel);
     expect(existsSync(join(cwd, ".sddx", "approvals"))).toBe(false);
 
-    completeTask(cwd, auto, map.n0, "part0");
-    completeTask(cwd, auto, map.n1, "part1");
-
-    for (const id of Object.values(map)) {
-      const r = JSON.parse(
-        readFileSync(join(cwd, ".sddx-worktrees", id, ".sddx", "receipts", `${id}.json`), "utf8"),
-      );
-      expect(r.approval.mode).toBe("auto");
+    for (const id of taskIds) {
+      expect(receipt(completeTask(cwd, id).receiptPath).approval.mode).toBe("auto");
     }
-    const report = cli(cwd, auto, "run", "report", "--goal", goalId);
+    const report = sddx(cwd, "run", "report", "--goal", goalId);
     expect(report.stdout).toContain("mode: auto");
     expect(report.stdout).toContain("2 of 2");
-    expect(cli(cwd, auto, "audit").status).toBe(0);
+    expect(sddx(cwd, "audit").status).toBe(0);
   }, 60_000);
 
   test("exceeding auto_max_tasks refuses terminally and cannot be approved away", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, 3);
     withMode(cwd, "auto", 2);
-    const capped = auto;
 
-    const refused = cli(cwd, capped, "graph", "create", "--graph", rel);
+    const refused = sddx(cwd, "plan", "start", rel);
     expect(refused.status).not.toBe(0);
     // exit 3 is "approval required"; a bound refuses rather than arming the gate
     expect(refused.status).not.toBe(3);
     expect(refused.stderr).toContain("auto_max_tasks");
-    expect(materialized(cwd)).toEqual({ goals: [], branches: "", worktrees: [] });
+    expect(materialized(cwd)).toEqual(NOTHING);
 
     // No token can buy the run: approving is a human act, so it belongs to
     // human mode. Previously this path produced a run recorded `auto` that a
-    // human had in fact approved — the hybrid this behavior removes.
-    expect(cli(cwd, capped, "graph", "approve", "--graph", rel).status).not.toBe(0);
-    expect(cli(cwd, capped, "graph", "create", "--graph", rel).status).not.toBe(0);
-    expect(materialized(cwd)).toEqual({ goals: [], branches: "", worktrees: [] });
+    // human had in fact approved, the hybrid this behavior removes.
+    expect(sddx(cwd, "plan", "approve", rel).status).not.toBe(0);
+    expect(sddx(cwd, "plan", "start", rel).status).not.toBe(0);
+    expect(materialized(cwd)).toEqual(NOTHING);
   }, 60_000);
 
   test("the same plan runs once configuration selects human mode", () => {
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, 3);
     withMode(cwd, "human", 2);
-    expect(cli(cwd, human, "graph", "approve", "--graph", rel).status).toBe(0);
-    const created = cli(cwd, human, "graph", "create", "--graph", rel, "--output", "json");
-    expect(created.status).toBe(0);
-    const goalId = JSON.parse(created.stdout).data.goalId as string;
-    const goal = readGoalAnywhere(cwd, goalId) as any;
+    expect(sddx(cwd, "plan", "approve", rel).status).toBe(0);
+    const { goalId } = start(cwd, rel);
+    const goal = readGoalAnywhere(cwd, goalId) as { approval: Record<string, unknown> };
     expect(goal.approval.mode).toBe("human");
     expect(goal.approval.requested_mode).toBeUndefined();
     expect(goal.approval.degraded_reason).toBeUndefined();
   }, 60_000);
 
   test("the completion summary has identical sections in both modes", () => {
-    const sections = (env: NodeJS.ProcessEnv) => {
+    const sections = (mode: Mode) => {
       const { clone: cwd } = fixtureClone();
       const rel = planRepo(cwd, 1);
-      withMode(cwd, env === auto ? "auto" : "human");
-      cli(cwd, env, "graph", "approve", "--graph", rel);
-      const created = cli(cwd, env, "graph", "create", "--graph", rel, "--output", "json");
-      const map = aliasMap(created.stdout);
-      const goalId = JSON.parse(created.stdout).data.goalId as string;
-      completeTask(cwd, env, map.n0, "part0");
-      return cli(cwd, env, "run", "report", "--goal", goalId)
+      withMode(cwd, mode);
+      if (mode === "human") sddx(cwd, "plan", "approve", rel);
+      const { goalId, taskIds } = start(cwd, rel);
+      completeTask(cwd, taskIds[0] as string);
+      return sddx(cwd, "run", "report", "--goal", goalId)
         .stdout.split("\n")
         .filter((l) =>
           /^(Goal|Approval|Summary|Oracle results|Assumptions|Review commands):?$/.test(
@@ -276,59 +215,29 @@ describe("auto mode end-to-end", () => {
           ),
         );
     };
-    const h = sections(human);
-    const a = sections(auto);
+    const h = sections("human");
+    const a = sections("auto");
     expect(h.length).toBeGreaterThan(0);
     expect(h).toEqual(a);
   }, 90_000);
 });
 
 describe("the gate is not self-grantable", () => {
-  test("SECURITY: approve+create in one turn still raises the dialog on approve", () => {
-    // The defeat this closes: an agent runs `graph approve` (ungated) then
-    // `graph create`, which now finds a token and passes — so human mode became a
+  test("SECURITY: approve+start in one turn still raises the dialog on approve", () => {
+    // The defeat this closes: an agent runs `plan approve` (ungated) then
+    // `plan start`, which now finds a token and passes, so human mode became a
     // no-op that recorded `mode: human` for work no human saw. The fix is that
-    // `graph approve` is itself gated and ALWAYS asks.
+    // `plan approve` is itself gated and ALWAYS asks.
     const { clone: cwd } = fixtureClone();
     const rel = planRepo(cwd, 2);
     withMode(cwd, "human");
 
-    expect(approvalGate({ command: `sddx graph approve --graph ${rel}`, cwd }).decision).toBe(
-      "ask",
-    );
-    // and the create the agent would chain after it is gated too, until a token exists
-    expect(approvalGate({ command: `sddx graph create --graph ${rel}`, cwd }).decision).toBe("ask");
+    expect(approvalGate({ command: `sddx plan approve ${rel}`, cwd }).decision).toBe("ask");
+    // and the start the agent would chain after it is gated too, until a token exists
+    expect(approvalGate({ command: `sddx plan start ${rel}`, cwd }).decision).toBe("ask");
     // both halves of a compound command are inspected
     expect(
-      approvalGate({
-        command: `sddx graph approve --graph ${rel} && sddx graph create --graph ${rel}`,
-        cwd,
-      }).decision,
+      approvalGate({ command: `sddx plan approve ${rel} && sddx plan start ${rel}`, cwd }).decision,
     ).toBe("ask");
-  }, 30_000);
-
-  test("SECURITY: a legacy approval token is refused, not silently honored", () => {
-    // A token vouches for the plan AND the workspace strategy it was rendered
-    // under. There is only one strategy now, so this can fire only for a token
-    // written by an older sddx under `branch` or `none` — which must not
-    // authorize a canonical run it was never rendered for. The token's field
-    // stays a loose string precisely so those tokens still parse.
-    const { clone: cwd } = fixtureClone();
-    const rel = planRepo(cwd, 1);
-    withMode(cwd, "human");
-    expect(cli(cwd, process.env, "graph", "approve", "--graph", rel).status).toBe(0);
-
-    const dir = join(cwd, ".sddx", "approvals");
-    for (const f of readdirSync(dir).filter((n) => n.endsWith(".json"))) {
-      const p = join(dir, f);
-      const t = JSON.parse(readFileSync(p, "utf8"));
-      t.workspace_mode = "none"; // as 3.x would have left it
-      writeFileSync(p, `${JSON.stringify(t, null, 2)}\n`);
-    }
-
-    const refused = cli(cwd, process.env, "graph", "create", "--graph", rel);
-    expect(refused.status).not.toBe(0);
-    expect(refused.stderr).toContain("no longer supported");
-    expect(materialized(cwd)).toEqual({ goals: [], branches: "", worktrees: [] });
   }, 30_000);
 });

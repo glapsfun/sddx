@@ -17,10 +17,10 @@ release-please opens/updates a standing "chore: release vX.Y.Z" PR
         │
         ▼
 required checks run on that PR, including the published-package install
-smoke test (.github/workflows/release-smoke-test.yml) — a fresh runner with
-Bun installs the packed tarball, runs `sddx init` in a throwaway repo, drives
-the README quickstart, and asserts `sddx doctor` / `sddx board` / `sddx audit`
-all exit 0
+smoke test (.github/workflows/release-smoke-test.yml): a fresh runner with
+Bun installs the packed tarball and runs scripts/smoke.sh, which drives one
+goal from spec to merged run branch in a throwaway repo and asserts
+`sddx board` / `sddx audit` / `sddx doctor` all exit 0
         │
         ▼
 maintainer reviews/edits the changelog section, merges when green

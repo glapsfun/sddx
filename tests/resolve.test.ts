@@ -3,27 +3,36 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { headBranch, resolveTask, workspaceRoot } from "../src/lib/resolve";
-import { createTask, readTask, transition, writeTask } from "../src/lib/task";
-import { fixtureClone, fixtureRepo } from "./fixtures";
+import {
+  createPlannedTask,
+  readTask,
+  type TaskState,
+  transition,
+  writeTask,
+} from "../src/lib/task";
+import { fixtureRepo } from "./fixtures";
+import { createRun, startTask } from "./helpers";
 
-const SPEC = {
-  task: "demo task",
-  context: [],
-  success_criteria: ["x"],
-  oracle: { type: "command" as const, run: "true", expect: "exit 0" },
-  stop_rules: [],
-  out_of_scope: [],
-  scope: [],
-  assumptions: [],
-};
-
-function makeTask(repo: string, sentence = "demo task"): string {
-  const t = createTask(repo, { ...SPEC, task: sentence }, ".sddx/specs/x.yaml", {
-    mode: "worktree",
-    branch: null,
-    base_sha: "0".repeat(40),
+function planned(repo: string, id: string): TaskState {
+  return createPlannedTask(repo, {
+    id,
+    title: "demo task",
+    goal_id: "2026-01-01-test-goal",
+    spec_path: ".sddx/specs/2026-01-01-test-goal.md",
+    oracle: { type: "command", run: "true", expect: "exit 0" },
+    scope: [],
+    assumptions: [],
+    depends_on: [],
   });
-  return t.id;
+}
+
+/** A started task whose state sits in `repo`'s own .sddx, as a branch checkout would hold it. */
+function started(repo: string, id: string): TaskState {
+  const t = planned(repo, id);
+  t.workspace = { branch: `sddx/${id}`, base_sha: "0".repeat(40), path: "." };
+  transition(t, "IN_PROGRESS");
+  writeTask(repo, t);
+  return t;
 }
 
 describe("workspaceRoot", () => {
@@ -43,84 +52,74 @@ describe("resolveTask", () => {
     expect(resolveTask(join(repo, "src", "a.ts")).kind).toBe("none");
   });
 
-  test("sole non-terminal task in main checkout", () => {
+  test("sole started, non-terminal task in the checkout", () => {
     const repo = fixtureRepo();
-    const id = makeTask(repo);
+    started(repo, "T1");
     const res = resolveTask(join(repo, "src", "a.ts"));
     expect(res.kind).toBe("task");
     if (res.kind === "task") {
-      expect(res.task.id).toBe(id);
+      expect(res.task.id).toBe("T1");
       expect(res.root).toBe(repo);
     }
   });
 
+  test("a PLANNED task has no worktree, so it governs nothing", () => {
+    const repo = fixtureRepo();
+    planned(repo, "T1");
+    expect(resolveTask(join(repo, "a.ts")).kind).toBe("none");
+  });
+
   test("terminal tasks are not candidates", () => {
     const repo = fixtureRepo();
-    const id = makeTask(repo);
-    const t = readTask(repo, id);
+    started(repo, "T1");
+    const t = readTask(repo, "T1");
     transition(t, "ABANDONED");
     writeTask(repo, t);
     expect(resolveTask(join(repo, "a.ts")).kind).toBe("none");
   });
 
-  test("two non-terminal tasks → ambiguous with both ids", () => {
+  test("two started, non-terminal tasks → ambiguous with both ids", () => {
     const repo = fixtureRepo();
-    const a = makeTask(repo, "first thing");
-    const b = makeTask(repo, "second thing");
+    started(repo, "T1");
+    started(repo, "T2");
     const res = resolveTask(join(repo, "a.ts"));
     expect(res.kind).toBe("ambiguous");
-    if (res.kind === "ambiguous") expect(res.ids.sort()).toEqual([a, b].sort());
+    if (res.kind === "ambiguous") expect(res.ids).toEqual(["T1", "T2"]);
   });
 
   test("corrupt task file reported", () => {
     const repo = fixtureRepo();
     mkdirSync(join(repo, ".sddx", "tasks"), { recursive: true });
-    writeFileSync(join(repo, ".sddx", "tasks", "20260101-bad.json"), "{nope");
+    writeFileSync(join(repo, ".sddx", "tasks", "BAD.json"), "{nope");
     const res = resolveTask(join(repo, "a.ts"));
     expect(res.kind).toBe("corrupt");
-    if (res.kind === "corrupt") expect(res.path).toContain("20260101-bad.json");
+    if (res.kind === "corrupt") expect(res.path).toContain("BAD.json");
   });
 
   test("worktree resolves by directory name, reading the worktree's own .sddx", () => {
-    const { clone } = fixtureClone();
-    const wt = join(clone, ".sddx-worktrees", "20260101-wt-task");
-    spawnSync("git", ["worktree", "add", "-q", wt, "-b", "sddx/20260101-wt-task"], { cwd: clone });
-    mkdirSync(join(wt, ".sddx", "tasks"), { recursive: true });
-    const state = {
-      id: "20260101-wt-task",
-      task: "wt",
-      phase: "RED",
-      spec_path: "x",
-      oracle: SPEC.oracle,
-      workspace: { mode: "worktree", branch: "sddx/20260101-wt-task", base_sha: "0".repeat(40) },
-      allow: [],
-      iterations: 0,
-      evidence: {},
-      history: [],
-      created_at: "",
-      updated_at: "",
-    };
-    writeFileSync(
-      join(wt, ".sddx", "tasks", "20260101-wt-task.json"),
-      JSON.stringify(state, null, 2),
-    );
+    const repo = fixtureRepo();
+    createRun(repo, { tasks: [{ id: "T1" }, { id: "T2" }] });
+    const wt = startTask(repo, "T1");
+    // a second started task elsewhere must not make the worktree ambiguous
+    startTask(repo, "T2");
     const res = resolveTask(join(wt, "src", "impl.ts"));
     expect(res.kind).toBe("task");
     if (res.kind === "task") {
-      expect(res.task.id).toBe("20260101-wt-task");
+      expect(res.task.id).toBe("T1");
+      expect(res.task.phase).toBe("IN_PROGRESS");
       expect(res.root).toBe(wt);
     }
   });
 
   test("branch checkout resolves via sddx/<id> HEAD ref", () => {
     const repo = fixtureRepo();
-    const id = makeTask(repo);
-    // second task would make the scan ambiguous — branch must disambiguate
-    makeTask(repo, "other thing");
-    spawnSync("git", ["switch", "-qc", `sddx/${id}`], { cwd: repo });
-    expect(headBranch(repo)).toBe(`sddx/${id}`);
+    started(repo, "T1");
+    // a second task would make the scan ambiguous: the branch must disambiguate
+    started(repo, "T2");
+    spawnSync("git", ["switch", "-qc", "sddx/T1"], { cwd: repo });
+    expect(headBranch(repo)).toBe("sddx/T1");
     const res = resolveTask(join(repo, "a.ts"));
     expect(res.kind).toBe("task");
-    if (res.kind === "task") expect(res.task.id).toBe(id);
+    if (res.kind === "task") expect(res.task.id).toBe("T1");
   });
 });

@@ -1,4 +1,7 @@
 import { spawnSync } from "node:child_process";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 
 export function git(cwd: string, ...args: string[]): string {
   const r = spawnSync("git", args, { cwd, encoding: "utf8" });
@@ -110,4 +113,93 @@ export const writeTree = (cwd: string): string => git(cwd, "write-tree");
 export function commit(cwd: string, message: string): string {
   git(cwd, "commit", "-m", message);
   return headSha(cwd);
+}
+
+/**
+ * The tree of `base` with `files` (repository-relative path to content) added
+ * or replaced, built in a temporary index so neither the worktree's files nor
+ * its real index change.
+ */
+export function treeWith(cwd: string, base: string, files: Record<string, string>): string {
+  const dir = mkdtempSync(join(tmpdir(), "sddx-index-"));
+  const env = { ...process.env, GIT_INDEX_FILE: join(dir, "index") };
+  const run = (args: string[], input?: string): string => {
+    const r = spawnSync("git", args, { cwd, env, input, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`git ${args[0]} failed: ${(r.stderr ?? "").trim()}`);
+    return (r.stdout ?? "").trim();
+  };
+  try {
+    run(["read-tree", base]);
+    for (const [path, content] of Object.entries(files)) {
+      const blob = run(["hash-object", "-w", "--stdin"], content);
+      run(["update-index", "--add", "--cacheinfo", `100644,${blob},${path}`]);
+    }
+    return run(["write-tree"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * Commits `files` on top of `baseTree` as the next commit of `branch`, which
+ * must be checked out in `worktree`, then writes the files and resets the index
+ * to the new commit. Built with plumbing, so no hook can alter or veto content
+ * that was already verified and reviewed; signed when `commit.gpgSign` asks for
+ * it, as `git commit` would. Nothing is written if the commit cannot be made.
+ */
+export function commitOnBranch(opts: {
+  worktree: string;
+  branch: string;
+  baseTree: string;
+  files: Record<string, string>;
+  readOnly?: string[];
+  message: string;
+}): string {
+  const { worktree, branch } = opts;
+  const ref = `refs/heads/${branch}`;
+  const head = spawnSync("git", ["symbolic-ref", "-q", "HEAD"], {
+    cwd: worktree,
+    encoding: "utf8",
+  });
+  if ((head.stdout ?? "").trim() !== ref) {
+    throw new Error(`${worktree} is not on its branch ${branch}`);
+  }
+  const parent = git(worktree, "rev-parse", ref);
+  const tree = treeWith(worktree, opts.baseTree, opts.files);
+  const sign = spawnSync("git", ["config", "--type=bool", "--get", "commit.gpgsign"], {
+    cwd: worktree,
+    encoding: "utf8",
+  });
+  const signArgs = (sign.stdout ?? "").trim() === "true" ? ["-S"] : [];
+  const commitSha = git(
+    worktree,
+    "commit-tree",
+    tree,
+    "-p",
+    parent,
+    ...signArgs,
+    "-m",
+    opts.message,
+  );
+  git(worktree, "update-ref", "-m", opts.message, ref, commitSha, parent);
+  for (const [path, content] of Object.entries(opts.files)) {
+    const abs = join(worktree, path);
+    mkdirSync(dirname(abs), { recursive: true });
+    rmSync(abs, { force: true });
+    writeFileSync(abs, content);
+    if (opts.readOnly?.includes(path)) chmodSync(abs, 0o444);
+  }
+  git(worktree, "reset", "-q");
+  return commitSha;
+}
+
+/** The worktree that has `branch` checked out, or null when none has. */
+export function checkedOutAt(cwd: string, branch: string): string | null {
+  const out = git(cwd, "worktree", "list", "--porcelain");
+  let path: string | null = null;
+  for (const line of out.split("\n")) {
+    if (line.startsWith("worktree ")) path = line.slice("worktree ".length);
+    if (line === `branch refs/heads/${branch}`) return path;
+  }
+  return null;
 }

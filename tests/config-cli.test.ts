@@ -105,21 +105,22 @@ describe("sddx config validate", () => {
     expect(r.stdout).toContain("OK");
   });
 
-  test("unknown key and wrong type: warns, still exits 0", () => {
+  test("unknown key and wrong type: reports both and exits 1", () => {
     const cwd = fixtureRepo();
     withConfig(cwd, { bogus_key: 1, oracle_runs_default: "not-a-number" });
     const r = cli(cwd, process.env, "config", "validate");
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain('unrecognized key "bogus_key"');
-    expect(r.stdout).toContain('"oracle_runs_default" must be a positive integer');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('unrecognized key "bogus_key"');
+    expect(r.stderr).toContain('"oracle_runs_default" must be a positive integer');
+    expect(r.stderr).toContain("2 issue(s)");
   });
 
   test("structurally-valid but out-of-range values are flagged, not silently defaulted", () => {
     const cwd = fixtureRepo();
     withConfig(cwd, { stuck_threshold: -2 });
     const r = cli(cwd, process.env, "config", "validate");
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain('"stuck_threshold" must be a positive integer — got -2');
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('"stuck_threshold" must be a positive integer, got -2');
   });
 
   test("a removed key is named as removed, not as an unrecognized typo", () => {
@@ -127,22 +128,38 @@ describe("sddx config validate", () => {
     // suggests a misspelling, removed means a setting that used to work and
     // silently stopped. A user who set workspace_mode needs the latter.
     const cwd = fixtureRepo();
-    withConfig(cwd, { workspace_mode: "branch", prefer_solo: true });
+    withConfig(cwd, {
+      workspace_mode: "branch",
+      prefer_solo: true,
+      runtime_scope: "project",
+      package_manager: "bun",
+      adapters: ["claude"],
+    });
     const r = cli(cwd, process.env, "config", "validate");
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain('"workspace_mode" removed in sddx 4.0');
-    expect(r.stdout).toContain("worktree is the only workspace strategy");
-    expect(r.stdout).toContain('"prefer_solo" removed in sddx 4.0');
-    expect(r.stdout).toContain("one-node");
+    expect(r.status).toBe(1);
+    expect(r.stderr).toContain('"workspace_mode" removed in sddx 4.0');
+    expect(r.stderr).toContain("worktree is the only workspace strategy");
+    expect(r.stderr).toContain('"prefer_solo" removed in sddx 4.0');
+    expect(r.stderr).toContain("one-node");
+    for (const key of ["runtime_scope", "package_manager", "adapters"]) {
+      expect(r.stderr).toContain(`"${key}" removed in sddx 6`);
+    }
     // named as removed, NOT as a typo
-    expect(r.stdout).not.toContain('unrecognized key "workspace_mode"');
-    expect(r.stdout).not.toContain('unrecognized key "prefer_solo"');
+    for (const key of ["workspace_mode", "prefer_solo", "runtime_scope", "package_manager"]) {
+      expect(r.stdout + r.stderr).not.toContain(`unrecognized key "${key}"`);
+    }
+    expect(r.stdout + r.stderr).not.toContain('unrecognized key "adapters"');
   });
 
   test("a removed key does not change execution behavior", () => {
-    // It is a notice, never a failure, and nothing downstream reads it.
+    // validate reports it (any issue exits 1), but nothing downstream reads it
     const cwd = fixtureRepo();
-    withConfig(cwd, { workspace_mode: "none", prefer_solo: true, stuck_threshold: 7 });
+    withConfig(cwd, {
+      workspace_mode: "none",
+      prefer_solo: true,
+      runtime_scope: "project",
+      stuck_threshold: 7,
+    });
     const shown = cli(cwd, process.env, "config", "show", "--output", "json");
     expect(shown.status).toBe(0);
     const data = JSON.parse(shown.stdout).data;
@@ -150,7 +167,8 @@ describe("sddx config validate", () => {
     expect(data.stuck_threshold).toBe(7);
     expect(data.workspace_mode).toBeUndefined();
     expect(data.prefer_solo).toBeUndefined();
-    expect(cli(cwd, process.env, "config", "validate").status).toBe(0);
+    expect(data.runtime_scope).toBeUndefined();
+    expect(cli(cwd, process.env, "config", "validate").status).toBe(1);
   });
 
   test("malformed JSON: fails loudly", () => {

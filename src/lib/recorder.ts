@@ -1,10 +1,10 @@
-// PostToolUse test-result recorder: phases are earned from observed test-runner
-// exit codes, never claimed. Unknown commands are ignored — the recorder never
-// guesses whether a Bash command was a test run.
-import { stuckThreshold } from "./config";
-import { sha256 } from "./receipt";
+// Strict profile only: the PostToolUse recorder that turns observed test-runner
+// exit codes into the task's per-edit evidence. A failing run records RED (which
+// lifts the strict gates); a passing run after it records GREEN. Unknown commands
+// are ignored: the recorder never guesses whether a command was a test run.
+import { profile } from "./config";
 import { resolveTask } from "./resolve";
-import { isTerminal, legacyWorkspaceOf, type Phase, transition, writeTask } from "./task";
+import { mainRootOf, type TaskState, writeTask } from "./task";
 
 export const TEST_RUNNER_PREFIXES: readonly string[] = [
   "bun test",
@@ -26,80 +26,62 @@ export function matchTestRunner(command: string): string | null {
   return null;
 }
 
-/** Failure identity: command + exit code + last 20 output lines, numbers and
- * whitespace normalized away (durations vary between identical failures). The
- * command term keeps distinct test invocations distinct even when the harness
- * delivers no output and only the exit code is left to compare. */
-export function failureFingerprint(exitCode: number, output: string, command = ""): string {
-  const tail = output
-    .split("\n")
-    .slice(-20)
-    .join("\n")
-    .replace(/\d+(\.\d+)?/g, "#")
-    .replace(/\s+/g, " ")
-    .trim();
-  return sha256(`${exitCode}\n${command.trim()}\n${tail}`);
-}
-
 export interface RecordResult {
   matched: boolean;
-  transitioned: Phase | null;
+  recorded: "RED" | "GREEN" | null;
   taskId?: string;
-  stuck?: { count: number; threshold: number };
 }
 
 export function recordTestRun(
   cwd: string,
   command: string,
   exitCode: number | undefined,
-  output = "",
 ): RecordResult {
   if (matchTestRunner(command) === null || exitCode === undefined) {
-    return { matched: false, transitioned: null };
+    return { matched: false, recorded: null };
   }
+  if (profile(mainRootOf(cwd)) !== "strict") return { matched: true, recorded: null };
   const res = resolveTask(cwd);
-  if (res.kind !== "task") return { matched: true, transitioned: null };
+  if (res.kind !== "task") return { matched: true, recorded: null };
   const task = res.task;
-
-  // A legacy (3.x branch/none) task cannot be advanced by this version, and the
-  // recorder is a passive observer: going inert is the only correct response.
-  // Letting `transition` throw here instead surfaced as a generic "sddx hook
-  // error" on EVERY observed test run in an upgraded checkout, and — because the
-  // throw preceded `writeTask` — silently disabled stuck-streak accumulation for
-  // that checkout too. The migration refusal belongs on the commands the user
-  // actually invokes, not on a hook they never asked to run.
-  if (legacyWorkspaceOf(task) !== null && !isTerminal(task.phase)) {
-    return { matched: true, transitioned: null };
+  if (task.phase !== "IN_PROGRESS" || task.profile !== "strict") {
+    return { matched: true, recorded: null, taskId: task.id };
   }
-
-  const at = new Date().toISOString();
-  if (exitCode !== 0) {
-    const fp = failureFingerprint(exitCode, output, command);
-    task.stuck =
-      task.stuck?.fingerprint === fp
-        ? { fingerprint: fp, count: task.stuck.count + 1, since: task.stuck.since }
-        : { fingerprint: fp, count: 1, since: at };
-  } else if (task.stuck) {
-    task.stuck = undefined; // JSON.stringify drops it — a clean pass leaves no residue
-  }
-
-  let to: Phase | null = null;
-  if (task.phase === "PLAN" && exitCode !== 0) to = "RED";
-  if ((task.phase === "RED" || task.phase === "REFACTOR") && exitCode === 0) to = "GREEN";
-
-  if (to) {
-    transition(task, to, { testExit: exitCode, source: "hook" });
-  } else {
-    // observation without a legal transition (e.g. exit 0 in PLAN) is still evidence
-    task.evidence.last_test = { test_exit: exitCode, at, source: "hook" };
-  }
-  let stuck: RecordResult["stuck"];
-  if (task.stuck) {
-    // config is only consulted when a failure streak exists — keeps the
-    // passing-run hot path free of config I/O
-    const threshold = stuckThreshold(res.root);
-    if (task.stuck.count >= threshold) stuck = { count: task.stuck.count, threshold };
-  }
+  const strict = task.strict ?? { runs: [] };
+  strict.runs.push({ test_exit: exitCode, source: "hook", at: new Date().toISOString() });
+  let recorded: RecordResult["recorded"] = null;
+  if (exitCode !== 0 && strict.phase === undefined) recorded = "RED";
+  if (exitCode === 0 && strict.phase === "RED") recorded = "GREEN";
+  if (recorded) strict.phase = recorded;
+  task.strict = strict;
   writeTask(res.root, task);
-  return { matched: true, transitioned: to, taskId: task.id, stuck };
+  return { matched: true, recorded, taskId: task.id };
+}
+
+/**
+ * `sddx task phase <id> RED|GREEN --test-exit <n>`: the manual path for a test
+ * runner the recorder does not recognize. The exit code is checked, not trusted:
+ * RED needs a failing run and GREEN a passing one.
+ */
+export function recordManualRun(task: TaskState, phase: "RED" | "GREEN", exitCode: number): void {
+  if (phase === "RED" && exitCode === 0) {
+    throw new Error("RED requires evidence of a failing test: --test-exit <nonzero exit code>");
+  }
+  if (phase === "GREEN" && exitCode !== 0) {
+    throw new Error("GREEN requires evidence of a passing test: --test-exit 0");
+  }
+  if (task.phase !== "IN_PROGRESS" || task.profile !== "strict") {
+    throw new Error(`task ${task.id} is not an IN_PROGRESS strict-profile task`);
+  }
+  const strict = task.strict ?? { runs: [] };
+  // Same transition rule as the automatic recorder: GREEN lifts the gates only
+  // after a failing run showed the tests can fail.
+  if (phase === "GREEN" && strict.phase === undefined) {
+    throw new Error(
+      `GREEN requires a recorded failing run first: sddx task phase ${task.id} RED --test-exit <nonzero exit code>`,
+    );
+  }
+  strict.runs.push({ test_exit: exitCode, source: "manual", at: new Date().toISOString() });
+  strict.phase = phase;
+  task.strict = strict;
 }

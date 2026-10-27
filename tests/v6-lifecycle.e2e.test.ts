@@ -2,11 +2,12 @@
 // orchestrator would: the proof that every v6 guarantee holds from L1 alone.
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { sha256 } from "../src/lib/receipt";
 import { fixtureRepo, writeConfig } from "./fixtures";
-import { goalSpec, readTaskState, sddx, writeSpec } from "./helpers";
+import { completeTask, createRun, goalSpec, readTaskState, sddx, writeSpec } from "./helpers";
+import { scenario } from "./scenario";
 
 const git = (cwd: string, ...args: string[]) =>
   spawnSync("git", args, { cwd, encoding: "utf8" }).stdout.trim();
@@ -190,7 +191,8 @@ describe("a three-task fan-in goal, end to end", () => {
     );
     expect(both5.seq).toBe(2);
     expect(rootHashes).toContain(both5.prev);
-  });
+    // three tasks, each proven twice and reviewed: well past bun's 5 s default on a busy machine
+  }, 60_000);
 });
 
 describe("negative paths stop the goal where they should", () => {
@@ -265,5 +267,28 @@ describe("negative paths stop the goal where they should", () => {
     ok(sddx(cwd, "task", "start", "T1"));
     writeConfig(cwd, { interaction_mode: "human", profile: "default" });
     expect(sddx(cwd, "verify", "T1").stderr).toContain("started under the strict profile");
+  });
+});
+
+describe("the CLI stays out of the harness's configuration", () => {
+  scenario("claude-plugin", "A full goal leaves .claude/ untouched", () => {
+    const cwd = fixtureRepo();
+    const run = createRun(cwd, { tasks: [{ id: "T1" }] });
+    completeTask(cwd, "T1");
+    expect(readTaskState(cwd, "T1").phase).toBe("DONE");
+
+    const found: string[] = [];
+    const walk = (dir: string): void => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        if (e.name === ".git") continue;
+        const p = join(dir, e.name);
+        if (e.name === ".claude") found.push(p);
+        else if (e.isDirectory()) walk(p);
+      }
+    };
+    walk(cwd);
+    expect(found).toEqual([]);
+    const tracked = git(cwd, "ls-tree", "-r", "--name-only", run.runBranch).split("\n");
+    expect(tracked.filter((f) => f.startsWith(".claude/"))).toEqual([]);
   });
 });

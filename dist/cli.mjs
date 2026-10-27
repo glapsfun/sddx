@@ -6946,7 +6946,7 @@ var require_public_api = __commonJS((exports) => {
 // src/cli.ts
 import { spawnSync as spawnSync17 } from "node:child_process";
 import { existsSync as existsSync22, readFileSync as readFileSync19 } from "node:fs";
-import { join as join26, relative as relative5, resolve as resolve6 } from "node:path";
+import { join as join27, relative as relative5, resolve as resolve9 } from "node:path";
 
 // src/audit.ts
 import { spawnSync as spawnSync7 } from "node:child_process";
@@ -9810,8 +9810,17 @@ var byLine = (a, b) => (a.line ?? 0) - (b.line ?? 0);
 var formatSpecError = (path, e) => e.line === null ? `${path}: ${e.message}` : `${path}:${e.line}: ${e.message}`;
 
 // src/lib/hookdispatch.ts
-import { existsSync as existsSync15, readdirSync as readdirSync8, readFileSync as readFileSync14 } from "node:fs";
-import { join as join17 } from "node:path";
+import {
+  accessSync,
+  constants,
+  existsSync as existsSync16,
+  readdirSync as readdirSync9,
+  readFileSync as readFileSync15,
+  realpathSync as realpathSync2,
+  statSync as statSync4
+} from "node:fs";
+import { delimiter, dirname as dirname8, join as join19, resolve as resolve6 } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // src/tdd-gate.ts
 import { relative as relative2, resolve as resolve2 } from "node:path";
@@ -10327,6 +10336,19 @@ function approvalGate(event) {
   }
 }
 
+// src/lib/shellcwd.ts
+import { resolve as resolve4 } from "node:path";
+var LEADING_CD = /^\s*cd\s+([^\s"'`$\\;&|~]+)\s*(?:&&|;)\s*/;
+function withLeadingCd(command, cwd) {
+  let rest = command;
+  let dir = cwd;
+  for (let m = LEADING_CD.exec(rest);m; m = LEADING_CD.exec(rest)) {
+    dir = resolve4(dir, m[1]);
+    rest = rest.slice(m[0].length);
+  }
+  return { command: rest, cwd: dir };
+}
+
 // src/lib/bashgate.ts
 var BASH_ALLOW_BASE = [
   "bun",
@@ -10374,6 +10396,8 @@ function checkBashCommand(command, extraAllow) {
     const cmd = commandBasename(words[0]);
     if (cmd === "sddx-run" || cmd === "sddx")
       continue;
+    if (cmd === "cd")
+      continue;
     if (["bunx", "npx"].includes(cmd) && words.map(commandBasename).includes("sddx"))
       continue;
     if (cmd === "git") {
@@ -10410,10 +10434,19 @@ function blockMessage2(task, why) {
 function bashGate(input, env = process.env) {
   if (typeof input.command !== "string" || input.command.trim() === "")
     return { allow: true };
-  const cwd = input.cwd ?? process.cwd();
+  const started = input.cwd ?? process.cwd();
+  const moved = withLeadingCd(input.command, started);
+  for (const cwd of new Set([started, moved.cwd])) {
+    const decision = gateIn(cwd, moved.command, env);
+    if (!decision.allow)
+      return decision;
+  }
+  return { allow: true };
+}
+function gateIn(cwd, command, env) {
   if (profile(mainRootOf(cwd)) !== "strict")
     return { allow: true };
-  if (checkBashCommand(input.command, []).allow)
+  if (checkBashCommand(command, []).allow)
     return { allow: true };
   const res = resolveTask(cwd);
   if (res.kind === "none")
@@ -10427,10 +10460,269 @@ function bashGate(input, env = process.env) {
   if (t.phase !== "IN_PROGRESS" || t.profile !== "strict" || t.strict?.phase)
     return { allow: true };
   const extra = splitList(env.SDDX_RED_BASH_ALLOW ?? readConfig(mainRootOf(res.root)).red_bash_allow);
-  const decision = checkBashCommand(input.command, extra);
+  const decision = checkBashCommand(command, extra);
   if (decision.allow)
     return decision;
   return { allow: false, reason: blockMessage2(t, decision.reason) };
+}
+
+// src/lib/frontmatter.ts
+var FRONTMATTER = /^---\n([\s\S]*?)\n---\n?/;
+var lf = (markdown) => markdown.replace(/\r\n?/g, `
+`);
+var withoutFrontmatter = (markdown) => lf(markdown).replace(FRONTMATTER, "").trim();
+
+// src/lib/migrate.ts
+import { spawnSync as spawnSync9 } from "node:child_process";
+import {
+  existsSync as existsSync14,
+  mkdirSync as mkdirSync10,
+  readdirSync as readdirSync8,
+  readFileSync as readFileSync14,
+  renameSync,
+  rmSync as rmSync5,
+  writeFileSync as writeFileSync11
+} from "node:fs";
+import { dirname as dirname6, join as join16 } from "node:path";
+var LEGACY_DIR = ".sddx/legacy";
+var TERMINAL = new Set(["DONE", "ABANDONED"]);
+var REMOVED_KEYS = ["runtime_scope", "package_manager", "adapters"];
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync14(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function v5TasksIn(root, dir, inWorktree) {
+  const abs = join16(root, dir);
+  if (!existsSync14(abs))
+    return [];
+  const out = [];
+  for (const f of readdirSync8(abs).filter((n) => n.endsWith(".json"))) {
+    const raw = readJson(join16(abs, f));
+    if (raw === null || isV6Task(raw))
+      continue;
+    const phase = String(raw.phase ?? "unknown");
+    out.push({ id: f.slice(0, -".json".length), phase, path: `${dir}/${f}`, inWorktree });
+  }
+  return out;
+}
+function v5Goals(root) {
+  const r = spawnSync9("git", ["for-each-ref", "--format=%(refname)", "refs/sddx/goals/"], {
+    cwd: root,
+    encoding: "utf8"
+  });
+  const goals = [];
+  for (const ref of (r.stdout ?? "").split(`
+`).map((s) => s.trim())) {
+    if (!ref.startsWith("refs/sddx/goals/"))
+      continue;
+    const blob = spawnSync9("git", ["cat-file", "-p", ref], { cwd: root, encoding: "utf8" });
+    try {
+      const g = JSON.parse(blob.stdout ?? "");
+      if (g.spec_path === undefined)
+        goals.push({ id: g.id, task_ids: g.task_ids ?? [] });
+    } catch {}
+  }
+  return goals;
+}
+function v5Phase(root, id) {
+  for (const p of [
+    join16(root, ".sddx-worktrees", id, ".sddx", "tasks", `${id}.json`),
+    join16(root, ".sddx", "tasks", `${id}.json`)
+  ]) {
+    const raw = readJson(p);
+    if (raw !== null)
+      return String(raw.phase);
+  }
+  const r = spawnSync9("git", ["show", `sddx/${id}:.sddx/tasks/${id}.json`], {
+    cwd: root,
+    encoding: "utf8"
+  });
+  if (r.status !== 0)
+    return null;
+  try {
+    return String(JSON.parse(r.stdout).phase);
+  } catch {
+    return null;
+  }
+}
+function detectV5Signals(root) {
+  const cfg = readJson(configPath(root));
+  const configVersion = cfg && typeof cfg.schema_version === "string" && cfg.schema_version.startsWith("1.") ? cfg.schema_version : null;
+  const tasks = v5TasksIn(root, ".sddx/tasks", false);
+  const wts = join16(root, ".sddx-worktrees");
+  if (existsSync14(wts)) {
+    for (const id of readdirSync8(wts)) {
+      tasks.push(...v5TasksIn(root, `.sddx-worktrees/${id}/.sddx/tasks`, true).filter((t) => t.id === id));
+    }
+  }
+  const manifest = readV5Manifest(root);
+  const claudeOwned = [];
+  const claudeModified = [];
+  for (const path of Object.keys(V5_OWNED)) {
+    const o = v5Ownership(root, path, manifest);
+    if (o === "owned")
+      claudeOwned.push(path);
+    else if (o === "modified")
+      claudeModified.push(path);
+  }
+  let settingsHooks = 0;
+  if (existsSync14(join16(root, V5_SETTINGS_PATH))) {
+    settingsHooks = unmergeV5Settings(readFileSync14(join16(root, V5_SETTINGS_PATH), "utf8")).removed;
+  }
+  return {
+    configVersion,
+    tasks,
+    claudeOwned,
+    claudeModified,
+    settingsHooks,
+    declaration: existsSync14(join16(root, V5_DECLARATION_PATH))
+  };
+}
+function detectV5State(root) {
+  const signals = detectV5Signals(root);
+  const specDir = join16(root, ".sddx", "specs");
+  const specYamls = existsSync14(specDir) ? readdirSync8(specDir).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml")).map((f) => `.sddx/specs/${f}`) : [];
+  const dirsToArchive = ["drafts", "context", "goals"].map((d) => `.sddx/${d}`).filter((d) => existsSync14(join16(root, d)) && readdirSync8(join16(root, d)).some((f) => f !== ".gitkeep"));
+  const goalsInFlight = v5Goals(root).map((g) => ({
+    id: g.id,
+    outstanding: g.task_ids.filter((id) => !TERMINAL.has(v5Phase(root, id) ?? "missing"))
+  })).filter((g) => g.outstanding.length > 0);
+  const pkg = readJson(join16(root, "package.json"));
+  const packageDependency = Boolean(pkg && ["dependencies", "devDependencies"].some((k) => pkg[k]?.["@glapsfun/sddx"] !== undefined));
+  return { ...signals, specYamls, dirsToArchive, goalsInFlight, packageDependency };
+}
+function v5Blockers(s) {
+  const out = [];
+  if (s.configVersion)
+    out.push(`.sddx/config.json has schema_version ${s.configVersion}`);
+  for (const t of s.tasks) {
+    if (!t.inWorktree || !TERMINAL.has(t.phase))
+      out.push(`v5 task state ${t.path}`);
+  }
+  return out;
+}
+function inFlight(s) {
+  const out = s.tasks.filter((t) => !TERMINAL.has(t.phase)).map((t) => `task ${t.id} is ${t.phase} (${t.path})`);
+  for (const g of s.goalsInFlight) {
+    out.push(`goal ${g.id} has unfinished tasks: ${g.outstanding.join(", ")}`);
+  }
+  return [...new Set(out)];
+}
+function planMigration(s) {
+  const actions = [];
+  for (const p of s.claudeOwned) {
+    actions.push({ kind: "remove", path: p, detail: "generated by sddx 5, unmodified" });
+  }
+  for (const p of s.claudeModified) {
+    actions.push({
+      kind: "keep",
+      path: p,
+      detail: "generated by sddx 5 but edited since; remove it by hand"
+    });
+  }
+  if (s.settingsHooks > 0) {
+    actions.push({
+      kind: "rewrite",
+      path: V5_SETTINGS_PATH,
+      detail: `remove ${s.settingsHooks} sddx hook entr${s.settingsHooks === 1 ? "y" : "ies"}, keep everything else`
+    });
+  }
+  if (s.declaration) {
+    actions.push({
+      kind: "remove",
+      path: V5_DECLARATION_PATH,
+      detail: "sddx 5 adapter declaration"
+    });
+  }
+  for (const d of s.dirsToArchive) {
+    actions.push({ kind: "move", path: d, detail: `to ${LEGACY_DIR}/${d.slice(".sddx/".length)}` });
+  }
+  for (const t of s.tasks.filter((x) => !x.inWorktree)) {
+    actions.push({ kind: "move", path: t.path, detail: `to ${LEGACY_DIR}/tasks/` });
+  }
+  for (const p of s.specYamls) {
+    actions.push({ kind: "move", path: p, detail: `to ${LEGACY_DIR}/specs/` });
+  }
+  if (s.configVersion) {
+    actions.push({
+      kind: "rewrite",
+      path: ".sddx/config.json",
+      detail: `schema_version ${CONFIG_SCHEMA_VERSION}, drop ${REMOVED_KEYS.join(", ")}`
+    });
+  }
+  if (s.packageDependency) {
+    actions.push({
+      kind: "manual",
+      path: "package.json",
+      detail: "lists @glapsfun/sddx; remove it or upgrade it to 6 yourself (migrate never edits package manifests)"
+    });
+  }
+  return actions;
+}
+function move(root, from, to) {
+  const dest = join16(root, to);
+  mkdirSync10(dirname6(dest), { recursive: true });
+  renameSync(join16(root, from), dest);
+}
+function applyMigration(root, s) {
+  for (const p of s.claudeOwned)
+    rmSync5(join16(root, p), { force: true });
+  for (const p of s.claudeOwned) {
+    const dir = dirname6(join16(root, p));
+    if (existsSync14(dir) && readdirSync8(dir).length === 0)
+      rmSync5(dir, { recursive: true });
+  }
+  if (s.settingsHooks > 0) {
+    const path = join16(root, V5_SETTINGS_PATH);
+    writeFileSync11(path, unmergeV5Settings(readFileSync14(path, "utf8")).text);
+  }
+  if (s.declaration)
+    rmSync5(join16(root, V5_DECLARATION_PATH), { force: true });
+  for (const d of s.dirsToArchive)
+    move(root, d, `${LEGACY_DIR}/${d.slice(".sddx/".length)}`);
+  for (const t of s.tasks.filter((x) => !x.inWorktree)) {
+    move(root, t.path, `${LEGACY_DIR}/tasks/${t.id}.json`);
+  }
+  for (const p of s.specYamls)
+    move(root, p, `${LEGACY_DIR}/specs/${p.slice(".sddx/specs/".length)}`);
+  if (s.configVersion) {
+    const cfg = readJson(configPath(root));
+    const next = { schema_version: CONFIG_SCHEMA_VERSION };
+    for (const [k, v] of Object.entries(cfg)) {
+      if (k === "schema_version" || REMOVED_KEYS.includes(k))
+        continue;
+      next[k] = v;
+    }
+    writeFileSync11(configPath(root), `${JSON.stringify(next, null, 2)}
+`);
+  }
+}
+var nothingToDo = (actions) => actions.every((a) => a.kind === "keep" || a.kind === "manual");
+
+// src/lib/optin.ts
+import { statSync as statSync3 } from "node:fs";
+import { dirname as dirname7, join as join17, resolve as resolve5 } from "node:path";
+var isDir = (p) => {
+  try {
+    return statSync3(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
+function optedInRoot(cwd) {
+  const start = resolve5(cwd);
+  const top = workspaceRoot(start);
+  if (top === null)
+    return isDir(join17(start, ".sddx")) ? start : null;
+  for (let d = start;; d = dirname7(d)) {
+    if (isDir(join17(d, ".sddx")))
+      return d;
+    if (d === top)
+      return null;
+  }
 }
 
 // src/lib/recorder.ts
@@ -10453,7 +10745,8 @@ function matchTestRunner(command) {
   }
   return null;
 }
-function recordTestRun(cwd, command, exitCode) {
+function recordTestRun(started, fullCommand, exitCode) {
+  const { command, cwd } = withLeadingCd(fullCommand, started);
   if (matchTestRunner(command) === null || exitCode === undefined) {
     return { matched: false, recorded: null };
   }
@@ -10499,8 +10792,8 @@ function recordManualRun(task, phase, exitCode) {
 }
 
 // src/lib/stopgate.ts
-import { existsSync as existsSync14 } from "node:fs";
-import { join as join16 } from "node:path";
+import { existsSync as existsSync15 } from "node:fs";
+import { join as join18 } from "node:path";
 var NEXT_STEP = {
   PLANNED: "start it with: sddx task start <id>",
   IN_PROGRESS: "make the change, then prove it with: sddx verify <id>",
@@ -10528,8 +10821,8 @@ function stopGate(event) {
   }
   const { task } = res;
   if (isTerminal(task.phase)) {
-    const receipt = join16(res.root, ".sddx", "receipts", `${task.id}.json`);
-    if (task.phase === "DONE" && !existsSync14(receipt)) {
+    const receipt = join18(res.root, ".sddx", "receipts", `${task.id}.json`);
+    if (task.phase === "DONE" && !existsSync15(receipt)) {
       return {
         block: true,
         reason: `sddx: task ${task.id} is DONE but .sddx/receipts/${task.id}.json is missing — completion is unproven. Restore the receipt or abandon the task.`
@@ -10563,7 +10856,7 @@ function stopGate(event) {
 // src/lib/hookdispatch.ts
 function readEvent() {
   try {
-    const raw = readFileSync14(0, "utf8");
+    const raw = readFileSync15(0, "utf8");
     const parsed = raw.trim() === "" ? {} : JSON.parse(raw);
     return typeof parsed === "object" && parsed !== null ? parsed : {};
   } catch {
@@ -10646,55 +10939,164 @@ function cmdStopGate(event) {
 }
 function activeTaskFiles(root) {
   const files = [];
-  const main = join17(root, ".sddx", "tasks");
-  if (existsSync15(main)) {
-    for (const f of readdirSync8(main).filter((n) => n.endsWith(".json")))
-      files.push(join17(main, f));
+  const main = join19(root, ".sddx", "tasks");
+  if (existsSync16(main)) {
+    for (const f of readdirSync9(main).filter((n) => n.endsWith(".json")))
+      files.push(join19(main, f));
   }
-  const wts = join17(root, ".sddx-worktrees");
-  if (existsSync15(wts)) {
-    for (const id of readdirSync8(wts)) {
-      const f = join17(wts, id, ".sddx", "tasks", `${id}.json`);
-      if (existsSync15(f))
+  const wts = join19(root, ".sddx-worktrees");
+  if (existsSync16(wts)) {
+    for (const id of readdirSync9(wts)) {
+      const f = join19(wts, id, ".sddx", "tasks", `${id}.json`);
+      if (existsSync16(f))
         files.push(f);
     }
   }
   return files;
 }
-function cmdSessionStart(event) {
-  const cwd = event.cwd ?? process.cwd();
-  const lines = [];
-  if (existsSync15(join17(cwd, ".sddx"))) {
+var NOT_OPTED_IN_LINE = "sddx is installed. To plan a change with it in this repository, run /sddx:brainstorm.";
+var ROUTER = join19("skills", "using-sddx", "SKILL.md");
+var ROUTER_MAPPING = join19("skills", "using-sddx", "references", "claude-code.md");
+function pluginRoot() {
+  const fromEnv = process.env.CLAUDE_PLUGIN_ROOT;
+  if (fromEnv)
+    return fromEnv;
+  let d = dirname8(fileURLToPath(import.meta.url));
+  for (let i = 0;i < 4; i++, d = dirname8(d)) {
+    if (existsSync16(join19(d, ROUTER)))
+      return d;
+  }
+  return null;
+}
+function shadowingSddx(pluginBin) {
+  const own = pluginBin ? realOrNull(join19(pluginBin, "sddx")) : null;
+  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
+    if (dir === "")
+      continue;
+    const candidate = join19(dir, "sddx");
     try {
-      const res = sweep(cwd);
-      if (res.removed.length > 0)
-        lines.push(`sddx: swept ${res.removed.length} orphan worktree(s)`);
+      accessSync(candidate, constants.X_OK);
+      if (!statSync4(candidate).isFile())
+        continue;
+      if (own !== null && realpathSync2(candidate) === own)
+        continue;
+      if (pluginBin && resolve6(dir) === resolve6(pluginBin))
+        continue;
+      return candidate;
     } catch {}
-    if (boardEnabled(cwd)) {
-      try {
-        writeBoard(cwd);
-      } catch (e) {
-        lines.push(`sddx: board refresh failed: ${e.message}`);
-      }
-    }
-    for (const file of activeTaskFiles(cwd)) {
-      try {
-        const t = JSON.parse(readFileSync14(file, "utf8"));
-        if (!isTerminal(t.phase))
-          lines.push(`sddx task ${t.id}: ${t.phase}, ${t.task}`);
-      } catch {
-        lines.push(`sddx: task file ${file} is unreadable`);
-      }
+  }
+  return null;
+}
+var realOrNull = (path) => {
+  try {
+    return realpathSync2(path);
+  } catch {
+    return null;
+  }
+};
+function runCommandLines(plugin) {
+  const pluginBin = plugin ? join19(plugin, "bin") : null;
+  const shadow = shadowingSddx(pluginBin);
+  if (!shadow || !pluginBin)
+    return ["Run sddx as: sddx"];
+  return [
+    `Run sddx as: ${join19(pluginBin, "sddx")}`,
+    `Warning: another sddx at ${shadow} comes first on PATH and would shadow the plugin's, so use the command above wherever a skill says sddx. Removing the other one lets plain sddx work; the sddx troubleshooting guide shows how.`
+  ];
+}
+function routerText(plugin) {
+  if (!plugin)
+    return "sddx: the router skill could not be located (CLAUDE_PLUGIN_ROOT is unset)";
+  const parts = [];
+  for (const rel of [ROUTER, ROUTER_MAPPING]) {
+    try {
+      parts.push(withoutFrontmatter(readFileSync15(join19(plugin, rel), "utf8")));
+    } catch {
+      parts.push(`sddx: ${join19(plugin, rel)} could not be read`);
     }
   }
-  if (lines.length === 0) {
-    emit({});
-    return;
+  return parts.join(`
+
+`);
+}
+function v5Check(root) {
+  let s;
+  try {
+    s = detectV5Signals(root);
+  } catch (e) {
+    return {
+      pending: false,
+      lines: [`sddx: could not check for sddx 5 leftovers: ${e.message}`]
+    };
   }
-  emit({
-    hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: lines.join(`
-`) }
-  });
+  const registered = s.claudeOwned.length > 0 || s.settingsHooks > 0;
+  if (v5Blockers(s).length > 0 || registered || s.declaration) {
+    const lines = [
+      "This repository was set up by sddx 5, which sddx 6 does not run. Run `sddx migrate` to preview the move, then `sddx migrate --yes` to apply it."
+    ];
+    if (registered) {
+      lines.push("Until then its sddx 5 files and hooks under .claude/ stay registered, so both sets of hooks would fire: sddx 5's and the plugin's.");
+    }
+    return { pending: true, lines };
+  }
+  if (s.claudeModified.length === 0)
+    return { pending: false, lines: [] };
+  return {
+    pending: false,
+    lines: [
+      `Note: sddx 5 generated ${s.claudeModified.join(", ")}, and they were edited since, so sddx migrate kept them. Remove them once they are no longer needed.`
+    ]
+  };
+}
+function optedInLines(root, plugin, notes) {
+  const lines = [
+    `sddx is active in this repository (${root}).`,
+    ...runCommandLines(plugin),
+    ...notes
+  ];
+  try {
+    const res = sweep(root);
+    if (res.removed.length > 0)
+      lines.push(`sddx: swept ${res.removed.length} orphan worktree(s)`);
+  } catch {}
+  if (boardEnabled(root)) {
+    try {
+      writeBoard(root);
+    } catch (e) {
+      lines.push(`sddx: board refresh failed: ${e.message}`);
+    }
+  }
+  for (const file of activeTaskFiles(root)) {
+    try {
+      const t = JSON.parse(readFileSync15(file, "utf8"));
+      if (!isTerminal(t.phase))
+        lines.push(`sddx task ${t.id}: ${t.phase}, ${t.task}`);
+    } catch {
+      lines.push(`sddx: task file ${file} is unreadable`);
+    }
+  }
+  return [...lines, "", routerText(plugin)];
+}
+function sessionStartContext(cwd) {
+  const root = optedInRoot(cwd);
+  if (root === null)
+    return NOT_OPTED_IN_LINE;
+  const plugin = pluginRoot();
+  const v5 = v5Check(root);
+  if (v5.pending)
+    return [...v5.lines, ...runCommandLines(plugin)].join(`
+`);
+  return optedInLines(root, plugin, v5.lines).join(`
+`);
+}
+function cmdSessionStart(event) {
+  let context;
+  try {
+    context = sessionStartContext(event.cwd ?? process.cwd());
+  } catch (e) {
+    context = `sddx: session start failed: ${e.message}`;
+  }
+  emit({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } });
 }
 function dispatchHook(sub, event) {
   try {
@@ -10722,21 +11124,21 @@ function runHook(sub) {
 }
 
 // src/lib/lifecycle.ts
-import { rmSync as rmSync6 } from "node:fs";
-import { join as join19 } from "node:path";
+import { rmSync as rmSync7 } from "node:fs";
+import { join as join21 } from "node:path";
 
 // src/lib/proof.ts
-import { spawnSync as spawnSync10 } from "node:child_process";
-import { existsSync as existsSync16, mkdirSync as mkdirSync10, mkdtempSync as mkdtempSync3, readFileSync as readFileSync15, rmSync as rmSync5, writeFileSync as writeFileSync11 } from "node:fs";
+import { spawnSync as spawnSync11 } from "node:child_process";
+import { existsSync as existsSync17, mkdirSync as mkdirSync11, mkdtempSync as mkdtempSync3, readFileSync as readFileSync16, rmSync as rmSync6, writeFileSync as writeFileSync12 } from "node:fs";
 import { tmpdir as tmpdir3 } from "node:os";
-import { join as join18 } from "node:path";
+import { join as join20 } from "node:path";
 
 // src/lib/oracle.ts
-import { spawnSync as spawnSync9 } from "node:child_process";
+import { spawnSync as spawnSync10 } from "node:child_process";
 var ORACLE_TIMEOUT_MS = 10 * 60000;
 function runOracle(cwd, run) {
   const started = Date.now();
-  const r = spawnSync9("sh", ["-c", run], { cwd, timeout: ORACLE_TIMEOUT_MS });
+  const r = spawnSync10("sh", ["-c", run], { cwd, timeout: ORACLE_TIMEOUT_MS });
   if (r.error)
     throw new Error(`oracle could not run: ${r.error.message}`);
   return {
@@ -10750,10 +11152,10 @@ function runOracle(cwd, run) {
 // src/lib/proof.ts
 var STATE_EXCLUDE = ":(exclude).sddx";
 function worktreeTree(worktree) {
-  const dir = mkdtempSync3(join18(tmpdir3(), "sddx-tree-"));
-  const env = { ...process.env, GIT_INDEX_FILE: join18(dir, "index") };
+  const dir = mkdtempSync3(join20(tmpdir3(), "sddx-tree-"));
+  const env = { ...process.env, GIT_INDEX_FILE: join20(dir, "index") };
   const run = (args) => {
-    const r = spawnSync10("git", args, { cwd: worktree, env, encoding: "utf8" });
+    const r = spawnSync11("git", args, { cwd: worktree, env, encoding: "utf8" });
     if (r.status !== 0)
       throw new Error(`git ${args[0]} failed: ${(r.stderr ?? "").trim()}`);
     return (r.stdout ?? "").trim();
@@ -10763,11 +11165,11 @@ function worktreeTree(worktree) {
     run(["add", "-A", "--", ".", STATE_EXCLUDE]);
     return run(["write-tree"]);
   } finally {
-    rmSync5(dir, { recursive: true, force: true });
+    rmSync6(dir, { recursive: true, force: true });
   }
 }
 function diffZ(cwd, args) {
-  const r = spawnSync10("git", ["diff", "-z", "--no-renames", "--no-ext-diff", ...args], {
+  const r = spawnSync11("git", ["diff", "-z", "--no-renames", "--no-ext-diff", ...args], {
     cwd,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024
@@ -10788,7 +11190,7 @@ function changedFiles(cwd, base, tree) {
 }
 var sddxChanges = (cwd, base, tree) => diffZ(cwd, ["--name-only", base, tree, "--", ".sddx"]);
 function gitOnPaths(cwd, args, paths) {
-  const r = spawnSync10("git", ["--literal-pathspecs", ...args, "--pathspec-from-file=-", "--pathspec-file-nul"], { cwd, input: `${paths.join("\x00")}\x00`, encoding: "utf8" });
+  const r = spawnSync11("git", ["--literal-pathspecs", ...args, "--pathspec-from-file=-", "--pathspec-file-nul"], { cwd, input: `${paths.join("\x00")}\x00`, encoding: "utf8" });
   if (r.status !== 0)
     throw new Error(`git ${args[0]} failed: ${(r.stderr ?? "").trim()}`);
 }
@@ -10796,7 +11198,7 @@ function changedTestFiles(cwd, base, tree, config) {
   return changedFiles(cwd, base, tree).filter((f) => classify(f.path, [], config).rule === "test");
 }
 function diffSha256(cwd, base, tree) {
-  const r = spawnSync10("git", ["diff", "--binary", base, tree, "--", ".", STATE_EXCLUDE], {
+  const r = spawnSync11("git", ["diff", "--binary", base, tree, "--", ".", STATE_EXCLUDE], {
     cwd,
     maxBuffer: 512 * 1024 * 1024
   });
@@ -10816,24 +11218,24 @@ function failureFingerprint(half, exitCode, output) {
 `).replace(/\d+(\.\d+)?/g, "#").replace(/\s+/g, " ").trim();
   return sha256(`${half}\x00${exitCode}\x00${tail}`);
 }
-var proofPath = (root, id) => join18(worktreesDir(root), `${id}${PROOF_SUFFIX}`);
-var proofRecordPath = (root, id) => join18(gitCommonDir(root), "sddx-proofs", `${id}.json`);
+var proofPath = (root, id) => join20(worktreesDir(root), `${id}${PROOF_SUFFIX}`);
+var proofRecordPath = (root, id) => join20(gitCommonDir(root), "sddx-proofs", `${id}.json`);
 function writeProofRecord(root, record) {
   const path = proofRecordPath(root, record.task_id);
-  mkdirSync10(join18(path, ".."), { recursive: true });
-  writeFileSync11(path, `${JSON.stringify(record, null, 2)}
+  mkdirSync11(join20(path, ".."), { recursive: true });
+  writeFileSync12(path, `${JSON.stringify(record, null, 2)}
 `);
 }
 function readProofRecord(root, id, attempt) {
   try {
-    const r = JSON.parse(readFileSync15(proofRecordPath(root, id), "utf8"));
+    const r = JSON.parse(readFileSync16(proofRecordPath(root, id), "utf8"));
     return r.task_id === id && r.attempt === attempt ? r : null;
   } catch {
     return null;
   }
 }
 function clearProofRecord(root, id) {
-  rmSync5(proofRecordPath(root, id), { force: true });
+  rmSync6(proofRecordPath(root, id), { force: true });
 }
 function claimProofPath(root, id, path) {
   const existing = listSddxWorktrees(root).find((w) => w.path === path);
@@ -10841,7 +11243,7 @@ function claimProofPath(root, id, path) {
   if (owner.alive) {
     throw new Error(`a verify of ${id} is already running${owner.pid ? ` (pid ${owner.pid})` : ""}. If none is, remove its proof worktree: git worktree remove --force --force ${path}`);
   }
-  if (existing || existsSync16(path))
+  if (existing || existsSync17(path))
     removeScratchWorktree(root, path);
 }
 function runSetup(path, setup) {
@@ -10955,7 +11357,7 @@ function startTask(cwd, id) {
   task.workspace = {
     branch: `sddx/${id}`,
     base_sha: ws.baseSha,
-    path: join19(".sddx-worktrees", id)
+    path: join21(".sddx-worktrees", id)
   };
   task.profile = profile(root);
   if (task.profile === "strict")
@@ -10963,7 +11365,7 @@ function startTask(cwd, id) {
   transition(task, "IN_PROGRESS");
   writeTask(ws.path, task);
   if (home === root)
-    rmSync6(taskPath(root, id), { force: true });
+    rmSync7(taskPath(root, id), { force: true });
   return { task, path: ws.path, baseSha: ws.baseSha, reused: ws.reused };
 }
 function readyTasks(cwd, goalId) {
@@ -10979,7 +11381,7 @@ function readyTasks(cwd, goalId) {
 function persistTerminal(root, home, task) {
   writeTask(root, task);
   if (home !== root)
-    rmSync6(taskPath(home, task.id), { force: true });
+    rmSync7(taskPath(home, task.id), { force: true });
 }
 function cascadeSkips(root, goal, failedId) {
   const skipped = [];
@@ -11027,236 +11429,6 @@ function abandonTask(cwd, id, reason) {
   const skipped = cascadeSkips(root, readGoal(root, task.goal_id), id);
   return { ...outcome, task, skipped };
 }
-
-// src/lib/migrate.ts
-import { spawnSync as spawnSync11 } from "node:child_process";
-import {
-  existsSync as existsSync17,
-  mkdirSync as mkdirSync11,
-  readdirSync as readdirSync9,
-  readFileSync as readFileSync16,
-  renameSync,
-  rmSync as rmSync7,
-  writeFileSync as writeFileSync12
-} from "node:fs";
-import { dirname as dirname6, join as join20 } from "node:path";
-var LEGACY_DIR = ".sddx/legacy";
-var TERMINAL = new Set(["DONE", "ABANDONED"]);
-var REMOVED_KEYS = ["runtime_scope", "package_manager", "adapters"];
-function readJson(path) {
-  try {
-    return JSON.parse(readFileSync16(path, "utf8"));
-  } catch {
-    return null;
-  }
-}
-function v5TasksIn(root, dir, inWorktree) {
-  const abs = join20(root, dir);
-  if (!existsSync17(abs))
-    return [];
-  const out = [];
-  for (const f of readdirSync9(abs).filter((n) => n.endsWith(".json"))) {
-    const raw = readJson(join20(abs, f));
-    if (raw === null || isV6Task(raw))
-      continue;
-    const phase = String(raw.phase ?? "unknown");
-    out.push({ id: f.slice(0, -".json".length), phase, path: `${dir}/${f}`, inWorktree });
-  }
-  return out;
-}
-function v5Goals(root) {
-  const r = spawnSync11("git", ["for-each-ref", "--format=%(refname)", "refs/sddx/goals/"], {
-    cwd: root,
-    encoding: "utf8"
-  });
-  const goals = [];
-  for (const ref of (r.stdout ?? "").split(`
-`).map((s) => s.trim())) {
-    if (!ref.startsWith("refs/sddx/goals/"))
-      continue;
-    const blob = spawnSync11("git", ["cat-file", "-p", ref], { cwd: root, encoding: "utf8" });
-    try {
-      const g = JSON.parse(blob.stdout ?? "");
-      if (g.spec_path === undefined)
-        goals.push({ id: g.id, task_ids: g.task_ids ?? [] });
-    } catch {}
-  }
-  return goals;
-}
-function v5Phase(root, id) {
-  for (const p of [
-    join20(root, ".sddx-worktrees", id, ".sddx", "tasks", `${id}.json`),
-    join20(root, ".sddx", "tasks", `${id}.json`)
-  ]) {
-    const raw = readJson(p);
-    if (raw !== null)
-      return String(raw.phase);
-  }
-  const r = spawnSync11("git", ["show", `sddx/${id}:.sddx/tasks/${id}.json`], {
-    cwd: root,
-    encoding: "utf8"
-  });
-  if (r.status !== 0)
-    return null;
-  try {
-    return String(JSON.parse(r.stdout).phase);
-  } catch {
-    return null;
-  }
-}
-function detectV5State(root) {
-  const cfg = readJson(configPath(root));
-  const configVersion = cfg && typeof cfg.schema_version === "string" && cfg.schema_version.startsWith("1.") ? cfg.schema_version : null;
-  const tasks = v5TasksIn(root, ".sddx/tasks", false);
-  const wts = join20(root, ".sddx-worktrees");
-  if (existsSync17(wts)) {
-    for (const id of readdirSync9(wts)) {
-      tasks.push(...v5TasksIn(root, `.sddx-worktrees/${id}/.sddx/tasks`, true).filter((t) => t.id === id));
-    }
-  }
-  const specDir = join20(root, ".sddx", "specs");
-  const specYamls = existsSync17(specDir) ? readdirSync9(specDir).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml")).map((f) => `.sddx/specs/${f}`) : [];
-  const dirsToArchive = ["drafts", "context", "goals"].map((d) => `.sddx/${d}`).filter((d) => existsSync17(join20(root, d)) && readdirSync9(join20(root, d)).some((f) => f !== ".gitkeep"));
-  const goalsInFlight = v5Goals(root).map((g) => ({
-    id: g.id,
-    outstanding: g.task_ids.filter((id) => !TERMINAL.has(v5Phase(root, id) ?? "missing"))
-  })).filter((g) => g.outstanding.length > 0);
-  const manifest = readV5Manifest(root);
-  const claudeOwned = [];
-  const claudeModified = [];
-  for (const path of Object.keys(V5_OWNED)) {
-    const o = v5Ownership(root, path, manifest);
-    if (o === "owned")
-      claudeOwned.push(path);
-    else if (o === "modified")
-      claudeModified.push(path);
-  }
-  let settingsHooks = 0;
-  if (existsSync17(join20(root, V5_SETTINGS_PATH))) {
-    settingsHooks = unmergeV5Settings(readFileSync16(join20(root, V5_SETTINGS_PATH), "utf8")).removed;
-  }
-  const pkg = readJson(join20(root, "package.json"));
-  const packageDependency = Boolean(pkg && ["dependencies", "devDependencies"].some((k) => pkg[k]?.["@glapsfun/sddx"] !== undefined));
-  return {
-    configVersion,
-    tasks,
-    specYamls,
-    dirsToArchive,
-    goalsInFlight,
-    claudeOwned,
-    claudeModified,
-    settingsHooks,
-    declaration: existsSync17(join20(root, V5_DECLARATION_PATH)),
-    packageDependency
-  };
-}
-function v5Blockers(s) {
-  const out = [];
-  if (s.configVersion)
-    out.push(`.sddx/config.json has schema_version ${s.configVersion}`);
-  for (const t of s.tasks) {
-    if (!t.inWorktree || !TERMINAL.has(t.phase))
-      out.push(`v5 task state ${t.path}`);
-  }
-  return out;
-}
-function inFlight(s) {
-  const out = s.tasks.filter((t) => !TERMINAL.has(t.phase)).map((t) => `task ${t.id} is ${t.phase} (${t.path})`);
-  for (const g of s.goalsInFlight) {
-    out.push(`goal ${g.id} has unfinished tasks: ${g.outstanding.join(", ")}`);
-  }
-  return [...new Set(out)];
-}
-function planMigration(s) {
-  const actions = [];
-  for (const p of s.claudeOwned) {
-    actions.push({ kind: "remove", path: p, detail: "generated by sddx 5, unmodified" });
-  }
-  for (const p of s.claudeModified) {
-    actions.push({
-      kind: "keep",
-      path: p,
-      detail: "generated by sddx 5 but edited since; remove it by hand"
-    });
-  }
-  if (s.settingsHooks > 0) {
-    actions.push({
-      kind: "rewrite",
-      path: V5_SETTINGS_PATH,
-      detail: `remove ${s.settingsHooks} sddx hook entr${s.settingsHooks === 1 ? "y" : "ies"}, keep everything else`
-    });
-  }
-  if (s.declaration) {
-    actions.push({
-      kind: "remove",
-      path: V5_DECLARATION_PATH,
-      detail: "sddx 5 adapter declaration"
-    });
-  }
-  for (const d of s.dirsToArchive) {
-    actions.push({ kind: "move", path: d, detail: `to ${LEGACY_DIR}/${d.slice(".sddx/".length)}` });
-  }
-  for (const t of s.tasks.filter((x) => !x.inWorktree)) {
-    actions.push({ kind: "move", path: t.path, detail: `to ${LEGACY_DIR}/tasks/` });
-  }
-  for (const p of s.specYamls) {
-    actions.push({ kind: "move", path: p, detail: `to ${LEGACY_DIR}/specs/` });
-  }
-  if (s.configVersion) {
-    actions.push({
-      kind: "rewrite",
-      path: ".sddx/config.json",
-      detail: `schema_version ${CONFIG_SCHEMA_VERSION}, drop ${REMOVED_KEYS.join(", ")}`
-    });
-  }
-  if (s.packageDependency) {
-    actions.push({
-      kind: "manual",
-      path: "package.json",
-      detail: "lists @glapsfun/sddx; remove it or upgrade it to 6 yourself (migrate never edits package manifests)"
-    });
-  }
-  return actions;
-}
-function move(root, from, to) {
-  const dest = join20(root, to);
-  mkdirSync11(dirname6(dest), { recursive: true });
-  renameSync(join20(root, from), dest);
-}
-function applyMigration(root, s) {
-  for (const p of s.claudeOwned)
-    rmSync7(join20(root, p), { force: true });
-  for (const p of s.claudeOwned) {
-    const dir = dirname6(join20(root, p));
-    if (existsSync17(dir) && readdirSync9(dir).length === 0)
-      rmSync7(dir, { recursive: true });
-  }
-  if (s.settingsHooks > 0) {
-    const path = join20(root, V5_SETTINGS_PATH);
-    writeFileSync12(path, unmergeV5Settings(readFileSync16(path, "utf8")).text);
-  }
-  if (s.declaration)
-    rmSync7(join20(root, V5_DECLARATION_PATH), { force: true });
-  for (const d of s.dirsToArchive)
-    move(root, d, `${LEGACY_DIR}/${d.slice(".sddx/".length)}`);
-  for (const t of s.tasks.filter((x) => !x.inWorktree)) {
-    move(root, t.path, `${LEGACY_DIR}/tasks/${t.id}.json`);
-  }
-  for (const p of s.specYamls)
-    move(root, p, `${LEGACY_DIR}/specs/${p.slice(".sddx/specs/".length)}`);
-  if (s.configVersion) {
-    const cfg = readJson(configPath(root));
-    const next = { schema_version: CONFIG_SCHEMA_VERSION };
-    for (const [k, v] of Object.entries(cfg)) {
-      if (k === "schema_version" || REMOVED_KEYS.includes(k))
-        continue;
-      next[k] = v;
-    }
-    writeFileSync12(configPath(root), `${JSON.stringify(next, null, 2)}
-`);
-  }
-}
-var nothingToDo = (actions) => actions.every((a) => a.kind === "keep" || a.kind === "manual");
 
 // src/lib/prhost.ts
 import { spawnSync as spawnSync12 } from "node:child_process";
@@ -11414,16 +11586,16 @@ function createGoalPr(cwd, id, opts = {}) {
 
 // src/lib/runbranch.ts
 import { spawnSync as spawnSync13 } from "node:child_process";
-import { existsSync as existsSync18, mkdirSync as mkdirSync12, rmdirSync as rmdirSync2, statSync as statSync3 } from "node:fs";
-import { isAbsolute as isAbsolute4, join as join21 } from "node:path";
+import { existsSync as existsSync18, mkdirSync as mkdirSync12, rmdirSync as rmdirSync2, statSync as statSync5 } from "node:fs";
+import { isAbsolute as isAbsolute4, join as join22 } from "node:path";
 var LOCK_STALE_MS2 = 5 * 60000;
 var LOCK_TIMEOUT_MS = 30000;
 function gitCommonDir2(cwd) {
   const dir = git(cwd, "rev-parse", "--git-common-dir");
-  return isAbsolute4(dir) ? dir : join21(cwd, dir);
+  return isAbsolute4(dir) ? dir : join22(cwd, dir);
 }
 function withGoalLock(root, goalId, fn) {
-  const lockPath = join21(gitCommonDir2(root), `sddx-runbranch-${goalId}.lock`);
+  const lockPath = join22(gitCommonDir2(root), `sddx-runbranch-${goalId}.lock`);
   const deadline = Date.now() + LOCK_TIMEOUT_MS;
   for (;; ) {
     try {
@@ -11432,7 +11604,7 @@ function withGoalLock(root, goalId, fn) {
     } catch {
       if (existsSync18(lockPath)) {
         try {
-          if (Date.now() - statSync3(lockPath).mtimeMs > LOCK_STALE_MS2)
+          if (Date.now() - statSync5(lockPath).mtimeMs > LOCK_STALE_MS2)
             rmdirSync2(lockPath);
         } catch {}
       }
@@ -11460,7 +11632,7 @@ function integrateTaskIntoRunBranch(taskCwd, id) {
   if (!branch)
     return { result: "none", reason: "no-branch", runBranch: goal.run_branch };
   const outcome = withGoalLock(root, goal.id, () => {
-    const tmpPath = join21(worktreesDir(root), `integrate-${id}`);
+    const tmpPath = join22(worktreesDir(root), `integrate-${id}`);
     const holder = checkedOutAt(root, goal.run_branch);
     if (holder && isRunBranchScratch(holder))
       removeScratchWorktree(root, holder);
@@ -11514,7 +11686,7 @@ function integrateTaskIntoRunBranch(taskCwd, id) {
     worktree: taskCwd,
     branch,
     baseTree: git(taskCwd, "rev-parse", "HEAD^{tree}"),
-    files: { [join21(".sddx", "tasks", `${id}.json`)]: `${JSON.stringify(task, null, 2)}
+    files: { [join22(".sddx", "tasks", `${id}.json`)]: `${JSON.stringify(task, null, 2)}
 ` },
     message: `sddx(${id}): record integration (${outcome.result})`
   });
@@ -11527,7 +11699,7 @@ function revertTaskMerge(cwd, goalId, id) {
     if (latest?.result !== "merged" || !latest.commit_sha) {
       throw new Error(`task ${id} has no current merge in goal ${goalId} to revert`);
     }
-    const tmpPath = join21(worktreesDir(cwd), `revert-${id}`);
+    const tmpPath = join22(worktreesDir(cwd), `revert-${id}`);
     git(cwd, "worktree", "add", "-q", tmpPath, goal.run_branch);
     let revertSha;
     try {
@@ -11726,7 +11898,7 @@ function runActions(cwd, state) {
 
 // src/lib/output.ts
 import { existsSync as existsSync19, writeFileSync as writeFileSync13 } from "node:fs";
-import { join as join22 } from "node:path";
+import { join as join23 } from "node:path";
 
 // src/lib/ansi.ts
 var CODES = {
@@ -11886,10 +12058,10 @@ function writeTerminalFinal(result, colorFor) {
   }
 }
 function uniquePath(dir, baseName, ext) {
-  let candidate = join22(dir, `${baseName}.${ext}`);
+  let candidate = join23(dir, `${baseName}.${ext}`);
   let n = 2;
   while (existsSync19(candidate)) {
-    candidate = join22(dir, `${baseName}-${n}.${ext}`);
+    candidate = join23(dir, `${baseName}-${n}.${ext}`);
     n++;
   }
   return candidate;
@@ -11988,7 +12160,7 @@ class Reporter {
 import { spawnSync as spawnSync14 } from "node:child_process";
 import { existsSync as existsSync20, mkdtempSync as mkdtempSync4, readFileSync as readFileSync17, rmSync as rmSync8 } from "node:fs";
 import { tmpdir as tmpdir4 } from "node:os";
-import { join as join23, relative as relative3, resolve as resolve4, sep as sep2 } from "node:path";
+import { join as join24, relative as relative3, resolve as resolve7, sep as sep2 } from "node:path";
 var SPEC_NAME_RE = /^\d{4}-\d{2}-\d{2}-[a-z0-9][a-z0-9-]*\.md$/;
 function ancestors(id, parents, guard = new Set([id])) {
   const out = new Set;
@@ -12067,13 +12239,13 @@ function planRuleErrors(spec) {
   return errors2;
 }
 function taskIdInUse(root, id) {
-  const receipt = join23(".sddx", "receipts", `${id}.json`);
-  if (existsSync20(join23(root, receipt)))
+  const receipt = join24(".sddx", "receipts", `${id}.json`);
+  if (existsSync20(join24(root, receipt)))
     return receipt;
   if (existsSync20(taskPath(root, id)))
     return relative3(root, taskPath(root, id));
-  if (existsSync20(join23(worktreesDir(root), id)))
-    return join23(".sddx-worktrees", id);
+  if (existsSync20(join24(worktreesDir(root), id)))
+    return join24(".sddx-worktrees", id);
   if (branchExists(root, `sddx/${id}`))
     return `branch sddx/${id}`;
   if (resolveTaskState(root, id))
@@ -12089,7 +12261,7 @@ function isCommitted(root, specPath) {
 }
 function resolvePlan(cwd, specArg) {
   const root = resolveMainRepoRoot(cwd);
-  const absPath = resolve4(cwd, specArg);
+  const absPath = resolve7(cwd, specArg);
   const specPath = posix(relative3(root, absPath));
   const goalId = goalIdFromSpec(specPath);
   const plan = {
@@ -12176,8 +12348,8 @@ class Rollback {
   }
 }
 function commitSpecOnBranch(root, branch, parent, specPath, bytes, message) {
-  const dir = mkdtempSync4(join23(tmpdir4(), "sddx-plan-index-"));
-  const env = { ...process.env, GIT_INDEX_FILE: join23(dir, "index") };
+  const dir = mkdtempSync4(join24(tmpdir4(), "sddx-plan-index-"));
+  const env = { ...process.env, GIT_INDEX_FILE: join24(dir, "index") };
   const run2 = (args, input) => {
     const r = spawnSync14("git", args, { cwd: root, env, input, encoding: "utf8" });
     if (r.status !== 0)
@@ -12261,7 +12433,7 @@ function startPlan(plan, gate) {
 
 // src/lib/review.ts
 import { readFileSync as readFileSync18 } from "node:fs";
-import { isAbsolute as isAbsolute5, join as join24, relative as relative4, resolve as resolve5 } from "node:path";
+import { isAbsolute as isAbsolute5, join as join25, relative as relative4, resolve as resolve8 } from "node:path";
 
 // src/lib/finalize.ts
 import { existsSync as existsSync21 } from "node:fs";
@@ -12421,7 +12593,7 @@ function recordReview(id, input) {
   if (!proof) {
     throw new Error(`task ${id} has no boundary proof recorded by sddx verify for its current attempt; run sddx verify ${id}`);
   }
-  const worktree = join24(root, task.workspace.path);
+  const worktree = join25(root, task.workspace.path);
   const current = worktreeTree(worktree);
   if (current !== proof.tree_sha) {
     clearProofRecord(root, id);
@@ -12438,7 +12610,7 @@ function recordReview(id, input) {
     at: new Date().toISOString()
   };
   if (input.findings) {
-    const abs = resolve5(input.cwd, input.findings);
+    const abs = resolve8(input.cwd, input.findings);
     entry.findings_sha256 = sha256(readFileSync18(abs));
     const rel = relative4(root, abs);
     entry.findings_path = rel.startsWith("..") || isAbsolute5(rel) ? abs : rel;
@@ -12584,7 +12756,7 @@ function renderRunReport(r) {
 
 // src/lib/verify.ts
 import { spawnSync as spawnSync16 } from "node:child_process";
-import { join as join25 } from "node:path";
+import { join as join26 } from "node:path";
 function outOfScope(task, paths, root) {
   if (task.scope.length === 0)
     return [];
@@ -12647,7 +12819,7 @@ function verifyTask(cwd, id) {
   const { root, home, task } = loadForVerify(cwd, id);
   clearProofRecord(root, id);
   const workspace = task.workspace;
-  const worktree = join25(root, workspace.path);
+  const worktree = join26(root, workspace.path);
   const treeSha = worktreeTree(worktree);
   const base = workspace.base_sha;
   const now = new Date().toISOString();
@@ -13186,7 +13358,7 @@ function cmdDoctor(cwd, format, noColor) {
   let root = null;
   try {
     const r = resolveMainRepoRoot(cwd);
-    root = existsSync22(join26(r, ".git")) ? r : null;
+    root = existsSync22(join27(r, ".git")) ? r : null;
   } catch {
     root = null;
   }
@@ -13254,7 +13426,7 @@ function cmdSpecCheck(cwd, args, format, noColor) {
     fail2(USAGE, 2);
   let text;
   try {
-    text = readFileSync19(resolve6(cwd, file), "utf8");
+    text = readFileSync19(resolve9(cwd, file), "utf8");
   } catch {
     fail2(`spec check: cannot read ${file}`);
   }
@@ -13280,17 +13452,17 @@ function cmdCleanup(cwd, args, format, noColor) {
   if (!id)
     fail2(USAGE, 2);
   const branch = `sddx/${id}`;
-  const wtPath = join26(worktreesDir(cwd), id);
+  const wtPath = join27(worktreesDir(cwd), id);
   const task = resolveTaskState(cwd, id);
   if (existsSync22(wtPath)) {
     if (task && !isTerminal(task.phase)) {
       fail2(`refusing: task ${id} is ${task.phase} and its worktree holds its only state; finish it, or abandon it first (sddx task abandon ${id} --reason <text>)`);
     }
     if (isDirty(wtPath)) {
-      fail2(`refusing: worktree ${join26(".sddx-worktrees", id)} has uncommitted changes`);
+      fail2(`refusing: worktree ${join27(".sddx-worktrees", id)} has uncommitted changes`);
     }
     removeWorktree(cwd, wtPath);
-    reporter.success(`removed worktree ${join26(".sddx-worktrees", id)}`);
+    reporter.success(`removed worktree ${join27(".sddx-worktrees", id)}`);
   }
   if (task?.phase === "ABANDONED" && task.workspace && branchExists(cwd, branch)) {
     const ahead = spawnSync17("git", ["rev-list", "--count", `${task.workspace.base_sha}..${branch}`], {
@@ -13463,7 +13635,7 @@ function cmdConfigShow(cwd, args, format, noColor) {
 }
 function cmdConfigValidate(cwd, format, noColor) {
   const reporter = makeReporter("config validate", format, noColor);
-  const path = join26(sddxDir(cwd), "config.json");
+  const path = join27(sddxDir(cwd), "config.json");
   if (!existsSync22(path)) {
     reporter.success("config validate: no .sddx/config.json, built-in defaults apply");
     reporter.finish({ hasConfig: false, warnings: [] });

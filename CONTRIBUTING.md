@@ -42,7 +42,9 @@ clean local `bun run check` and pre-commit pass means CI will agree.
 - **Behavior changes come with tests.** The project practices what it
   enforces: test first, then implementation.
 - **Rebuild `dist/` when `src/` changes** — `bun run build` and commit the
-  bundles; CI fails on drift between `src/` and `dist/`.
+  bundles; CI fails on drift between `src/` and `dist/`. Build with the Bun
+  version pinned in `.bun-version`: another version bundles the same source
+  differently, and the drift check fails.
 - **Zero network calls is a hard invariant.** Any new dependency or network
   primitive fails `tests/privacy.test.ts`; don't add one.
 - **Hooks stay fast.** The SessionStart path budgets < 200 ms; keep heavy

@@ -6,21 +6,112 @@ proven diff, and every receipt is hash-chained. Those hold in any harness, or
 with no harness at all.
 
 Hooks add early feedback and the one thing a CLI cannot do on its own: raise
-the user's own permission dialog. Each harness plugin registers them; the
-handlers are `sddx hook <name>`, which read the harness event as JSON on stdin,
-write a decision as JSON on stdout, and always exit 0, so a bug in sddx can
-never brick a session.
+the user's own permission dialog. The harness plugin registers them (see
+[Registration in Claude Code](#registration-in-claude-code)); the handlers are
+`sddx hook <name>`, which read the harness event as JSON on stdin, write a
+decision as JSON on stdout, and always exit 0, so a bug in sddx can never brick
+a session.
 
 ## The handlers
 
 | Handler | Event | Default profile | Strict profile |
 | --- | --- | --- | --- |
-| `session-start` | session start | sweeps orphan worktrees, refreshes the board, lists unfinished tasks | same |
+| `session-start` | session start | injects context by repository state (see [What session start injects](#what-session-start-injects)) | same |
 | `approval-gate` | before Bash and file-tool calls | asks on `plan approve` / `plan start`; denies writes to `.sddx/approvals/**`, `.sddx/config.json` and `.git/sddx-proofs/**` | same |
 | `tdd-gate` | before file-tool writes | pass-through, never reads task state | denies implementation writes before a failing test is recorded; denies implementation writes outside the task's scope |
 | `bash-gate` | before Bash | pass-through | before a failing test is recorded, only allow-listed test and read commands run |
 | `record-test` | after Bash | ignored | records test-runner exit codes as the task's RED and GREEN evidence |
 | `stop-gate` | session and subagent stop | blocks stopping while the governing task is `IN_PROGRESS` without a proof (allows it when stuck, at the iteration limit, or once `IN_REVIEW`) | same |
+
+## Registration in Claude Code
+
+The plugin's `hooks/hooks.json` registers every handler through one launcher,
+`hooks/run-hook <handler>`:
+
+| Event | Matcher | Handlers, in order | Timeout |
+| --- | --- | --- | --- |
+| `SessionStart` | `startup`, `clear`, `compact` | `session-start` | 10 s |
+| `PreToolUse` | `Bash` | `approval-gate`, `bash-gate` | 30 s, 10 s |
+| `PreToolUse` | `Edit`, `Write`, `MultiEdit`, `NotebookEdit` | `approval-gate`, `tdd-gate` | 30 s, 10 s |
+| `PostToolUse` | `Bash` | `record-test` | 10 s |
+| `Stop` | (every stop) | `stop-gate` | 10 s |
+| `SubagentStop` | (every stop) | `stop-gate` | 10 s |
+
+`resume` and `fork` are not matched: a resumed or forked session keeps the
+context its start injected. The approval gate gets a longer timeout because a
+timed-out hook is a non-blocking error in Claude Code, which for this gate would
+mean no dialog.
+
+### What the launcher decides before starting Bun
+
+The launcher is a POSIX `sh` script. It finds Bun on `PATH`, or at
+`~/.bun/bin/bun` when a session starts with a broken `PATH`, and decides in
+shell whether the handler needs to run at all:
+
+- `approval-gate` runs in every repository, because the first approval token or
+  config write can come before `.sddx/` exists. It starts Bun only when the
+  event's JSON, lowercased and with quote characters, backslashes and escaped
+  control characters deleted, contains `sddx`, `cli.mjs` or `cli.ts`. That
+  filter is sound: every decision the handler can make other than pass-through
+  needs one of those strings after the shell's own processing. A gated command
+  names an sddx invocation, and the handler's lexer joins quoted and escaped
+  pieces first, so `s'ddx'`, `s\ddx` and `SDDX` all gate; deleting characters
+  joins them in the filter too, and can create a match but never destroy one.
+  Every protected path contains `sddx`, the unreadable-expansion case requires
+  the word `sddx`, and a relative path that resolves into `.sddx/` comes with a
+  working directory that contains it. `tests/hook-prefilter.test.ts` runs the
+  gate's own test corpus, plus split spellings, through both the launcher and
+  the handler to hold this. Without `tr` and `sed` to normalize with, the
+  handler always runs.
+- `tdd-gate`, `bash-gate` and `record-test` start Bun only where the strict
+  profile can apply. Their handlers do nothing unless the profile is `strict`,
+  and each reads it from a particular repository: the strict gate from the
+  written file's, so a session started elsewhere cannot switch a strict
+  repository's gate off; the Bash gate and the recorder from the working
+  directory and the target of a leading `cd`. The launcher looks where its
+  handler looks. It skips Bun when every one of those repositories' main
+  checkouts has no `.sddx/config.json`, no `profile` in it, or `"profile":
+  "default"`; any other value, including an invalid one, counts as strict, as it
+  does for the handlers. When it cannot work out the directory, the handler
+  runs.
+- `stop-gate` starts Bun only in an opted-in repository: a `.sddx/` directory in
+  the working directory or an ancestor up to the git working-tree root. Outside
+  a git working tree only the working directory itself counts.
+- `session-start` always runs, so that every session learns whether sddx applies.
+
+### Without Bun, and when a handler fails
+
+- `session-start` injects one notice that sddx needs Bun, with the install
+  command.
+- `approval-gate` asks for any event whose normalized JSON mentions `sddx`, with
+  a reason naming Bun, and passes everything else. A missing runtime never silently opens the
+  gate.
+- Every other hook passes through.
+- When the handler exits non-zero or prints nothing, the launcher emits a
+  pass-through decision, or `ask` for the approval gate. The launcher itself
+  always exits 0, so exit status 2, which Claude Code treats as a blocking
+  decision, never reaches the harness.
+
+## What session start injects
+
+A plugin installed for your user loads in every repository you open, so session
+start decides how much to say from the repository's state:
+
+| Repository state | Injected context |
+| --- | --- |
+| Not opted in (no `.sddx/`) | One line: sddx is installed, and `/sddx:brainstorm` plans a change with it. Nothing is read or written. |
+| Set up by sddx 5: a config with `schema_version` 1.x, an sddx 5 task file, or sddx 5 files or hooks under `.claude/` | A pointer to `sddx migrate`; when `.claude/` still holds sddx 5 files or hooks, a note that both sets of hooks would fire. No router. |
+| Opted in | The repository root, the command to run sddx, any orphan worktrees swept, one line per task that is not `DONE` or `ABANDONED`, then the `using-sddx` router and its Claude Code tool mapping. The board is refreshed. |
+| Bun missing, any repository | One notice from the launcher, with the install command. |
+
+The command to run sddx is plain `sddx`, unless another executable named `sddx`
+is on `PATH`, such as a global npm install of sddx 5. Claude Code puts the
+plugin's `bin/` after your own `PATH` entries in the agent's shell, so that
+other one would win. Session start then gives the plugin's `bin/sddx` by
+absolute path and names the other executable.
+
+Session start always exits 0. An internal error becomes a one-line diagnostic in
+the injected context rather than a failed hook.
 
 ## The profile
 
@@ -94,8 +185,16 @@ Before a failing test is recorded, every segment of a Bash command (split on
 pipes, `&&`, `;` and newlines) must start with an allow-listed command: test
 runners and runtimes (`bun`, `npm`, `npx`, `pnpm`, `yarn`, `pytest`, `go`,
 `cargo`, `make`, `node`, `python`, `python3`), read tools (`ls`, `cat`, `grep`,
-`rg`, `find`, `head`, `tail`, `wc`), `git status|diff|log|show`, and the sddx CLI
-itself. Redirection with `>`, command or process substitution, and the runtimes'
+`rg`, `find`, `head`, `tail`, `wc`), `git status|diff|log|show`, `cd`, which
+writes nothing, and the sddx CLI itself.
+
+A command that starts with `cd <dir> &&` or `cd <dir>;` runs the rest in that
+directory, which is how a subagent works in its task's worktree: its shell
+starts in the session's directory. The Bash gate judges the rest of the command
+both where it started and where the `cd` moved to, so a `cd` out of a strict
+worktree does not escape its gate, and the recorder counts a test run for the
+task in the directory it ran in. Only a plain directory word is read; a quoted
+or expanded one leaves the command judged where it started. Redirection with `>`, command or process substitution, and the runtimes'
 eval flags are refused outright. `red_bash_allow` extends the list.
 
 ## The recorder and `task phase`

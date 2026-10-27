@@ -1,187 +1,113 @@
-# Installation
+# Install sddx
 
-sddx is a single npm package: `@glapsfun/sddx`. Installing it gives you the
-`sddx` command; running `sddx init` in a repository sets that repository up,
-including — if you want it — Claude Code integration installed *project-locally*
-under `.claude/`.
-
-There is no plugin to install. See
-[migrate-from-plugin.md](migrate-from-plugin.md) if you used the old
-marketplace distribution.
+sddx ships as a Claude Code plugin, distributed from its own GitHub repository.
+The plugin brings the workflow skills, two subagents, the hooks, and the sddx
+CLI itself. The same CLI is on npm for CI and scripts.
 
 ## Prerequisites
 
-- **[Bun](https://bun.sh) on your `PATH`.** It is the only supported runtime,
-  and none of the installers below will install it for you:
+- **[Bun](https://bun.sh).** The CLI and the hooks run on it, and nothing
+  installs it for you:
 
   ```sh
   curl -fsSL https://bun.sh/install | bash
   ```
 
-  Invoking `sddx` without Bun exits non-zero and tells you this. There is no
-  Node.js fallback.
-- **git.** `sddx init` refuses to run outside a repository, and the worktree
-  isolation model is git's.
-- **No runtime dependencies.** `dist/cli.mjs` is a dependency-free single-file
-  bundle; installing sddx pulls nothing else in.
+  Without Bun, the CLI exits with this install command, and session start says
+  the same.
+- **git.** Every task gets its own git worktree.
+- **Claude Code** with plugin support.
 
-## Install
+## Install the plugin
 
-```sh
-npm install -g @glapsfun/sddx     # or: bun add -g @glapsfun/sddx
+In Claude Code:
+
+```
+/plugin marketplace add glapsfun/sddx
+/plugin install sddx@sddx
 ```
 
-Or run it without installing:
+On Claude Code 2.1.275 or later, `/plugin install sddx --marketplace glapsfun/sddx`
+does both in one step. From a terminal, the same is:
 
-```sh
-npx @glapsfun/sddx init
-bunx @glapsfun/sddx init
+```
+claude plugin marketplace add glapsfun/sddx
+claude plugin install sddx@sddx
 ```
 
-The package name is scoped (`@glapsfun/sddx`) because the bare name `sddx` is
-blocked by npm's package-name-similarity policy; the installed command is plain
-`sddx` — the package's `bin` entry, not its registry name.
+Installed for your user, the plugin loads in every repository, but it only
+steers work in repositories with a `.sddx/` directory. Everywhere else session
+start adds one line saying sddx is available. To make it part of a project for
+everyone who works on it, see [Share sddx with a team](share-sddx-with-a-team.md).
 
-## Set up a repository
+## What the plugin adds
 
-```sh
-cd your-repo
-sddx init
-```
+- Skills: `/sddx:brainstorm`, `/sddx:plan`, `/sddx:execute`, `/sddx:review`,
+  `/sddx:finish`, `/sddx:debug`, and the `using-sddx` router that session start
+  loads in repositories that use sddx.
+- Subagents: `sddx:worker` implements one task in its worktree; `sddx:critic`
+  reviews a proven diff and cannot edit files.
+- Hooks: the plan approval dialog, the stop gate, and the strict-profile gates
+  ([Hooks and the plugin](../reference/hooks.md)).
+- The `sddx` command, on the agent's `PATH`.
 
-On a terminal this asks four short questions and then shows you every file it
-would create or modify, every package-manager command it would run, and every
-configuration value it would write. Nothing is touched until you approve, and
-declining leaves the repository byte-identical.
+Nothing is written into a repository until you plan the first goal there, and
+sddx never writes into `.claude/`.
 
-### Runtime scope
+## Check the install
 
-The one choice worth thinking about:
-
-| Scope | What generated content runs | When to pick it |
-| --- | --- | --- |
-| `global` | `sddx` | Simplest. You installed sddx globally and that is the version you want. |
-| `project` | `npm exec --offline --no -- sddx` (or `bunx --no-install sddx`) | Everyone on the team runs the version in the lockfile, not whatever they happen to have installed. |
-
-Project-pinned scope adds `@glapsfun/sddx` to your dev dependencies — the one
-package-manager command `init` runs, and only after you confirm it.
-
-Neither scope copies an sddx runtime into `.sddx/`. Package managers own
-package bytes; sddx owns configuration and adapter setup.
-
-### Adapters
-
-`--adapter claude` installs Claude Code integration into `.claude/`:
-
-- the sddx skills (`sddx-run`, `sddx-plan`, `sddx-verify`, `sddx-board`,
-  `sddx-audit`, `sddx-pr`), `sddx-` prefixed so they cannot collide with your own;
-- the five role-restricted agent definitions;
-- hook registrations in `.claude/settings.json` for the TDD gate, the Bash
-  gate, the approval gate, the test recorder, the stop gate, and the
-  SessionStart bootstrap.
-
-It writes nothing outside the repository and never touches your global Claude
-configuration.
-
-Hooks go in the **committed, team-shared** `settings.json` rather than the
-personal `settings.local.json` on purpose: the TDD gate is a team contract, and
-a gate only one person has is not one. If your repository gitignores `.claude/`,
-`sddx doctor` will point that out.
-
-## Non-interactive install
-
-For CI and scripts, the same choices are flags. Without a TTY, `init` never
-prompts — it either has enough flags to be deterministic, or it fails and names
-the ones it needs:
-
-```sh
-sddx init --yes --runtime global --adapter claude
-sddx init --yes --runtime project --package-manager npm --adapter claude
-sddx init --dry-run --runtime global --output json     # preview, machine-readable
-```
-
-## Verifying the install
+Start a session in any repository. Session start should report sddx as
+available, or as active in a repository that uses it. Ask the agent to run:
 
 ```sh
 sddx doctor
 ```
 
-It reports Bun, the git repository, the running version, project config, the
-runtime scope and how it resolves, adapter health (including whether any
-generated file has drifted), and any leftover plugin state. Every failure comes
-with the exact command that fixes it. Exit code is non-zero if anything failed.
+It reports Bun, git, the version, the project config, and any sddx 5 leftovers,
+each failure with the command that fixes it.
+
+## Pre-release builds
+
+To try the next major version before it is released, add the marketplace at its
+integration branch instead:
+
+```
+/plugin marketplace add glapsfun/sddx#v6
+```
+
+## Updating
+
+The plugin's version changes only when sddx is released, so an update always
+brings a released build. Update it from the `/plugin` menu.
+
+## The CLI in CI and scripts
+
+The CLI the plugin bundles is also the npm package `@glapsfun/sddx`. In CI, run
+it with `npx` or `bunx`, with Bun installed:
+
+```sh
+npx @glapsfun/sddx audit --ci
+```
+
+To pin the version CI runs, add it as a dev dependency of the project. Every
+guarantee sddx makes is enforced by this CLI, so CI can re-check receipts
+without Claude Code.
 
 ## Configuration
 
-`sddx init` writes `.sddx/config.json` — machine-readable project policy, under
-version control, and the only configuration source sddx reads:
-
-| Key | Default | Meaning |
-| --- | --- | --- |
-| `schema_version` | `1.0` | The config schema this file was written against |
-| `interaction_mode` | `human` | Whether a human approves the plan before anything is created |
-| `runtime_scope` | `global` | How generated content invokes sddx |
-| `package_manager` | `npm` | Which package manager runs the local binary under project scope |
-| `adapters` | `[]` | Which project adapters `init`/`sync` maintain |
-| `test_globs` | *(empty)* | Extra globs classified as test files by the TDD gate |
-| `exempt_globs` | *(empty)* | Extra globs exempt from the RED-phase write block |
-| `max_iterations_default` | `5` | Default stop rule: max loop iterations per task |
-| `board_enabled` | `true` | Regenerate `.sddx/BOARD.md` automatically |
-| `oracle_runs_default` | `1` | How many times verify executes the oracle |
-| `red_bash_allow` | *(empty)* | Extra commands the RED-phase Bash gate allows |
-| `stuck_threshold` | `3` | Identical failures before a task is flagged stuck |
-| `pr_host` | *(auto)* | `gh` \| `glab`; empty auto-detects from the origin remote |
-| `agent_model` | *(empty)* | Advisory `role=model` pairs read when dispatching subagents |
-| `verbose` | `false` | `sddx config show` also prints which source resolved each key |
-| `auto_max_tasks` | `6` | In auto mode, a larger plan is refused rather than run |
-
-`sddx config show` and `sddx config validate` read and check these; neither
-writes. See [../reference/cli.md](../reference/cli.md#sddx-config-show).
-
-## Keeping it up to date
-
-```sh
-npm install -g @glapsfun/sddx@latest           # global scope
-npm install --save-dev @glapsfun/sddx@latest   # project-pinned scope
-sddx sync --adapter claude                     # regenerate the adapter files
-```
-
-`sync` previews every change and writes only files sddx can prove it owns. If
-you edited a generated file by hand, it refuses and tells you so rather than
-overwriting your work.
+There is nothing to configure up front. `sddx plan start` writes
+`.sddx/config.json` with safe defaults the first time it creates state, and the
+file is yours to commit and edit. `sddx config show` prints the effective
+values; [the config reference](../reference/config.md) lists every key.
 
 ## Uninstall
 
-Remove the adapter from a repository:
-
-```sh
-sddx uninstall --adapter claude
-```
-
-This removes only the files recorded in the adapter's ownership manifest, and
-strips only sddx's own entries from `.claude/settings.json` — your other Claude
-configuration is preserved verbatim. A generated file you have since modified
-is reported and left in place rather than deleted.
-
-Your `.sddx/` directory — specs, tasks, receipts, board — stays, by design: it
-is version-controlled project state, not integration state.
-
-To remove the tool itself:
-
-```sh
-npm uninstall -g @glapsfun/sddx
-```
+Remove the plugin from the `/plugin` menu. `.sddx/` stays in your repositories:
+specs, receipts and goal records are history, and `sddx audit` still verifies
+them from the npm package.
 
 ## Privacy
 
-The sddx runtime makes **zero network calls**. Everything is local files
-(`.sddx/` under version control) and local git. No telemetry, no phoning home,
-no remote fetches — the bundle ships dependency-free and never imports a
-network API.
-
-The one exception is explicit and never silent: installing the package itself,
-and the single dependency install `sddx init` performs *after you confirm it*
-when you pick the project-pinned runtime scope. No hot path — session start,
-hooks, gates — ever reaches the network.
-
-See [SECURITY.md](../../SECURITY.md) for the security policy.
+sddx makes no network calls of its own. The only commands that reach the
+network are ones you ask for: installing the plugin, and `sddx pr create`,
+which pushes the run branch and opens a pull request through `gh` or `glab`.

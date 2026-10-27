@@ -253,13 +253,16 @@ describe("dispatcher wiring", () => {
 describe("hot paths", () => {
   test("SessionStart does no approval work and stays fast", () => {
     const cwd = fixtureRepo();
-    planRepo(cwd);
+    const rel = planRepo(cwd);
     writeConfig(cwd, { interaction_mode: "human" });
     const started = performance.now();
     const r = dispatch(cwd, "session-start", { cwd });
     const elapsed = performance.now() - started;
     expect(r.status).toBe(0);
-    expect(JSON.stringify(r.out)).not.toContain("approval");
+    // the router's prose mentions approval; what must be absent is a gate decision
+    // or the plan digest a gate would have computed
+    expect(decisionOf(r.out)).toBeUndefined();
+    expect(JSON.stringify(r.out)).not.toContain(planHash(join(cwd, rel)).hash.slice(0, 12));
     // generous vs. the 200ms budget: this spawns a fresh bun process too
     expect(elapsed).toBeLessThan(3000);
   });

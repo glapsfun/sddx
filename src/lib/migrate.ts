@@ -114,7 +114,14 @@ function v5Phase(root: string, id: string): string | null {
   }
 }
 
-export function detectV5State(root: string): V5State {
+/** The part of the sddx 5 state that needs no git: enough for session start to
+ * decide whether `sddx migrate` still has something to do. */
+export type V5Signals = Pick<
+  V5State,
+  "configVersion" | "tasks" | "claudeOwned" | "claudeModified" | "settingsHooks" | "declaration"
+>;
+
+export function detectV5Signals(root: string): V5Signals {
   const cfg = readJson(configPath(root)) as { schema_version?: unknown } | null;
   const configVersion =
     cfg && typeof cfg.schema_version === "string" && cfg.schema_version.startsWith("1.")
@@ -130,6 +137,32 @@ export function detectV5State(root: string): V5State {
       );
     }
   }
+
+  const manifest = readV5Manifest(root);
+  const claudeOwned: string[] = [];
+  const claudeModified: string[] = [];
+  for (const path of Object.keys(V5_OWNED)) {
+    const o = v5Ownership(root, path, manifest);
+    if (o === "owned") claudeOwned.push(path);
+    else if (o === "modified") claudeModified.push(path);
+  }
+  let settingsHooks = 0;
+  if (existsSync(join(root, V5_SETTINGS_PATH))) {
+    settingsHooks = unmergeV5Settings(readFileSync(join(root, V5_SETTINGS_PATH), "utf8")).removed;
+  }
+
+  return {
+    configVersion,
+    tasks,
+    claudeOwned,
+    claudeModified,
+    settingsHooks,
+    declaration: existsSync(join(root, V5_DECLARATION_PATH)),
+  };
+}
+
+export function detectV5State(root: string): V5State {
+  const signals = detectV5Signals(root);
 
   const specDir = join(root, ".sddx", "specs");
   const specYamls = existsSync(specDir)
@@ -150,19 +183,6 @@ export function detectV5State(root: string): V5State {
     }))
     .filter((g) => g.outstanding.length > 0);
 
-  const manifest = readV5Manifest(root);
-  const claudeOwned: string[] = [];
-  const claudeModified: string[] = [];
-  for (const path of Object.keys(V5_OWNED)) {
-    const o = v5Ownership(root, path, manifest);
-    if (o === "owned") claudeOwned.push(path);
-    else if (o === "modified") claudeModified.push(path);
-  }
-  let settingsHooks = 0;
-  if (existsSync(join(root, V5_SETTINGS_PATH))) {
-    settingsHooks = unmergeV5Settings(readFileSync(join(root, V5_SETTINGS_PATH), "utf8")).removed;
-  }
-
   const pkg = readJson(join(root, "package.json")) as Record<
     string,
     Record<string, unknown>
@@ -172,23 +192,12 @@ export function detectV5State(root: string): V5State {
       ["dependencies", "devDependencies"].some((k) => pkg[k]?.["@glapsfun/sddx"] !== undefined),
   );
 
-  return {
-    configVersion,
-    tasks,
-    specYamls,
-    dirsToArchive,
-    goalsInFlight,
-    claudeOwned,
-    claudeModified,
-    settingsHooks,
-    declaration: existsSync(join(root, V5_DECLARATION_PATH)),
-    packageDependency,
-  };
+  return { ...signals, specYamls, dirsToArchive, goalsInFlight, packageDependency };
 }
 
 /** What makes v6 commands refuse: a v5 config, a v5 task file in the main
  * checkout, or an unfinished v5 task in a worktree. */
-export function v5Blockers(s: V5State): string[] {
+export function v5Blockers(s: Pick<V5State, "configVersion" | "tasks">): string[] {
   const out: string[] = [];
   if (s.configVersion) out.push(`.sddx/config.json has schema_version ${s.configVersion}`);
   for (const t of s.tasks) {

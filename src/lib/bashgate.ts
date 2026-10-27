@@ -5,6 +5,7 @@
 import { profile, readConfig } from "./config";
 import { commandBasename, commandWords, GIT_READ_SUBCOMMANDS } from "./protectedpaths";
 import { resolutionFailureReason, resolveTask } from "./resolve";
+import { withLeadingCd } from "./shellcwd";
 import { mainRootOf, type TaskState } from "./task";
 
 export const BASH_ALLOW_BASE: readonly string[] = [
@@ -60,6 +61,8 @@ export function checkBashCommand(command: string, extraAllow: readonly string[])
     const cmd = commandBasename(words[0] as string);
     // sddx's own CLI must always run: it is how evidence gets recorded.
     if (cmd === "sddx-run" || cmd === "sddx") continue;
+    // cd writes nothing, and a worktree's commands start with one
+    if (cmd === "cd") continue;
     if (["bunx", "npx"].includes(cmd) && words.map(commandBasename).includes("sddx")) continue;
     if (cmd === "git") {
       const sub = words.slice(1).find((w) => !w.startsWith("-"));
@@ -93,16 +96,30 @@ function blockMessage(task: TaskState, why: string): string {
   ].join("\n");
 }
 
+/**
+ * Judges a command in the directory it runs in. A leading `cd <dir> &&` moves
+ * that directory, so the rest is judged both where the command started and
+ * where it moved to: a cd out of a strict worktree must not escape its gate.
+ */
 export function bashGate(
   input: { command?: string; cwd?: string },
   env: NodeJS.ProcessEnv = process.env,
 ): BashDecision {
   if (typeof input.command !== "string" || input.command.trim() === "") return { allow: true };
-  const cwd = input.cwd ?? process.cwd();
+  const started = input.cwd ?? process.cwd();
+  const moved = withLeadingCd(input.command, started);
+  for (const cwd of new Set([started, moved.cwd])) {
+    const decision = gateIn(cwd, moved.command, env);
+    if (!decision.allow) return decision;
+  }
+  return { allow: true };
+}
+
+function gateIn(cwd: string, command: string, env: NodeJS.ProcessEnv): BashDecision {
   if (profile(mainRootOf(cwd)) !== "strict") return { allow: true };
   // commands the built-in list alone allows are allowed whatever the task state,
   // which keeps task resolution (a filesystem walk) off the common path
-  if (checkBashCommand(input.command, []).allow) return { allow: true };
+  if (checkBashCommand(command, []).allow) return { allow: true };
   const res = resolveTask(cwd);
   if (res.kind === "none") return { allow: true };
   const failure = resolutionFailureReason(res, "running commands");
@@ -114,7 +131,7 @@ export function bashGate(
   const extra = splitList(
     env.SDDX_RED_BASH_ALLOW ?? readConfig(mainRootOf(res.root)).red_bash_allow,
   );
-  const decision = checkBashCommand(input.command, extra);
+  const decision = checkBashCommand(command, extra);
   if (decision.allow) return decision;
   return { allow: false, reason: blockMessage(t, decision.reason) };
 }

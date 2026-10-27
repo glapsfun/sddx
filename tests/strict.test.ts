@@ -196,6 +196,62 @@ describe("strict profile gates", () => {
   });
 });
 
+describe("a leading cd into the worktree", () => {
+  // a subagent's shell starts in the session's directory, the main checkout, so
+  // it runs every command in its task's worktree as `cd <worktree> && ...`
+  const viaCd = (rest: string) => `cd .sddx-worktrees/T1 && ${rest}`;
+
+  scenario("strict-profile", "Failing test run through cd records RED", () => {
+    const { cwd } = startedTask("strict");
+    const out = hook("record-test", cwd, {
+      tool_name: "Bash",
+      tool_input: { command: viaCd("bun test tests/a.test.ts") },
+      tool_response: { exit_code: 1 },
+    });
+    expect(out.systemMessage).toContain("recorded RED");
+    expect(state(cwd, "T1").strict?.phase).toBe("RED");
+  });
+
+  scenario("strict-profile", "Test run through cd allowed before RED", () => {
+    const { cwd } = startedTask("strict");
+    expect(
+      hook("bash-gate", cwd, {
+        tool_name: "Bash",
+        tool_input: { command: viaCd("bun test tests/a.test.ts") },
+      }),
+    ).toEqual({});
+  });
+
+  scenario("strict-profile", "Write through cd still blocked before RED", () => {
+    const { cwd } = startedTask("strict");
+    const d = hook("bash-gate", cwd, {
+      tool_name: "Bash",
+      tool_input: { command: viaCd("rm src/rl/bucket.ts") },
+    });
+    expect(d.hookSpecificOutput?.permissionDecision).toBe("deny");
+    expect(d.hookSpecificOutput?.permissionDecisionReason).toContain("task T1");
+  });
+
+  test("a cd out of a strict worktree does not escape its gate", () => {
+    const { wt } = startedTask("strict");
+    const d = hook("bash-gate", wt, {
+      tool_name: "Bash",
+      tool_input: { command: `cd /tmp && rm ${join(wt, "src", "rl", "bucket.ts")}` },
+    });
+    expect(d.hookSpecificOutput?.permissionDecision).toBe("deny");
+  });
+
+  test("a quoted or expanded directory is not read as a cd target", () => {
+    const { cwd } = startedTask("strict");
+    const out = hook("record-test", cwd, {
+      tool_name: "Bash",
+      tool_input: { command: 'cd "$WT" && bun test' },
+      tool_response: { exit_code: 1 },
+    });
+    expect(out.systemMessage ?? "").not.toContain("recorded");
+  });
+});
+
 describe("allow list", () => {
   scenario("strict-profile", "Allow in default profile", () => {
     const { cwd } = startedTask("default");

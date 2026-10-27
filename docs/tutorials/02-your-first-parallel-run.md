@@ -1,74 +1,104 @@
 # Your first parallel run
 
-`/sddx:run` — the flagship flow — decomposes a goal into independent tasks
-with disjoint file scopes, gives each its own git worktree forked from
-`origin/HEAD`, and runs them through the same RED→GREEN→VERIFY loop from
-[getting-started.md](01-getting-started.md) concurrently. This tutorial walks
-the CLI primitive underneath it: `sddx graph create`. The full commands are a
-runnable scaffold at
+A goal with several tasks runs them side by side whenever their scopes allow.
+This tutorial plans one with two independent tasks and a third that needs
+both, and shows how sddx keeps them apart until each is proven. The same goal
+driven by hand from the CLI is the scaffold at
 [examples/02-parallel-run](../../examples/02-parallel-run/).
+
+## The plan
+
+After brainstorming, the plan skill writes three tasks:
+
+````markdown
+## Tasks
+
+### g-greet greet function
+
+```sddx
+oracle:
+  type: command
+  run: bun test tests/greet.test.ts
+  expect: exit 0
+scope: [src/greet.ts, tests/greet.test.ts]
+```
+
+### g-polite polite suffix
+
+```sddx
+oracle:
+  type: command
+  run: bun test tests/polite.test.ts
+  expect: exit 0
+scope: [src/polite.ts, tests/polite.test.ts]
+```
+
+### g-both polite greeting
+
+```sddx
+oracle:
+  type: command
+  run: bun test tests/both.test.ts
+  expect: exit 0
+scope: [src/both.ts, tests/both.test.ts]
+depends_on: [g-greet, g-polite]
+```
+````
+
+`g-greet` and `g-polite` have no dependencies, so they can run at the same
+time, and `sddx plan check` requires their scopes to be disjoint. Two tasks
+that could write the same file cannot both be in flight; if they must touch
+one file, order them with `depends_on`
+([Model DAG dependencies](../how-to/model-dag-dependencies.md)).
 
 ## Why worktrees, not branches
 
-Two tasks on one branch in one checkout compound: task B's uncommitted state
-sits on top of task A's, and a mistake in A silently leaks into B. A
-worktree per task forks its own checkout from a shared base commit — each
-task's edits, tests, and git history stay physically separate while work is
-in progress. Once a task passes its oracle, `sddx verify` merges it
-automatically into the goal's **run branch** — a disposable, sddx-owned
-integration branch created before any task starts, so the combined result is
-reviewable at any point, even mid-run. The *original* branch you ran
-`/sddx:run` against is never touched; landing the run branch there (or
-shipping it as a PR via `/sddx:pr`) stays a human decision. See
-[design-principles.md](../explanation/design-principles.md) principle 3,
-"state is files in git" — worktrees are that principle applied to isolation,
-not just persistence.
+Each started task gets its own worktree at `.sddx-worktrees/<id>` on branch
+`sddx/<id>`, forked from the goal's run branch. Two tasks in one checkout
+would compound: one task's unfinished edits would sit under the other's
+tests. In separate worktrees, each task's edits, tests and proof stay apart
+while work is in progress.
 
-## The graph is the unit of parallel work
+The **run branch**, `sddx/run-<goal-id>`, collects each task once its review
+passes. It exists before any task starts, so the combined result can be
+reviewed at any point. Your own branch is never touched.
 
-A `graph.yaml` lists task nodes — an alias and a path to that task's spec —
-with optional `depends_on` edges between them:
+## Running the roots in parallel
 
-```yaml
-schema_version: "1.0"
-interaction_mode: human
-goal: add two independent modules
-tasks:
-  - alias: alpha
-    spec: specs/alpha.yaml
-  - alias: bravo
-    spec: specs/bravo.yaml
+The execute skill asks which tasks are ready and starts them:
+
+```sh
+sddx task ready --goal 2026-10-27-greeting
+sddx task start g-greet
+sddx task start g-polite
 ```
 
-No edges here, so both are roots: `sddx graph create --graph graph.yaml`
-validates every spec, checks that any two *unordered* tasks have disjoint
-`scope` (the "overlap ⟹ ordered" gate —
-[model-dag-dependencies.md](../how-to/model-dag-dependencies.md) covers the case where
-they aren't independent), then creates the goal's run branch, both worktrees
-(forked from that run branch's tip), and registers a **goal** tying the task
-ids together. Everything is validated before anything is written — a bad
-spec in task three of ten refuses the whole graph rather than leaving two
-worktrees to clean up by hand.
+Then it dispatches one worker subagent per task, both at once. Each works only
+in its own worktree and ends with `sddx verify <id>`. Each then gets its own
+critic review, and a pass merges that task into the run branch.
 
-## Drive each worktree independently
+## The fan-in
 
-Each worktree is a full, isolated checkout at `.sddx-worktrees/<id>` on
-branch `sddx/<id>`. Change into one and it's the same single-task loop from
-the previous tutorial — write the failing test, `task phase RED`,
-`red-check`, implement, `task phase GREEN`, `verify`. In Claude Code,
-`/sddx:run` hands each worktree to its own tdd-executor subagent and they run
-genuinely concurrently; from the CLI, "parallel" means "independent," not
-literally simultaneous in one terminal — you can drive them in any order, or
-interleave commands across both, and neither affects the other's state.
+`g-both` stays `PLANNED` until both of its dependencies are `DONE`. Then
+`sddx task ready` lists it, and its worktree forks from the run branch, which by
+now holds both roots' merged work. If either root is abandoned instead,
+`g-both` is skipped and the rest of the goal finishes, or the goal halts if the
+task says `on_dependency_failure: block`
+([Configure retry and skip/block](../how-to/configure-retry-and-skip.md)).
 
-## Check progress with the board
+## Watching progress
 
-`sddx board` regenerates `.sddx/BOARD.md` — a deterministic table of every
-task's phase, workspace, and receipt status across the main checkout *and*
-every worktree. Re-run it any time; never hand-edit the file.
+```sh
+sddx board
+sddx run report --goal 2026-10-27-greeting
+```
+
+`sddx board` writes `.sddx/BOARD.md`, a table of every task's state and
+receipt across the main checkout and every worktree, and flags a task that
+keeps failing the same way. The run report shows what has merged so far.
 
 ## Next
 
-Two independent tasks are the simple case. When one task's work genuinely
-depends on another's, that's
-[model-dag-dependencies.md](../how-to/model-dag-dependencies.md).
+When the work has a real order, see
+[Model DAG dependencies](../how-to/model-dag-dependencies.md). To land the
+result, see [Ship a goal as a PR](../how-to/ship-a-goal-as-a-pr.md).

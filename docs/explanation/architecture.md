@@ -28,14 +28,19 @@ hold with no harness present, which is what lets the same repository work in
 any harness and in CI. Hooks (L2) add early feedback and the user's own
 permission dialog; they are never the only thing enforcing a rule.
 
-This repository holds L1, the hook handlers it exposes (`sddx hook <name>`), and
-the frozen knowledge `sddx migrate` needs about sddx 5. The plugins and skills
-live with their harness integrations.
+This repository holds all three layers: L1 and the hook handlers it exposes
+(`sddx hook <name>`), the Claude Code plugin with its hook launcher, and the
+skills and agents, written harness-neutrally so the Codex plugin can share
+them. The repository root is the plugin and its own marketplace.
 
 ## Layout
 
 ```
 sddx/
+├── .claude-plugin/              # plugin.json and marketplace.json: the root is the plugin
+├── hooks/                       # hooks.json and run-hook, the POSIX launcher
+├── skills/                      # using-sddx router and the workflow skills
+├── agents/                      # worker and critic subagents
 ├── bin/sddx, bin/sddx-run       # launcher: Bun required, no fallback
 ├── src/
 │   ├── cli.ts                   # command routing and output
@@ -52,10 +57,11 @@ sddx/
 │       ├── receipt.ts           # receipt schema 1 to 5, the hash chain
 │       ├── approvalgate.ts, protectedpaths.ts, bashgate.ts, recorder.ts, stopgate.ts
 │       ├── hookdispatch.ts      # `sddx hook <name>`: event JSON in, decision out
+│       ├── optin.ts             # whether a session is opted in (`.sddx/` present)
 │       ├── migrate.ts           # sddx 5 to 6
 │       └── legacy/              # what sddx 5 generated, frozen for migrate
 ├── dist/                        # committed dependency-free bundles
-├── scripts/                     # build, spec coverage, v5 fixture builder
+├── scripts/                     # build, spec coverage, token budget, v5 fixture builder
 └── tests/                       # bun test: unit, CLI scenarios, e2e
 ```
 
@@ -66,8 +72,11 @@ sddx/
 - `bun run build` bundles each entry point into a single dependency-free
   `dist/*.mjs`, and `dist/` is committed. CI rebuilds and fails if `dist/`
   drifts from `src/`.
-- Hooks run on every session and tool call, so their handlers stay cheap: in the
-  default profile the gate handlers return before reading any task state.
+- Hooks run on every session and tool call, so their handlers stay cheap. The
+  launcher decides in shell whether a handler needs Bun at all: outside an
+  opted-in repository only session start and the approval gate run, and the
+  approval gate only for events that mention sddx. In the default profile the
+  gate handlers return before reading any task state.
 
 ## State model
 

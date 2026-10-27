@@ -23,9 +23,9 @@ import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { writeBoard } from "../board";
 import { tddGate } from "../tdd-gate";
-import { approvalGate } from "./approvalgate";
+import { type ApprovalGateDecision, approvalGate } from "./approvalgate";
 import { bashGate } from "./bashgate";
-import { boardEnabled } from "./config";
+import { boardEnabled, profile } from "./config";
 import { withoutFrontmatter } from "./frontmatter";
 import { detectV5Signals, type V5Signals, v5Blockers } from "./migrate";
 import { optedInRoot } from "./optin";
@@ -58,29 +58,48 @@ function readEvent(): HookEvent {
   }
 }
 
-const emit = (output: Record<string, unknown>): void => {
-  console.log(JSON.stringify(output));
-};
+type Output = Record<string, unknown>;
+
+/** The harness running the hook: Codex cannot raise a dialog from a hook. */
+export type Harness = "claude-code" | "codex";
+
+export const harnessOf = (name: string | undefined): Harness =>
+  name === "codex" ? "codex" : "claude-code";
 
 const FILE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 
-function cmdTddGate(event: HookEvent): void {
+function cmdTddGate(event: HookEvent): Output {
   const decision = tddGate({
     filePath: event.tool_input?.file_path ?? event.tool_input?.notebook_path,
     cwd: event.cwd,
   });
   if (decision.allow) {
     // pass-through: no permissionDecision — never auto-approve, just don't deny
-    emit(decision.diagnostic ? { systemMessage: decision.diagnostic } : {});
-    return;
+    return decision.diagnostic ? { systemMessage: decision.diagnostic } : {};
   }
-  emit({
+  return {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
       permissionDecisionReason: decision.reason,
     },
-  });
+  };
+}
+
+/** The plugin's `bin/sddx` by absolute path, for a command the user types. */
+function pluginCommand(): string {
+  const plugin = pluginRoot();
+  return plugin ? join(plugin, "bin", "sddx") : "sddx";
+}
+
+/** Codex has no dialog: an ask becomes a deny that hands the command to the user. */
+function handOff(decision: ApprovalGateDecision): string {
+  return [
+    decision.reason ?? "sddx: approval required",
+    "",
+    "In Codex only a person can approve a plan, so this was refused. Ask the user to review the plan and type:",
+    `  !${pluginCommand()} plan approve ${decision.spec ?? "<spec>"}`,
+  ].join("\n");
 }
 
 /**
@@ -91,44 +110,41 @@ function cmdTddGate(event: HookEvent): void {
  * Do not "harmonize" this with the prohibition gates; a silent approval gate is
  * a disabled one. See src/lib/approvalgate.ts and its regression test.
  */
-function cmdApprovalGate(event: HookEvent): void {
+function cmdApprovalGate(event: HookEvent, harness: Harness): Output {
   const fileTool =
     (typeof event.tool_name === "string" && FILE_TOOLS.has(event.tool_name)) ||
     (event.tool_input?.file_path ?? event.tool_input?.notebook_path) !== undefined;
   const decision = approvalGate(
-    fileTool
-      ? {
-          filePath: String(event.tool_input?.file_path ?? event.tool_input?.notebook_path ?? ""),
-          cwd: event.cwd,
-        }
-      : { command: event.tool_input?.command, cwd: event.cwd },
+    event.tool_name === "apply_patch"
+      ? { patch: String(event.tool_input?.command ?? ""), cwd: event.cwd }
+      : fileTool
+        ? {
+            filePath: String(event.tool_input?.file_path ?? event.tool_input?.notebook_path ?? ""),
+            cwd: event.cwd,
+          }
+        : { command: event.tool_input?.command, cwd: event.cwd },
   );
-  if (decision.decision === "pass") {
-    emit({});
-    return;
-  }
-  emit({
+  if (decision.decision === "pass") return {};
+  const handedOff = harness === "codex" && decision.decision === "ask";
+  return {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
-      permissionDecision: decision.decision,
-      permissionDecisionReason: decision.reason,
+      permissionDecision: handedOff ? "deny" : decision.decision,
+      permissionDecisionReason: handedOff ? handOff(decision) : decision.reason,
     },
-  });
+  };
 }
 
-function cmdBashGate(event: HookEvent): void {
+function cmdBashGate(event: HookEvent): Output {
   const decision = bashGate({ command: event.tool_input?.command, cwd: event.cwd });
-  if (decision.allow) {
-    emit({});
-    return;
-  }
-  emit({
+  if (decision.allow) return {};
+  return {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
       permissionDecisionReason: decision.reason,
     },
-  });
+  };
 }
 
 function exitCodeOf(response: HookEvent["tool_response"]): number | undefined {
@@ -139,29 +155,22 @@ function exitCodeOf(response: HookEvent["tool_response"]): number | undefined {
   return undefined;
 }
 
-function cmdRecordTest(event: HookEvent): void {
+function cmdRecordTest(event: HookEvent): Output {
   const command = event.tool_input?.command;
-  if (typeof command !== "string") {
-    emit({});
-    return;
-  }
+  if (typeof command !== "string") return {};
   const res = recordTestRun(event.cwd ?? process.cwd(), command, exitCodeOf(event.tool_response));
-  emit(
-    res.recorded
-      ? { systemMessage: `sddx: task ${res.taskId} recorded ${res.recorded} (observed test run)` }
-      : {},
-  );
+  return res.recorded
+    ? { systemMessage: `sddx: task ${res.taskId} recorded ${res.recorded} (observed test run)` }
+    : {};
 }
 
-function cmdStopGate(event: HookEvent): void {
+function cmdStopGate(event: HookEvent): Output {
   const decision = stopGate({ cwd: event.cwd, stop_hook_active: event.stop_hook_active });
-  emit(
-    decision.block
-      ? { decision: "block", reason: decision.reason }
-      : decision.note
-        ? { systemMessage: decision.note }
-        : {},
-  );
+  return decision.block
+    ? { decision: "block", reason: decision.reason }
+    : decision.note
+      ? { systemMessage: decision.note }
+      : {};
 }
 
 /** Task files in the main checkout plus each task worktree's own file. */
@@ -183,13 +192,22 @@ function activeTaskFiles(root: string): string[] {
 
 export const NOT_OPTED_IN_LINE =
   "sddx is installed. To plan a change with it in this repository, run /sddx:brainstorm.";
+export const CODEX_NOT_OPTED_IN_LINE =
+  "sddx is installed. To plan a change with it in this repository, mention $sddx:brainstorm.";
+
+const CODEX_STRICT_NOTE =
+  "This repository uses the strict profile, whose per-edit gates do not run in Codex. Each task still needs its boundary proof from sddx verify. Record each test run with sddx task phase <id> RED --test-exit <n>, then GREEN once it passes.";
 
 const ROUTER = join("skills", "using-sddx", "SKILL.md");
-const ROUTER_MAPPING = join("skills", "using-sddx", "references", "claude-code.md");
+const ROUTER_MAPPING: Record<Harness, string> = {
+  "claude-code": join("skills", "using-sddx", "references", "claude-code.md"),
+  codex: join("skills", "using-sddx", "references", "codex.md"),
+};
 
-/** CLAUDE_PLUGIN_ROOT, else the nearest ancestor of this bundle that ships the router. */
+/** PLUGIN_ROOT (Codex) or CLAUDE_PLUGIN_ROOT, else the nearest ancestor of
+ * this bundle that ships the router. */
 function pluginRoot(): string | null {
-  const fromEnv = process.env.CLAUDE_PLUGIN_ROOT;
+  const fromEnv = process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT;
   if (fromEnv) return fromEnv;
   let d = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 4; i++, d = dirname(d)) {
@@ -227,8 +245,10 @@ const realOrNull = (path: string): string | null => {
   }
 };
 
-function runCommandLines(plugin: string | null): string[] {
+function runCommandLines(plugin: string | null, harness: Harness): string[] {
   const pluginBin = plugin ? join(plugin, "bin") : null;
+  // Codex puts no plugin directory on the agent's PATH: only the absolute path reaches it
+  if (harness === "codex") return [`Run sddx as: ${pluginBin ? join(pluginBin, "sddx") : "sddx"}`];
   const shadow = shadowingSddx(pluginBin);
   if (!shadow || !pluginBin) return ["Run sddx as: sddx"];
   return [
@@ -237,10 +257,10 @@ function runCommandLines(plugin: string | null): string[] {
   ];
 }
 
-function routerText(plugin: string | null): string {
-  if (!plugin) return "sddx: the router skill could not be located (CLAUDE_PLUGIN_ROOT is unset)";
+function routerText(plugin: string | null, harness: Harness): string {
+  if (!plugin) return "sddx: the router skill could not be located (the plugin root is unset)";
   const parts: string[] = [];
-  for (const rel of [ROUTER, ROUTER_MAPPING]) {
+  for (const rel of [ROUTER, ROUTER_MAPPING[harness]]) {
     try {
       parts.push(withoutFrontmatter(readFileSync(join(plugin, rel), "utf8")));
     } catch {
@@ -288,12 +308,24 @@ function v5Check(root: string): { pending: boolean; lines: string[] } {
   };
 }
 
-function optedInLines(root: string, plugin: string | null, notes: string[]): string[] {
+function optedInLines(
+  root: string,
+  plugin: string | null,
+  notes: string[],
+  harness: Harness,
+): string[] {
   const lines = [
     `sddx is active in this repository (${root}).`,
-    ...runCommandLines(plugin),
+    ...runCommandLines(plugin, harness),
     ...notes,
   ];
+  if (harness === "codex") {
+    try {
+      if (profile(root) === "strict") lines.push(CODEX_STRICT_NOTE);
+    } catch (e) {
+      lines.push(`sddx: could not read the profile: ${(e as Error).message}`);
+    }
+  }
   try {
     const res = sweep(root);
     if (res.removed.length > 0) lines.push(`sddx: swept ${res.removed.length} orphan worktree(s)`);
@@ -315,46 +347,59 @@ function optedInLines(root: string, plugin: string | null, notes: string[]): str
       lines.push(`sddx: task file ${file} is unreadable`);
     }
   }
-  return [...lines, "", routerText(plugin)];
+  return [...lines, "", routerText(plugin, harness)];
 }
 
-/** What session start tells the agent, by repository state (see the session-router spec). */
-export function sessionStartContext(cwd: string): string {
+/** What session start tells the agent, by repository state and harness (see the session-router spec). */
+export function sessionStartContext(cwd: string, harness: Harness = "claude-code"): string {
   const root = optedInRoot(cwd);
-  if (root === null) return NOT_OPTED_IN_LINE;
+  if (root === null) return harness === "codex" ? CODEX_NOT_OPTED_IN_LINE : NOT_OPTED_IN_LINE;
   const plugin = pluginRoot();
   const v5 = v5Check(root);
-  if (v5.pending) return [...v5.lines, ...runCommandLines(plugin)].join("\n");
-  return optedInLines(root, plugin, v5.lines).join("\n");
+  if (v5.pending) return [...v5.lines, ...runCommandLines(plugin, harness)].join("\n");
+  return optedInLines(root, plugin, v5.lines, harness).join("\n");
 }
 
-function cmdSessionStart(event: HookEvent): void {
+function cmdSessionStart(event: HookEvent, harness: Harness): Output {
   let context: string;
   try {
-    context = sessionStartContext(event.cwd ?? process.cwd());
+    context = sessionStartContext(event.cwd ?? process.cwd(), harness);
   } catch (e) {
     context = `sddx: session start failed: ${(e as Error).message}`;
   }
-  emit({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } });
+  return { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } };
 }
 
-/** Routes one hook event. Never throws: a failure is a diagnostic, not a crash. */
-export function dispatchHook(sub: string | undefined, event: HookEvent): void {
+/** The output for one hook event. Never throws: a failure is a diagnostic, not a crash. */
+export function hookOutput(
+  sub: string | undefined,
+  event: HookEvent,
+  harness: Harness = "claude-code",
+): Output {
   try {
-    if (sub === "tdd-gate") cmdTddGate(event);
-    else if (sub === "bash-gate") cmdBashGate(event);
-    else if (sub === "approval-gate") cmdApprovalGate(event);
-    else if (sub === "record-test") cmdRecordTest(event);
-    else if (sub === "stop-gate") cmdStopGate(event);
-    else if (sub === "session-start") cmdSessionStart(event);
-    else emit({ systemMessage: `sddx hooks: unknown subcommand ${sub ?? "(none)"}` });
+    if (sub === "tdd-gate") return cmdTddGate(event);
+    if (sub === "bash-gate") return cmdBashGate(event);
+    if (sub === "approval-gate") return cmdApprovalGate(event, harness);
+    if (sub === "record-test") return cmdRecordTest(event);
+    if (sub === "stop-gate") return cmdStopGate(event);
+    if (sub === "session-start") return cmdSessionStart(event, harness);
+    return { systemMessage: `sddx hooks: unknown subcommand ${sub ?? "(none)"}` };
   } catch (e) {
-    emit({ systemMessage: `sddx hook error (${sub}): ${(e as Error).message}` });
+    return { systemMessage: `sddx hook error (${sub}): ${(e as Error).message}` };
   }
 }
 
+/** Routes one hook event and prints its output. */
+export function dispatchHook(
+  sub: string | undefined,
+  event: HookEvent,
+  harness: Harness = "claude-code",
+): void {
+  console.log(JSON.stringify(hookOutput(sub, event, harness)));
+}
+
 /** Entrypoint behavior shared by the CLI's `hook` command. Always exits 0. */
-export function runHook(sub: string | undefined): never {
-  dispatchHook(sub, readEvent());
+export function runHook(sub: string | undefined, harness?: string): never {
+  dispatchHook(sub, readEvent(), harnessOf(harness));
   process.exit(0);
 }

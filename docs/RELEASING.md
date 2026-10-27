@@ -13,7 +13,8 @@ PR merges to main (conventional commits: feat:, fix:, docs:, ci:, ...)
         ▼
 release-please opens/updates a standing "chore: release vX.Y.Z" PR
   • new CHANGELOG.md section drafted from the commits since the last release
-  • package.json#version and .claude-plugin/plugin.json#version bumped together
+  • package.json#version, .claude-plugin/plugin.json#version and
+    .codex-plugin/plugin.json#version bumped together
         │
         ▼
 required checks run on that PR, including the published-package install
@@ -36,22 +37,34 @@ already committed and CI-verified) and runs `npm publish --provenance`
 
 ## The plugin
 
-The repository is also the Claude Code plugin and its own marketplace: users
-add it with `/plugin marketplace add glapsfun/sddx`, which serves the plugin
-from `main`. `.claude-plugin/plugin.json` carries the same version as
-`package.json`, and release-please bumps both in the release PR
-(`release-please-config.json`, `extra-files`). Claude Code updates an installed
-plugin only when that version changes, so commits landing on `main` between
-releases reach nobody; merging the release PR is what ships the plugin, at the
-same moment as the npm package. `tests/plugin-manifest.test.ts` fails if the two
-versions ever disagree, and runs `claude plugin validate . --strict` in CI.
+The repository is also the Claude Code plugin, the Codex plugin, and the
+marketplace both read: users add it with `/plugin marketplace add glapsfun/sddx`
+in Claude Code or `codex plugin marketplace add glapsfun/sddx` in Codex, which
+serves the plugin from `main`. `.claude-plugin/plugin.json` and
+`.codex-plugin/plugin.json` carry the same version as `package.json`, and
+release-please bumps all three in the release PR (`release-please-config.json`,
+`extra-files`). Claude Code updates an installed plugin only when that version
+changes, so commits landing on `main` between releases reach nobody; merging
+the release PR is what ships the plugin, at the same moment as the npm package.
+`tests/plugin-manifest.test.ts` fails if the versions ever disagree, and runs
+`claude plugin validate . --strict` in CI. `tests/codex-install.test.ts`
+installs the plugin into a throwaway Codex home in CI and checks what Codex
+loads.
 
 Major versions are built on an integration branch (`v6` for sddx 6) and merged
-into `main` when ready. To try one before release, install from the branch:
+into `main` when ready. To try one before release, install from the branch, in
+Claude Code:
 
 ```
 /plugin marketplace add glapsfun/sddx#v6
 /plugin install sddx@sddx
+```
+
+or in Codex, then trust the plugin's hooks in `/hooks`:
+
+```
+codex plugin marketplace add glapsfun/sddx --ref v6
+codex plugin add sddx@sddx
 ```
 
 ## The maintainer's job

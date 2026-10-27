@@ -1,5 +1,5 @@
 #!/bin/sh
-# sddx hook launcher for Claude Code: run-hook <handler>
+# sddx hook launcher: run-hook <handler> [codex]
 #
 # Decides in shell, before paying for a Bun start, whether the handler has to
 # run at all: the approval gate only for events that can concern sddx, the
@@ -7,17 +7,25 @@
 # gate only in a repository that opted in to sddx (a .sddx/ directory). Always exits 0:
 # Claude Code reads exit status 2 as a blocking decision, and a crash here
 # must never block a session.
+#
+# With "codex", the handler is told the harness, and the approval gate denies
+# where it would ask: Codex cannot raise a dialog from a hook, and runs the
+# call when a hook fails.
 
 handler=$1
+harness=${2:-}
 
 pass() {
   printf '{}\n'
   exit 0
 }
 
-# $1 must not contain double quotes or backslashes
-ask() {
-  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"%s"}}\n' "$1"
+# The approval gate's own decision when it cannot run the handler: ask in
+# Claude Code, deny in Codex. $1 must not contain double quotes or backslashes.
+hold() {
+  decision=ask
+  [ "$harness" = codex ] && decision=deny
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"%s"}}\n' "$decision" "$1"
   exit 0
 }
 
@@ -191,7 +199,7 @@ case $handler in
     probe=$(probe_of "$payload")
     if [ -z "$bun" ]; then
       case $probe in
-        *sddx*) ask "sddx needs Bun to check this, and Bun was not found. Install it with: $BUN_INSTALL_HINT" ;;
+        *sddx*) hold "sddx needs Bun to check this, and Bun was not found. Install it with: $BUN_INSTALL_HINT" ;;
         *) pass ;;
       esac
     fi
@@ -215,19 +223,24 @@ case $handler in
 esac
 
 hooks=$root/dist/hooks.mjs
+set -- "$hooks" "$handler"
+[ "$harness" = codex ] && set -- "$@" codex
 case $handler in
   approval-gate | tdd-gate | bash-gate | record-test)
-    out=$(printf '%s' "$payload" | "$bun" "$hooks" "$handler")
+    out=$(printf '%s' "$payload" | "$bun" "$@")
     ;;
   *)
-    out=$("$bun" "$hooks" "$handler")
+    out=$("$bun" "$@")
     ;;
 esac
 status=$?
 
 if [ "$status" -ne 0 ] || [ -z "$out" ]; then
   if [ "$handler" = approval-gate ]; then
-    ask "The sddx approval gate failed to run (exit $status), so it cannot vouch for this. Allow it only if you meant to."
+    if [ "$harness" = codex ]; then
+      hold "The sddx approval gate failed to run (exit $status), so this was refused. Check that sddx and Bun are installed, or run the command yourself with the ! prefix."
+    fi
+    hold "The sddx approval gate failed to run (exit $status), so it cannot vouch for this. Allow it only if you meant to."
   fi
   pass
 fi

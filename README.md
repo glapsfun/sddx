@@ -41,8 +41,20 @@ Then, in Claude Code:
 ```
 
 On Claude Code 2.1.275 or later, `/plugin install sddx --marketplace glapsfun/sddx`
-does both in one step. Nothing is written into your repository until you plan
-your first goal. Details, pre-release builds and removal:
+does both in one step.
+
+Or, in Codex, from a terminal:
+
+```
+codex plugin marketplace add glapsfun/sddx
+codex plugin add sddx@sddx
+```
+
+Then open `/hooks` in Codex and trust the sddx hooks: Codex runs a plugin's
+hooks only once you trust them, and again after every update.
+
+Nothing is written into your repository until you plan your first goal.
+Details, how Codex differs, pre-release builds and removal:
 [Install sddx](docs/how-to/install-sddx.md). To have teammates prompted to
 install it when they open the repository, see
 [Share sddx with a team](docs/how-to/share-sddx-with-a-team.md).
@@ -59,12 +71,13 @@ Coming from sddx 5? See [Migrate to sddx 6](docs/how-to/migrate-to-v6.md).
 ## What a session looks like
 
 In a repository that uses sddx, ask for a change, or start one with
-`/sddx:brainstorm`:
+`/sddx:brainstorm` (in Codex, mention `$sddx:brainstorm`):
 
 1. **Brainstorm.** The agent asks about purpose and constraints, one question
    at a time, and writes the design into `.sddx/specs/<date>-<slug>.md`.
 2. **Plan.** It splits the design into tasks with oracles and scopes. You
-   review the plan, and approving it raises your permission dialog.
+   review the plan, and approving it raises your permission dialog. In Codex,
+   you type the approve command yourself.
 3. **Execute.** Each task gets its own git worktree and a worker subagent,
    in parallel where scopes allow. Each ends at `sddx verify`.
 4. **Review.** A critic subagent reviews the proven diff. A pass commits the

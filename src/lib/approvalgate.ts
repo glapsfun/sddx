@@ -29,22 +29,37 @@ import { decideGate, type GateNode, planHash } from "./approval";
 import { autoMaxTasks, gateInteractionMode } from "./config";
 import { scopesOverlap } from "./glob-overlap";
 import { parseGoalSpec } from "./goalspec";
+import { applyPatchHeredocs, patchTargets } from "./patch";
 import {
   isReadOnly,
   protectedPathBlock,
   protectedPathRef,
   protectedWriteBlock,
 } from "./protectedpaths";
+import { withLeadingCd } from "./shellcwd";
 
 export interface ApprovalGateDecision {
   /** `ask` raises the user's permission dialog; `deny` refuses; `pass` emits no decision. */
   decision: "ask" | "deny" | "pass";
   reason?: string;
+  /** For an `ask` about a plan: the spec argument, so a harness without a dialog
+   * can hand the approve command to the user. */
+  spec?: string;
 }
 
 const pass: ApprovalGateDecision = { decision: "pass" };
-const ask = (reason: string): ApprovalGateDecision => ({ decision: "ask", reason });
+const ask = (reason: string, spec?: string): ApprovalGateDecision =>
+  spec === undefined ? { decision: "ask", reason } : { decision: "ask", reason, spec };
 const deny = (reason: string): ApprovalGateDecision => ({ decision: "deny", reason });
+
+/** The first protected path a patch writes, as a file-tool write would be judged. */
+function patchBlock(patch: string, cwd: string): string | null {
+  for (const target of patchTargets(patch)) {
+    const blocked = protectedWriteBlock(target) ?? protectedWriteBlock(resolve(cwd, target));
+    if (blocked) return blocked;
+  }
+  return null;
+}
 
 /**
  * Splits a raw command line into individual command segments, so a compound
@@ -287,9 +302,12 @@ function readPlan(specPath: string): { nodes: GateNode[]; openDecisions: string[
 export function approvalGate(event: {
   command?: string;
   filePath?: string;
+  /** The text of a Codex `apply_patch` call. */
+  patch?: string;
   cwd?: string;
 }): ApprovalGateDecision {
-  const { command, filePath } = event;
+  const { filePath } = event;
+  let command = event.command;
   const cwd = event.cwd ?? process.cwd();
   if (filePath !== undefined) {
     // `resolve` normalizes: `.sddx/tasks/../approvals/x.json` reaches the
@@ -297,8 +315,20 @@ export function approvalGate(event: {
     const blocked = protectedWriteBlock(filePath) ?? protectedWriteBlock(resolve(cwd, filePath));
     return blocked ? deny(blocked) : pass;
   }
+  if (event.patch !== undefined) {
+    const blocked = patchBlock(event.patch, cwd);
+    return blocked ? deny(blocked) : pass;
+  }
   if (!command) return pass;
   try {
+    // A patch fed to apply_patch through the shell is judged by the files it
+    // writes; only the shell text around it is read as commands.
+    const heredocs = applyPatchHeredocs(command);
+    if (heredocs.bodies.length > 0) {
+      const blocked = patchBlock(heredocs.bodies.join("\n"), withLeadingCd(command, cwd).cwd);
+      if (blocked) return deny(blocked);
+      command = heredocs.shell;
+    }
     const protectedPath = protectedPathRef(command);
     if (protectedPath && !isReadOnly(command)) return deny(protectedPathBlock(protectedPath));
 
@@ -334,6 +364,7 @@ export function approvalGate(event: {
           "Approve only if you have reviewed it:",
           `  sddx plan check ${specArg ?? "<spec>"}`,
         ].join("\n"),
+        specArg,
       );
     }
 
@@ -341,7 +372,10 @@ export function approvalGate(event: {
       return ask("sddx: plan start without a spec argument; cannot verify what would run");
     const plan = readPlan(specPath);
     if (!plan)
-      return ask(`sddx: plan at ${specArg} could not be read; approval cannot be verified`);
+      return ask(
+        `sddx: plan at ${specArg} could not be read; approval cannot be verified`,
+        specArg,
+      );
 
     // Mode comes from `.sddx/config.json` only, never from the command line or
     // the environment, both of which the constrained agent composes.
@@ -364,6 +398,7 @@ export function approvalGate(event: {
         gate.reason ?? "approval required",
         `Review it first: sddx plan check ${specArg}`,
       ].join("\n"),
+      specArg,
     );
   } catch (e) {
     return ask(`sddx: approval could not be verified (${(e as Error).message}); asking instead`);

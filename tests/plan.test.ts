@@ -203,6 +203,41 @@ describe("plan approval", () => {
     expect(token.signature).toBeUndefined();
   });
 
+  scenario("plan-approval", "Approval from an agent's tool call", () => {
+    const cwd = fixtureRepo();
+    const spec = writeSpec(cwd, SPEC, twoTasks());
+    const r = spawnSync("bun", [CLI, "plan", "approve", spec], {
+      cwd,
+      encoding: "utf8",
+      env: { ...process.env, NO_COLOR: "1", CODEX_TOOL_CALL_ID: "call_1" },
+    });
+    expect(r.status).toBe(3);
+    expect(existsSync(join(cwd, ".sddx", "approvals"))).toBe(false);
+    expect(`${r.stdout}${r.stderr}`).toContain(`sddx plan approve ${spec}`);
+    expect(`${r.stdout}${r.stderr}`).toContain("!");
+  });
+
+  scenario("plan-approval", "Approval typed by the user", () => {
+    const cwd = fixtureRepo();
+    const spec = writeSpec(cwd, SPEC, twoTasks());
+    const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: "1" };
+    delete env.CODEX_TOOL_CALL_ID;
+    const r = spawnSync("bun", [CLI, "plan", "approve", spec], { cwd, encoding: "utf8", env });
+    expect(r.status).toBe(0);
+    expect(existsSync(join(cwd, ".sddx", "approvals"))).toBe(true);
+  });
+
+  test("an empty CODEX_TOOL_CALL_ID does not count as a tool call", () => {
+    const cwd = fixtureRepo();
+    const spec = writeSpec(cwd, SPEC, twoTasks());
+    const r = spawnSync("bun", [CLI, "plan", "approve", spec], {
+      cwd,
+      encoding: "utf8",
+      env: { ...process.env, NO_COLOR: "1", CODEX_TOOL_CALL_ID: "" },
+    });
+    expect(r.status).toBe(0);
+  });
+
   scenario("plan-approval", "Approve refuses an invalid plan", () => {
     const cwd = fixtureRepo();
     const spec = writeSpec(

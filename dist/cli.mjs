@@ -6946,7 +6946,8 @@ var require_public_api = __commonJS((exports) => {
 // src/cli.ts
 import { spawnSync as spawnSync17 } from "node:child_process";
 import { existsSync as existsSync22, readFileSync as readFileSync19 } from "node:fs";
-import { join as join27, relative as relative5, resolve as resolve9 } from "node:path";
+import { dirname as dirname9, join as join27, relative as relative5, resolve as resolve9 } from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // src/audit.ts
 import { spawnSync as spawnSync7 } from "node:child_process";
@@ -9984,7 +9985,92 @@ function tddGate(input, env = process.env) {
 
 // src/lib/approvalgate.ts
 import { existsSync as existsSync13, readFileSync as readFileSync13 } from "node:fs";
-import { isAbsolute as isAbsolute3, join as join15, resolve as resolve3 } from "node:path";
+import { isAbsolute as isAbsolute3, join as join15, resolve as resolve4 } from "node:path";
+
+// src/lib/patch.ts
+var TARGET = /^\s*\*\*\*\s*(?:Add File|Update File|Delete File|Move to):\s*(.+?)\s*$/;
+function patchTargets(text) {
+  const out = [];
+  for (const line of text.split(/\r?\n/)) {
+    const m = TARGET.exec(line);
+    if (m)
+      out.push(m[1]);
+  }
+  return out;
+}
+var OPENER = /^<<(-?)\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/;
+var FEEDS_PATCH = /^\s*(?:cd\s+[^\s;&|]+\s*(?:&&|;)\s*)*apply_patch\s*$/;
+function openersIn(line, state) {
+  const out = [];
+  for (let i = 0;i < line.length; i++) {
+    const c = line[i];
+    if (state.quote !== null) {
+      if (c === "\\" && state.quote !== "'")
+        i += 1;
+      else if (c === state.quote)
+        state.quote = null;
+      continue;
+    }
+    if (c === "\\") {
+      i += 1;
+      continue;
+    }
+    if (c === "'" || c === '"' || c === "`") {
+      state.quote = c;
+      continue;
+    }
+    if (c === "#" && (i === 0 || /\s/.test(line[i - 1])))
+      break;
+    if (c === "<" && line[i + 1] === "<" && line[i + 2] !== "<") {
+      const m = OPENER.exec(line.slice(i));
+      if (!m)
+        continue;
+      out.push({
+        strip: m[1] === "-",
+        delimiter: m[3],
+        patch: FEEDS_PATCH.test(line.slice(0, i))
+      });
+      i += m[0].length - 1;
+    }
+  }
+  return out;
+}
+function applyPatchHeredocs(command) {
+  const shell = [];
+  const bodies = [];
+  const pending = [];
+  const state = { quote: null };
+  let body = [];
+  for (const line of command.split(`
+`)) {
+    const open = pending[0];
+    if (open) {
+      const ends = (open.strip ? line.replace(/^\t+/, "") : line) === open.delimiter;
+      if (open.patch) {
+        if (ends)
+          bodies.push(body.join(`
+`));
+        else
+          body.push(line);
+      } else {
+        shell.push(line);
+      }
+      if (ends) {
+        pending.shift();
+        body = [];
+      }
+      continue;
+    }
+    shell.push(line);
+    pending.push(...openersIn(line, state));
+  }
+  if (pending.length > 0) {
+    return { shell: command, bodies: pending[0]?.patch ? [...bodies, body.join(`
+`)] : bodies };
+  }
+  return { shell: shell.join(`
+`), bodies };
+}
 
 // src/lib/protectedpaths.ts
 var GIT_READ_SUBCOMMANDS = ["status", "diff", "log", "show"];
@@ -10092,10 +10178,31 @@ function protectedWriteBlock(path) {
   return null;
 }
 
+// src/lib/shellcwd.ts
+import { resolve as resolve3 } from "node:path";
+var LEADING_CD = /^\s*cd\s+([^\s"'`$\\;&|~]+)\s*(?:&&|;)\s*/;
+function withLeadingCd(command, cwd) {
+  let rest = command;
+  let dir = cwd;
+  for (let m = LEADING_CD.exec(rest);m; m = LEADING_CD.exec(rest)) {
+    dir = resolve3(dir, m[1]);
+    rest = rest.slice(m[0].length);
+  }
+  return { command: rest, cwd: dir };
+}
+
 // src/lib/approvalgate.ts
 var pass2 = { decision: "pass" };
-var ask = (reason) => ({ decision: "ask", reason });
+var ask = (reason, spec) => spec === undefined ? { decision: "ask", reason } : { decision: "ask", reason, spec };
 var deny = (reason) => ({ decision: "deny", reason });
+function patchBlock(patch, cwd) {
+  for (const target of patchTargets(patch)) {
+    const blocked = protectedWriteBlock(target) ?? protectedWriteBlock(resolve4(cwd, target));
+    if (blocked)
+      return blocked;
+  }
+  return null;
+}
 function lex(command) {
   const segments2 = [];
   let tokens = [];
@@ -10278,15 +10385,28 @@ function readPlan(specPath) {
   };
 }
 function approvalGate(event) {
-  const { command, filePath } = event;
+  const { filePath } = event;
+  let command = event.command;
   const cwd = event.cwd ?? process.cwd();
   if (filePath !== undefined) {
-    const blocked = protectedWriteBlock(filePath) ?? protectedWriteBlock(resolve3(cwd, filePath));
+    const blocked = protectedWriteBlock(filePath) ?? protectedWriteBlock(resolve4(cwd, filePath));
+    return blocked ? deny(blocked) : pass2;
+  }
+  if (event.patch !== undefined) {
+    const blocked = patchBlock(event.patch, cwd);
     return blocked ? deny(blocked) : pass2;
   }
   if (!command)
     return pass2;
   try {
+    const heredocs = applyPatchHeredocs(command);
+    if (heredocs.bodies.length > 0) {
+      const blocked = patchBlock(heredocs.bodies.join(`
+`), withLeadingCd(command, cwd).cwd);
+      if (blocked)
+        return deny(blocked);
+      command = heredocs.shell;
+    }
     const protectedPath = protectedPathRef(command);
     if (protectedPath && !isReadOnly(command))
       return deny(protectedPathBlock(protectedPath));
@@ -10312,13 +10432,13 @@ function approvalGate(event) {
         "Approve only if you have reviewed it:",
         `  sddx plan check ${specArg ?? "<spec>"}`
       ].join(`
-`));
+`), specArg);
     }
     if (!specPath)
       return ask("sddx: plan start without a spec argument; cannot verify what would run");
     const plan = readPlan(specPath);
     if (!plan)
-      return ask(`sddx: plan at ${specArg} could not be read; approval cannot be verified`);
+      return ask(`sddx: plan at ${specArg} could not be read; approval cannot be verified`, specArg);
     const gate = decideGate(cwd, specPath, plan.nodes, gateInteractionMode(cwd), autoMaxTasks(cwd), scopesOverlap, plan.openDecisions);
     if (gate.ok)
       return pass2;
@@ -10330,23 +10450,10 @@ function approvalGate(event) {
       gate.reason ?? "approval required",
       `Review it first: sddx plan check ${specArg}`
     ].join(`
-`));
+`), specArg);
   } catch (e) {
     return ask(`sddx: approval could not be verified (${e.message}); asking instead`);
   }
-}
-
-// src/lib/shellcwd.ts
-import { resolve as resolve4 } from "node:path";
-var LEADING_CD = /^\s*cd\s+([^\s"'`$\\;&|~]+)\s*(?:&&|;)\s*/;
-function withLeadingCd(command, cwd) {
-  let rest = command;
-  let dir = cwd;
-  for (let m = LEADING_CD.exec(rest);m; m = LEADING_CD.exec(rest)) {
-    dir = resolve4(dir, m[1]);
-    rest = rest.slice(m[0].length);
-  }
-  return { command: rest, cwd: dir };
 }
 
 // src/lib/bashgate.ts
@@ -10863,9 +10970,7 @@ function readEvent() {
     return {};
   }
 }
-var emit = (output) => {
-  console.log(JSON.stringify(output));
-};
+var harnessOf = (name) => name === "codex" ? "codex" : "claude-code";
 var FILE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 function cmdTddGate(event) {
   const decision = tddGate({
@@ -10873,48 +10978,57 @@ function cmdTddGate(event) {
     cwd: event.cwd
   });
   if (decision.allow) {
-    emit(decision.diagnostic ? { systemMessage: decision.diagnostic } : {});
-    return;
+    return decision.diagnostic ? { systemMessage: decision.diagnostic } : {};
   }
-  emit({
+  return {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
       permissionDecisionReason: decision.reason
     }
-  });
+  };
 }
-function cmdApprovalGate(event) {
+function pluginCommand() {
+  const plugin = pluginRoot();
+  return plugin ? join19(plugin, "bin", "sddx") : "sddx";
+}
+function handOff(decision) {
+  return [
+    decision.reason ?? "sddx: approval required",
+    "",
+    "In Codex only a person can approve a plan, so this was refused. Ask the user to review the plan and type:",
+    `  !${pluginCommand()} plan approve ${decision.spec ?? "<spec>"}`
+  ].join(`
+`);
+}
+function cmdApprovalGate(event, harness) {
   const fileTool = typeof event.tool_name === "string" && FILE_TOOLS.has(event.tool_name) || (event.tool_input?.file_path ?? event.tool_input?.notebook_path) !== undefined;
-  const decision = approvalGate(fileTool ? {
+  const decision = approvalGate(event.tool_name === "apply_patch" ? { patch: String(event.tool_input?.command ?? ""), cwd: event.cwd } : fileTool ? {
     filePath: String(event.tool_input?.file_path ?? event.tool_input?.notebook_path ?? ""),
     cwd: event.cwd
   } : { command: event.tool_input?.command, cwd: event.cwd });
-  if (decision.decision === "pass") {
-    emit({});
-    return;
-  }
-  emit({
+  if (decision.decision === "pass")
+    return {};
+  const handedOff = harness === "codex" && decision.decision === "ask";
+  return {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
-      permissionDecision: decision.decision,
-      permissionDecisionReason: decision.reason
+      permissionDecision: handedOff ? "deny" : decision.decision,
+      permissionDecisionReason: handedOff ? handOff(decision) : decision.reason
     }
-  });
+  };
 }
 function cmdBashGate(event) {
   const decision = bashGate({ command: event.tool_input?.command, cwd: event.cwd });
-  if (decision.allow) {
-    emit({});
-    return;
-  }
-  emit({
+  if (decision.allow)
+    return {};
+  return {
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       permissionDecision: "deny",
       permissionDecisionReason: decision.reason
     }
-  });
+  };
 }
 function exitCodeOf(response) {
   for (const key of ["exit_code", "exitCode", "code"]) {
@@ -10926,16 +11040,14 @@ function exitCodeOf(response) {
 }
 function cmdRecordTest(event) {
   const command = event.tool_input?.command;
-  if (typeof command !== "string") {
-    emit({});
-    return;
-  }
+  if (typeof command !== "string")
+    return {};
   const res = recordTestRun(event.cwd ?? process.cwd(), command, exitCodeOf(event.tool_response));
-  emit(res.recorded ? { systemMessage: `sddx: task ${res.taskId} recorded ${res.recorded} (observed test run)` } : {});
+  return res.recorded ? { systemMessage: `sddx: task ${res.taskId} recorded ${res.recorded} (observed test run)` } : {};
 }
 function cmdStopGate(event) {
   const decision = stopGate({ cwd: event.cwd, stop_hook_active: event.stop_hook_active });
-  emit(decision.block ? { decision: "block", reason: decision.reason } : decision.note ? { systemMessage: decision.note } : {});
+  return decision.block ? { decision: "block", reason: decision.reason } : decision.note ? { systemMessage: decision.note } : {};
 }
 function activeTaskFiles(root) {
   const files = [];
@@ -10955,10 +11067,15 @@ function activeTaskFiles(root) {
   return files;
 }
 var NOT_OPTED_IN_LINE = "sddx is installed. To plan a change with it in this repository, run /sddx:brainstorm.";
+var CODEX_NOT_OPTED_IN_LINE = "sddx is installed. To plan a change with it in this repository, mention $sddx:brainstorm.";
+var CODEX_STRICT_NOTE = "This repository uses the strict profile, whose per-edit gates do not run in Codex. Each task still needs its boundary proof from sddx verify. Record each test run with sddx task phase <id> RED --test-exit <n>, then GREEN once it passes.";
 var ROUTER = join19("skills", "using-sddx", "SKILL.md");
-var ROUTER_MAPPING = join19("skills", "using-sddx", "references", "claude-code.md");
+var ROUTER_MAPPING = {
+  "claude-code": join19("skills", "using-sddx", "references", "claude-code.md"),
+  codex: join19("skills", "using-sddx", "references", "codex.md")
+};
 function pluginRoot() {
-  const fromEnv = process.env.CLAUDE_PLUGIN_ROOT;
+  const fromEnv = process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT;
   if (fromEnv)
     return fromEnv;
   let d = dirname8(fileURLToPath(import.meta.url));
@@ -10994,8 +11111,10 @@ var realOrNull = (path) => {
     return null;
   }
 };
-function runCommandLines(plugin) {
+function runCommandLines(plugin, harness) {
   const pluginBin = plugin ? join19(plugin, "bin") : null;
+  if (harness === "codex")
+    return [`Run sddx as: ${pluginBin ? join19(pluginBin, "sddx") : "sddx"}`];
   const shadow = shadowingSddx(pluginBin);
   if (!shadow || !pluginBin)
     return ["Run sddx as: sddx"];
@@ -11004,11 +11123,11 @@ function runCommandLines(plugin) {
     `Warning: another sddx at ${shadow} comes first on PATH and would shadow the plugin's, so use the command above wherever a skill says sddx. Removing the other one lets plain sddx work; the sddx troubleshooting guide shows how.`
   ];
 }
-function routerText(plugin) {
+function routerText(plugin, harness) {
   if (!plugin)
-    return "sddx: the router skill could not be located (CLAUDE_PLUGIN_ROOT is unset)";
+    return "sddx: the router skill could not be located (the plugin root is unset)";
   const parts = [];
-  for (const rel of [ROUTER, ROUTER_MAPPING]) {
+  for (const rel of [ROUTER, ROUTER_MAPPING[harness]]) {
     try {
       parts.push(withoutFrontmatter(readFileSync15(join19(plugin, rel), "utf8")));
     } catch {
@@ -11048,12 +11167,20 @@ function v5Check(root) {
     ]
   };
 }
-function optedInLines(root, plugin, notes) {
+function optedInLines(root, plugin, notes, harness) {
   const lines = [
     `sddx is active in this repository (${root}).`,
-    ...runCommandLines(plugin),
+    ...runCommandLines(plugin, harness),
     ...notes
   ];
+  if (harness === "codex") {
+    try {
+      if (profile(root) === "strict")
+        lines.push(CODEX_STRICT_NOTE);
+    } catch (e) {
+      lines.push(`sddx: could not read the profile: ${e.message}`);
+    }
+  }
   try {
     const res = sweep(root);
     if (res.removed.length > 0)
@@ -11075,51 +11202,53 @@ function optedInLines(root, plugin, notes) {
       lines.push(`sddx: task file ${file} is unreadable`);
     }
   }
-  return [...lines, "", routerText(plugin)];
+  return [...lines, "", routerText(plugin, harness)];
 }
-function sessionStartContext(cwd) {
+function sessionStartContext(cwd, harness = "claude-code") {
   const root = optedInRoot(cwd);
   if (root === null)
-    return NOT_OPTED_IN_LINE;
+    return harness === "codex" ? CODEX_NOT_OPTED_IN_LINE : NOT_OPTED_IN_LINE;
   const plugin = pluginRoot();
   const v5 = v5Check(root);
   if (v5.pending)
-    return [...v5.lines, ...runCommandLines(plugin)].join(`
+    return [...v5.lines, ...runCommandLines(plugin, harness)].join(`
 `);
-  return optedInLines(root, plugin, v5.lines).join(`
+  return optedInLines(root, plugin, v5.lines, harness).join(`
 `);
 }
-function cmdSessionStart(event) {
+function cmdSessionStart(event, harness) {
   let context;
   try {
-    context = sessionStartContext(event.cwd ?? process.cwd());
+    context = sessionStartContext(event.cwd ?? process.cwd(), harness);
   } catch (e) {
     context = `sddx: session start failed: ${e.message}`;
   }
-  emit({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } });
+  return { hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } };
 }
-function dispatchHook(sub, event) {
+function hookOutput(sub, event, harness = "claude-code") {
   try {
     if (sub === "tdd-gate")
-      cmdTddGate(event);
-    else if (sub === "bash-gate")
-      cmdBashGate(event);
-    else if (sub === "approval-gate")
-      cmdApprovalGate(event);
-    else if (sub === "record-test")
-      cmdRecordTest(event);
-    else if (sub === "stop-gate")
-      cmdStopGate(event);
-    else if (sub === "session-start")
-      cmdSessionStart(event);
-    else
-      emit({ systemMessage: `sddx hooks: unknown subcommand ${sub ?? "(none)"}` });
+      return cmdTddGate(event);
+    if (sub === "bash-gate")
+      return cmdBashGate(event);
+    if (sub === "approval-gate")
+      return cmdApprovalGate(event, harness);
+    if (sub === "record-test")
+      return cmdRecordTest(event);
+    if (sub === "stop-gate")
+      return cmdStopGate(event);
+    if (sub === "session-start")
+      return cmdSessionStart(event, harness);
+    return { systemMessage: `sddx hooks: unknown subcommand ${sub ?? "(none)"}` };
   } catch (e) {
-    emit({ systemMessage: `sddx hook error (${sub}): ${e.message}` });
+    return { systemMessage: `sddx hook error (${sub}): ${e.message}` };
   }
 }
-function runHook(sub) {
-  dispatchHook(sub, readEvent());
+function dispatchHook(sub, event, harness = "claude-code") {
+  console.log(JSON.stringify(hookOutput(sub, event, harness)));
+}
+function runHook(sub, harness) {
+  dispatchHook(sub, readEvent(), harnessOf(harness));
   process.exit(0);
 }
 
@@ -13064,6 +13193,13 @@ function cmdPlanApprove(cwd, args, format, noColor) {
   const specArg = args.find((a, i) => !a.startsWith("-") && args[i - 1] !== "--harness");
   if (!specArg)
     fail2(USAGE, 2);
+  if (process.env.CODEX_TOOL_CALL_ID) {
+    const own = join27(dirname9(fileURLToPath2(import.meta.url)), "..", "bin", "sddx");
+    failWith([
+      "plan approve: only a person can approve a plan, and this ran as a Codex agent's tool call",
+      `ask the user to review the plan and type: !${own} plan approve ${specArg}`
+    ], 3);
+  }
   const plan = resolvePlan(cwd, specArg);
   if (plan.errors.length > 0)
     failWith(plan.errors.map((e) => `plan approve: ${e}`));
@@ -13666,7 +13802,7 @@ var V5_SAFE = new Set(["migrate", "audit", "doctor", "config"]);
 async function main(argv) {
   const cwd = process.cwd();
   if (argv[0] === "hook")
-    runHook(argv[1]);
+    runHook(argv[1], argv[2]);
   const { format, noColor, rest: cleaned } = parseOutputFlag(argv);
   currentFormat = format;
   currentNoColor = noColor;

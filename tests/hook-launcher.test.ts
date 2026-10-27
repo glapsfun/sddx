@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, cpSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fixtureRepo, writeConfig } from "./fixtures";
@@ -278,4 +279,103 @@ describe("hooks/run-hook without Bun, and when the handler fails", () => {
     });
     expect(decisionOf(r.out)).toBe("ask");
   });
+});
+
+describe("hooks/run-hook in Codex", () => {
+  const codex = { harness: "codex" as const };
+
+  scenario("codex-hooks", "No Bun", () => {
+    const cwd = gitRepo(true);
+    const r = runLauncher("approval-gate", bash("sddx plan approve .sddx/specs/x.md", cwd), {
+      cwd,
+      bun: "none",
+      ...codex,
+    });
+    expect(r.status).toBe(0);
+    expect(decisionOf(r.out)).toBe("deny");
+    expect(reasonOf(r.out)).toContain("Bun");
+  });
+
+  test("an unrelated command without Bun passes through in Codex too", () => {
+    const cwd = gitRepo(false);
+    const r = runLauncher("approval-gate", bash("ls", cwd), { cwd, bun: "none", ...codex });
+    expect(r.out).toEqual({});
+  });
+
+  scenario("codex-hooks", "Handler crash", () => {
+    const cwd = gitRepo(true);
+    const r = runLauncher("approval-gate", bash("sddx plan start .sddx/specs/x.md", cwd), {
+      cwd,
+      bun: { exit: 1 },
+      ...codex,
+    });
+    expect(r.status).toBe(0);
+    expect(decisionOf(r.out)).toBe("deny");
+  });
+
+  test("a silent handler denies for the approval gate and passes for the stop gate", () => {
+    const cwd = gitRepo(true);
+    const gate = runLauncher("approval-gate", bash("sddx plan approve x.md", cwd), {
+      cwd,
+      bun: { exit: 0 },
+      ...codex,
+    });
+    expect(decisionOf(gate.out)).toBe("deny");
+    const stop = runLauncher("stop-gate", {}, { cwd, bun: { exit: 3 }, ...codex });
+    expect(stop.out).toEqual({});
+  });
+
+  test("the handler is told the harness", () => {
+    const cwd = gitRepo(true);
+    const r = runLauncher("approval-gate", bash("sddx plan approve x.md", cwd), {
+      cwd,
+      bun: { stdout: "{}" },
+      ...codex,
+    });
+    expect(r.bunCalls).toEqual([`${join(repoRoot, "dist", "hooks.mjs")} approval-gate codex`]);
+  });
+
+  test("without a harness argument the handler is started as before", () => {
+    const cwd = gitRepo(true);
+    const r = runLauncher("approval-gate", bash("sddx plan approve x.md", cwd), {
+      cwd,
+      bun: { stdout: "{}" },
+    });
+    expect(r.bunCalls).toEqual([`${join(repoRoot, "dist", "hooks.mjs")} approval-gate`]);
+  });
+
+  scenario(
+    "codex-hooks",
+    "Launcher without execute permission",
+    () => {
+      // some Codex install paths drop file modes; the commands run the launcher through sh
+      const root = mkdtempSync(join(tmpdir(), "codex-plugin-"));
+      for (const p of ["hooks", "dist", "skills", "bin", "package.json"]) {
+        cpSync(join(repoRoot, p), join(root, p), { recursive: true });
+      }
+      chmodSync(join(root, "hooks", "run-hook"), 0o644);
+      const file = JSON.parse(readFileSync(join(repoRoot, "hooks", "hooks-codex.json"), "utf8"));
+      const commands = new Set<string>();
+      for (const groups of Object.values(file.hooks) as { hooks: { command: string }[] }[][]) {
+        for (const h of groups.flatMap((g) => g.hooks)) commands.add(h.command);
+      }
+      expect(commands.size).toBeGreaterThan(2);
+      for (const command of commands) {
+        // biome-ignore lint/suspicious/noTemplateCurlyInString: the placeholder Codex substitutes
+        const run = command.replaceAll("${PLUGIN_ROOT}", root);
+        const r = spawnSync("/bin/sh", ["-c", run], {
+          cwd: bareDir(),
+          input: "{}",
+          encoding: "utf8",
+          env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "" },
+        });
+        expect({ command, status: r.status }).toEqual({ command, status: 0 });
+        const lines = r.stdout.trim().split("\n");
+        expect({ command, lines: lines.length }).toEqual({ command, lines: 1 });
+        const parsed: unknown = JSON.parse(lines[0] as string);
+        expect(typeof parsed).toBe("object");
+      }
+    },
+    60_000,
+  );
 });

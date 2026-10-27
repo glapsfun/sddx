@@ -59,6 +59,26 @@ describe("bin/sddx as the plugin ships it", () => {
     expect(r.stdout.trim()).toBe(manifest.version);
   });
 
+  scenario("codex-plugin", "Absolute invocation from elsewhere", () => {
+    // Codex puts no plugin directory on PATH, so the agent runs the launcher by
+    // its absolute path inside Codex's versioned plugin cache
+    const version = JSON.parse(readFileSync(join(repoRoot, "package.json"), "utf8")).version;
+    const root = join(
+      mkdtempSync(join(tmpdir(), "codex-home-")),
+      "plugins/cache/sddx/sddx",
+      version,
+    );
+    for (const p of ["bin", "dist", "package.json"]) {
+      cpSync(join(repoRoot, p), join(root, p), { recursive: true });
+    }
+    const r = spawnSync(join(root, "bin/sddx"), ["--version"], {
+      cwd: mkdtempSync(join(tmpdir(), "elsewhere-")),
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout.trim()).toBe(version);
+  });
+
   scenario("claude-plugin", "Launcher without Bun", () => {
     const r = spawnSync(join(repoRoot, "bin/sddx"), ["--version"], {
       cwd: tmpdir(),

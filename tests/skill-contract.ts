@@ -1,6 +1,6 @@
 // What the plugin's skills and agents promise the CLI and the harness, checked
-// without running a model: every command they name exists, skill text names no
-// Claude Code tool outside the one mapping file, and agents declare their tools.
+// without running a model: every command they name exists, skill text names a
+// harness's tools only in that harness's mapping file, and agents declare their tools.
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -10,6 +10,7 @@ import { CLI } from "./helpers";
 export const SKILLS = ["using-sddx", "brainstorm", "plan", "execute", "review", "finish", "debug"];
 export const AGENTS = ["worker", "critic"];
 export const MAPPING_FILE = join("skills", "using-sddx", "references", "claude-code.md");
+export const CODEX_MAPPING_FILE = join("skills", "using-sddx", "references", "codex.md");
 
 /** Commands `sddx --help` lists: "plan check", "verify", "task phase", ... */
 export function knownCommands(): Set<string> {
@@ -47,11 +48,17 @@ export function namedCommands(markdown: string, known: Set<string>): string[] {
   return out;
 }
 
-const HARNESS_TOOLS = /\b(TodoWrite|AskUserQuestion|subagent_type)\b|\b(Agent|Task|Skill) tool\b/g;
+const CLAUDE_TOOLS = /\b(TodoWrite|AskUserQuestion|subagent_type)\b|\b(Agent|Task|Skill) tool\b/g;
+const CODEX_TOOLS = /\b(spawn_agent|wait_agent|update_plan|request_user_input|fork_turns)\b/g;
 
-/** Claude Code tool names in a piece of skill text. */
-export const harnessToolsIn = (markdown: string): string[] =>
-  [...markdown.matchAll(HARNESS_TOOLS)].map((m) => m[0]);
+const toolsIn = (markdown: string, tools: RegExp): string[] =>
+  [...markdown.matchAll(tools)].map((m) => m[0]);
+
+/** Claude Code and Codex tool names in a piece of skill text. */
+export const harnessToolsIn = (markdown: string): string[] => [
+  ...toolsIn(markdown, CLAUDE_TOOLS),
+  ...toolsIn(markdown, CODEX_TOOLS),
+];
 
 function markdownUnder(root: string, dir: string): string[] {
   const base = join(root, dir);
@@ -77,9 +84,15 @@ export function contractViolations(root: string, known = knownCommands()): strin
       if (!known.has(cmd))
         out.push(`${file}: names \`sddx ${cmd}\`, which sddx --help does not list`);
     }
-    if (file.startsWith("skills") && file !== MAPPING_FILE) {
-      for (const tool of new Set(harnessToolsIn(text))) {
+    if (!file.startsWith("skills")) continue;
+    if (file !== MAPPING_FILE) {
+      for (const tool of new Set(toolsIn(text, CLAUDE_TOOLS))) {
         out.push(`${file}: names the Claude Code tool ${tool}; move it to ${MAPPING_FILE}`);
+      }
+    }
+    if (file !== CODEX_MAPPING_FILE) {
+      for (const tool of new Set(toolsIn(text, CODEX_TOOLS))) {
+        out.push(`${file}: names the Codex tool ${tool}; move it to ${CODEX_MAPPING_FILE}`);
       }
     }
   }

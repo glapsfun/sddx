@@ -108,6 +108,7 @@ describe("opt-in: the TypeScript rule and the launcher's agree", () => {
 
 const ROUTER_BODY = "ROUTER-BODY-MARKER: route behavior changes through sddx.";
 const MAPPING_BODY = "MAPPING-MARKER: dispatch a subagent with the Agent tool.";
+const CODEX_MAPPING_BODY = "CODEX-MAPPING-MARKER: dispatch a subagent with spawn_agent.";
 
 /** A plugin root holding only the two router files session start injects. */
 function fixturePlugin(): string {
@@ -119,25 +120,33 @@ function fixturePlugin(): string {
     `---\nname: using-sddx\ndescription: frontmatter stays out\n---\n\n${ROUTER_BODY}\n`,
   );
   writeFileSync(join(dir, "references", "claude-code.md"), `${MAPPING_BODY}\n`);
+  writeFileSync(join(dir, "references", "codex.md"), `${CODEX_MAPPING_BODY}\n`);
   return root;
 }
 
 const BUN_DIR = dirname(Bun.which("bun") as string);
 
 /** Runs session start from source the way the launcher would, on a PATH with no sddx. */
-function sessionStart(cwd: string, opts: { plugin?: string; pathPrefix?: string } = {}) {
-  const r = spawnSync("bun", [join(repoRoot, "src", "hooks.ts"), "session-start"], {
+function sessionStart(
+  cwd: string,
+  opts: { plugin?: string; pathPrefix?: string; harness?: "codex" } = {},
+) {
+  const plugin = opts.plugin ?? fixturePlugin();
+  const args = [join(repoRoot, "src", "hooks.ts"), "session-start"];
+  const r = spawnSync("bun", opts.harness ? [...args, opts.harness] : args, {
     cwd,
     input: JSON.stringify({ hook_event_name: "SessionStart", source: "startup", cwd }),
     encoding: "utf8",
     env: {
       PATH: [opts.pathPrefix, BUN_DIR, "/usr/bin", "/bin"].filter(Boolean).join(":"),
       HOME: process.env.HOME ?? "",
-      CLAUDE_PLUGIN_ROOT: opts.plugin ?? fixturePlugin(),
+      CLAUDE_PLUGIN_ROOT: plugin,
+      ...(opts.harness === "codex" ? { PLUGIN_ROOT: plugin } : {}),
       NO_COLOR: "1",
     },
   });
-  return { status: r.status, context: contextOf(JSON.parse(r.stdout || "{}")) };
+  const out = JSON.parse(r.stdout || "{}") as Record<string, unknown>;
+  return { status: r.status, context: contextOf(out), out };
 }
 
 function optedInRepo(): string {
@@ -320,5 +329,76 @@ describe("one failing part of session start does not withhold the rest", () => {
     expect(status).toBe(0);
     expect(context).toContain(ROUTER_BODY);
     expect(context).toContain("sddx 5");
+  });
+});
+
+describe("session start in Codex", () => {
+  const codex = { harness: "codex" as const };
+
+  scenario("session-router", "Router injected in Codex", () => {
+    const { status, context } = sessionStart(optedInRepo(), codex);
+    expect(status).toBe(0);
+    expect(context).toContain(ROUTER_BODY);
+    expect(context).toContain(CODEX_MAPPING_BODY);
+    expect(context).not.toContain(MAPPING_BODY);
+  });
+
+  scenario("session-router", "Repository without .sddx/ in Codex", () => {
+    const cwd = fixtureRepo();
+    const status = () =>
+      spawnSync("git", ["status", "--porcelain", "--ignored"], { cwd, encoding: "utf8" }).stdout;
+    const before = status();
+    const { context } = sessionStart(cwd, codex);
+    expect(context.split("\n")).toHaveLength(1);
+    expect(context).toContain("$sddx:brainstorm");
+    expect(context).not.toContain("/sddx:brainstorm");
+    expect(status()).toBe(before);
+  });
+
+  scenario("session-router", "Codex session", () => {
+    const plugin = fixturePlugin();
+    const { context } = sessionStart(optedInRepo(), { ...codex, plugin });
+    expect(context).toContain(`Run sddx as: ${join(plugin, "bin", "sddx")}\n`);
+    expect(context).not.toContain("Run sddx as: sddx\n");
+  });
+
+  test("in Codex another sddx on PATH changes nothing: the command is already absolute", () => {
+    const plugin = fixturePlugin();
+    const { context } = sessionStart(optedInRepo(), {
+      ...codex,
+      plugin,
+      pathPrefix: sddxOnPath(),
+    });
+    expect(context).toContain(`Run sddx as: ${join(plugin, "bin", "sddx")}\n`);
+    expect(context).not.toContain("Warning: another sddx");
+  });
+
+  scenario("session-router", "Strict repository in Codex", () => {
+    const cwd = optedInRepo();
+    writeFileSync(join(cwd, ".sddx", "config.json"), '{ "profile": "strict" }\n');
+    const { context } = sessionStart(cwd, codex);
+    expect(context).toContain("per-edit gates do not run in Codex");
+    expect(context).toContain("sddx task phase");
+  });
+
+  scenario("session-router", "Strict repository in Claude Code", () => {
+    const cwd = optedInRepo();
+    writeFileSync(join(cwd, ".sddx", "config.json"), '{ "profile": "strict" }\n');
+    const { context } = sessionStart(cwd);
+    expect(context).not.toContain("per-edit gates do not run");
+  });
+
+  test("a default-profile repository in Codex gets no strict note", () => {
+    expect(sessionStart(optedInRepo(), codex).context).not.toContain("per-edit gates");
+  });
+
+  scenario("codex-hooks", "Session start shape in Codex", () => {
+    for (const cwd of [optedInRepo(), fixtureRepo()]) {
+      const { out } = sessionStart(cwd, codex);
+      expect(Object.keys(out)).toEqual(["hookSpecificOutput"]);
+      const inner = out.hookSpecificOutput as Record<string, unknown>;
+      expect(Object.keys(inner).sort()).toEqual(["additionalContext", "hookEventName"]);
+      expect(inner.hookEventName).toBe("SessionStart");
+    }
   });
 });

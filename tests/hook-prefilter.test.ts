@@ -1,7 +1,7 @@
 // The launcher passes an approval-gate event through without starting Bun
 // unless its payload contains sddx, cli.mjs or cli.ts. That is only safe if the
 // handler would have passed every such event too. This runs the approval
-// gate's own test corpus, as commands and as file paths, through both.
+// gate's own test corpus, as commands, file paths and patch targets, through both.
 import { describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -39,6 +39,10 @@ const corpus = [
   'bun "src/cli".ts plan approve x',
 ];
 
+/** A Codex patch that writes `path`, as the apply_patch tool sends it and as a heredoc. */
+const patchOf = (path: string) => `*** Begin Patch\n*** Update File: ${path}\n*** End Patch`;
+const heredocOf = (path: string) => `apply_patch <<'EOF'\n${patchOf(path)}\nEOF`;
+
 /** A working directory whose own path names nothing the pre-filter looks for. */
 const plainCwd = mkdtempSync(join(tmpdir(), "prefilter-"));
 /** One inside .sddx/, where a relative path can reach the protected files. */
@@ -62,6 +66,14 @@ describe("the approval pre-filter never skips an event the handler acts on", () 
           {
             event: { tool_name: "Write", tool_input: { file_path: s, content: "" }, cwd },
             direct: () => approvalGate({ filePath: s, cwd }).decision,
+          },
+          {
+            event: { tool_name: "apply_patch", tool_input: { command: patchOf(s) }, cwd },
+            direct: () => approvalGate({ patch: patchOf(s), cwd }).decision,
+          },
+          {
+            event: { tool_name: "Bash", tool_input: { command: heredocOf(s) }, cwd },
+            direct: () => approvalGate({ command: heredocOf(s), cwd }).decision,
           },
         ];
         for (const { event, direct } of events) {

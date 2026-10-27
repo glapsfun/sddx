@@ -291,4 +291,47 @@ describe("the CLI stays out of the harness's configuration", () => {
     const tracked = git(cwd, "ls-tree", "-r", "--name-only", run.runBranch).split("\n");
     expect(tracked.filter((f) => f.startsWith(".claude/"))).toEqual([]);
   });
+
+  scenario("codex-plugin", "A full goal leaves Codex configuration untouched", () => {
+    const cwd = fixtureRepo();
+    const seeded: Record<string, string> = {
+      ".codex/config.toml": 'model = "seeded"\n',
+      ".agents/plugins/marketplace.json": '{ "name": "seeded", "plugins": [] }\n',
+    };
+    for (const [rel, text] of Object.entries(seeded)) {
+      mkdirSync(join(cwd, rel, ".."), { recursive: true });
+      writeFileSync(join(cwd, rel), text);
+    }
+    git(cwd, "add", "-A");
+    git(cwd, "commit", "-qm", "codex configuration");
+    const base = git(cwd, "rev-parse", "HEAD").trim();
+
+    const run = createRun(cwd, { tasks: [{ id: "T1" }] });
+    completeTask(cwd, "T1");
+    expect(readTaskState(cwd, "T1").phase).toBe("DONE");
+
+    // every copy of a Codex file anywhere in the checkout, worktrees included,
+    // holds exactly what was seeded, and the main checkout holds nothing else
+    const found: Record<string, string> = {};
+    const walk = (dir: string, inside: boolean): void => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        if (e.name === ".git") continue;
+        const p = join(dir, e.name);
+        const codex = inside || e.name === ".codex" || e.name === ".agents";
+        if (e.isDirectory()) walk(p, codex);
+        else if (codex) found[p.slice(cwd.length + 1)] = readFileSync(p, "utf8");
+      }
+    };
+    walk(cwd, false);
+    expect(Object.keys(found).length).toBeGreaterThanOrEqual(2);
+    for (const [rel, text] of Object.entries(found)) {
+      const seed = Object.keys(seeded).find((k) => rel === k || rel.endsWith(`/${k}`));
+      expect({ rel, seed: seed !== undefined }).toEqual({ rel, seed: true });
+      expect({ rel, text }).toEqual({ rel, text: seeded[seed as string] as string });
+    }
+    for (const rel of Object.keys(seeded)) expect(found[rel]).toBe(seeded[rel] as string);
+    const codexTree = (ref: string) =>
+      git(cwd, "ls-tree", "-r", ref, "--", ".codex", ".agents").trim();
+    expect(codexTree(run.runBranch)).toBe(codexTree(base));
+  });
 });

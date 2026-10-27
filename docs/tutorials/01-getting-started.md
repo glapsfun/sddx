@@ -1,7 +1,8 @@
 # Getting started: your first goal
 
 This tutorial takes one small goal from an empty repository to a pull request,
-in a Claude Code session with the sddx plugin. At each step you will see what
+in a Claude Code session with the sddx plugin. Where Codex differs, a note at
+the end of the step says how. At each step you will see what
 the agent does and the sddx command that gates it. The same lifecycle driven by
 hand from the CLI, with no agent at all, is the runnable scaffold at
 [examples/01-single-task](../../examples/01-single-task/).
@@ -18,6 +19,9 @@ curl -fsSL https://bun.sh/install | bash
 /plugin marketplace add glapsfun/sddx
 /plugin install sddx@sddx
 ```
+
+> **In Codex:** install with `codex plugin marketplace add glapsfun/sddx` and
+> `codex plugin add sddx@sddx`, then open `/hooks` and trust the sddx hooks.
 
 Then make a repository with one commit and a test runner. This tutorial uses
 Bun's:
@@ -39,6 +43,8 @@ Type:
 ```
 /sddx:brainstorm add a greet(name) function that returns "Hello, <name>"
 ```
+
+> **In Codex:** mention `$sddx:brainstorm` instead.
 
 The agent asks one question at a time, for example what an empty name should
 return, and you can answer "skip" to let it decide. Then it writes the design
@@ -110,6 +116,10 @@ the spec afterwards and the hash no longer matches, so `plan start` refuses.
 `plan start` creates the goal, its run branch `sddx/run-2026-10-27-greeting`,
 and the task `greet-1` in state `PLANNED`.
 
+> **In Codex:** there is no dialog. The agent stops and asks you to type the
+> approve command yourself, with Codex's `!` prefix and the full path session
+> start gave; typing it is your approval. The agent passes `--harness codex`.
+
 ## 3. Execute
 
 ```sh
@@ -132,6 +142,10 @@ without the change proves nothing, so `verify` refuses it. A pass moves the
 task to `IN_REVIEW`. [Verification](../reference/verification.md) has the
 details.
 
+> **In Codex:** the agent starts the worker from the plugin's role file, and
+> asks to run `task start` and `verify` outside Codex's sandbox, which keeps
+> `.git` read-only. Approve the request.
+
 ## 4. Review
 
 A critic subagent, in a clean context and with no file-editing tools, reviews
@@ -145,6 +159,9 @@ A pass makes the task `DONE`. sddx commits the proven tree together with the
 task state and a receipt, `.sddx/receipts/greet-1.json`, and merges that commit
 into the run branch. A fail sends the task back to the worker with the
 critic's findings.
+
+> **In Codex:** the critic keeps write access, but an edit would change the
+> proven tree, and `review record` would refuse the review.
 
 ## 5. Finish
 

@@ -7,13 +7,11 @@ export const repoRoot = new URL("..", import.meta.url).pathname;
 
 export const CLI = join(repoRoot, "src/cli.ts");
 
-/** Runs the CLI from source. */
+/** Runs the CLI from source, as the user would: never as a Codex agent's tool call. */
 export function sddx(cwd: string, ...args: string[]) {
-  return spawnSync("bun", [CLI, ...args], {
-    cwd,
-    encoding: "utf8",
-    env: { ...process.env, NO_COLOR: "1" },
-  });
+  const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: "1" };
+  delete env.CODEX_TOOL_CALL_ID;
+  return spawnSync("bun", [CLI, ...args], { cwd, encoding: "utf8", env });
 }
 
 export interface SpecTaskInput {

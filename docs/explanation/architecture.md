@@ -1,140 +1,126 @@
 # Architecture
 
-Contributor-facing map of the codebase: where things live, how sources become
-the shipped bundles, and where state goes. Reader-facing behavior is
-documented in the tutorials, how-to guides, and
-[../reference/hooks.md](../reference/hooks.md); the reasoning behind each
-design choice is in [design-principles.md](design-principles.md) and
-[why-sddx.md](why-sddx.md).
+Contributor-facing map of the codebase: where things live, how the layers fit,
+and where state goes. Behavior is documented in the
+[reference](../reference/cli.md); the reasoning behind the design is in
+[design-principles.md](design-principles.md).
+
+## Three layers
+
+```
+ +--------------------------------------------------------------+
+ | L3  skills        markdown the harness reads: brainstorm,    |
+ |                   plan, execute, review, debug, finish       |
+ +--------------------------------------------------------------+
+ | L2  plugins       one per harness: install, session-start    |
+ |                   context, hook registrations                |
+ +--------------------------------------------------------------+
+ | L1  core          the sddx CLI plus git: spec and plan       |
+ |                   checks, approval, worktrees, the boundary  |
+ |                   proof, review binding, receipts, audit     |
+ +--------------------------------------------------------------+
+```
+
+The rule that shapes everything: **every guarantee is enforceable at L1 alone.**
+An approved plan, an oracle that fails before and passes after the change, a
+review bound to the exact merged diff, a tamper-evident receipt: all of these
+hold with no harness present, which is what lets the same repository work in
+any harness and in CI. Hooks (L2) add early feedback and the user's own
+permission dialog; they are never the only thing enforcing a rule.
+
+This repository holds L1, the hook handlers it exposes (`sddx hook <name>`), and
+the frozen knowledge `sddx migrate` needs about sddx 5. The plugins and skills
+live with their harness integrations.
 
 ## Layout
 
 ```
 sddx/
-├── templates/claude/            # adapter templates, shipped in the npm package
-│   ├── skills/                  # /sddx:run, plan, verify, board, audit, pr
-│   ├── agents/                  # intake, orchestrator, planner, tdd-executor, verifier
-│   └── hooks/hooks.json         # the hook registrations
-├── bin/sddx-run                 # POSIX launcher: Bun required, no fallback
-├── src/                         # TypeScript sources (Bun toolchain)
-│   ├── lib/                     # spec, task, classify, receipt, verify, worktree, git…
-│   └── lib/adapters/            # one module per harness; claude is the only one
-├── dist/                        # committed dependency-free bundles: cli.mjs, hooks.mjs, bootstrap.mjs
-├── scripts/                     # build.ts, token-budget.ts
-└── tests/                       # bun test: unit + hook integration + e2e milestones
+├── bin/sddx, bin/sddx-run       # launcher: Bun required, no fallback
+├── src/
+│   ├── cli.ts                   # command routing and output
+│   ├── board.ts, audit.ts       # BOARD.md rendering, receipt audit
+│   ├── tdd-gate.ts              # strict-profile write gate
+│   └── lib/
+│       ├── goalspec.ts          # markdown goal spec parser
+│       ├── plan.ts              # plan rules, plan resolution, plan start
+│       ├── approval.ts          # plan hash, approval tokens, autonomy bounds
+│       ├── lifecycle.ts         # task start, ready, abandon
+│       ├── task.ts              # task state and transitions
+│       ├── proof.ts, verify.ts  # verified tree, boundary proof, sddx verify
+│       ├── review.ts, finalize.ts # review binding, receipt + commit + merge
+│       ├── receipt.ts           # receipt schema 1 to 5, the hash chain
+│       ├── approvalgate.ts, protectedpaths.ts, bashgate.ts, recorder.ts, stopgate.ts
+│       ├── hookdispatch.ts      # `sddx hook <name>`: event JSON in, decision out
+│       ├── migrate.ts           # sddx 5 to 6
+│       └── legacy/              # what sddx 5 generated, frozen for migrate
+├── dist/                        # committed dependency-free bundles
+├── scripts/                     # build, spec coverage, v5 fixture builder
+└── tests/                       # bun test: unit, CLI scenarios, e2e
 ```
-
-The templates carry a single `{{SDDX}}` placeholder wherever they invoke the
-CLI. `sddx init --adapter claude` substitutes the invocation implied by the
-repository's committed `runtime_scope` and writes the result into the project's
-own `.claude/` — `sddx-` prefixed, so nothing can collide with assets the user
-wrote. Because the substitution depends only on committed policy, two
-developers generate byte-identical files.
-
-Role separation is enforced with tool restrictions, not prompting: the
-`intake`, `orchestrator` and `planner` agents have no source-edit tools
-(`intake` writes exactly one thing, the Goal Brief header of a graph draft, and
-has no Bash at all), the `tdd-executor` cannot merge or write receipts, and the
-`verifier` can run the oracle and write the receipt but never edit sources.
 
 ## Runtime and build
 
-- **Develop and test with Bun** (version pinned in `.bun-version`):
-  `bun test`, `tsc --noEmit`, Biome for lint/format.
-- **Ship dependency-free.** `bun run build` (`scripts/build.ts`) bundles each
-  entry point into a single-file `dist/*.mjs` with zero runtime dependencies,
-  and `dist/` is committed. npm packages exist only at build time; users
-  install nothing.
-- **Launch anywhere.** `bin/sddx-run` prefers `bun`, falls back to `node`
-  ≥ 18, and refuses anything older — no other runtimes.
-- **CI drift check.** CI rebuilds and fails if `dist/` doesn't match `src/`,
-  so the committed bundles can be trusted.
-- **Hot-path budget.** Hooks run on every session and every tool call:
-  SessionStart bootstrap stays under 200 ms, no heavy imports on the hot path,
-  and state/receipts are JSON so hook code parses them with zero libraries.
-  The always-on skill surface is measured by `scripts/token-budget.ts` and
-  gated in the test suite (< 500 tokens).
+- Develop and test with Bun (version pinned in `.bun-version`): `bun test`,
+  `tsc --noEmit`, Biome.
+- `bun run build` bundles each entry point into a single dependency-free
+  `dist/*.mjs`, and `dist/` is committed. CI rebuilds and fails if `dist/`
+  drifts from `src/`.
+- Hooks run on every session and tool call, so their handlers stay cheap: in the
+  default profile the gate handlers return before reading any task state.
 
 ## State model
 
 ```
 .sddx/
-  drafts/<name>.yaml         # pre-registration graph.yaml + spec drafts (planner/orchestrator authored)
-  context/<name>.md          # pre-registration research/context notes (planner authored)
-  specs/<task-id>.yaml       # the registered spec (copied at task create)
-  tasks/<task-id>.json       # phase, oracle, workspace, base SHA, allow list, iterations
-  receipts/<task-id>.json    # immutable, written once by the verifier
-                             # NOTE: the goal record is NOT here — it lives in its own git ref,
-                             # refs/sddx/goals/<goal-id> (see "State model" below). A loose
-                             # goals/<goal-id>.json is only a record written before refs existed.
-  approvals/<plan-sha>.json  # plan-approval tokens, CONTENT-ADDRESSED by the plan hash they
-                             # approve — so a plan regenerated byte-identically reuses its
-                             # approval, and an edited plan simply has no token
-  BOARD.md                   # generated rollup — never hand-edited
-  config.json                # materialized from the plugin manifest's userConfig; read-only to sddx code
-  sweep.json                 # last orphan-sweep result; read by the board's flagged-worktrees section
+  config.json               # reviewed policy; tool writes are denied
+  specs/<goal-id>.md        # goal specs; the goal id is the file name
+  approvals/<plan-hash>.json# approval tokens, content-addressed by the spec's sha256
+  tasks/<id>.json           # PLANNED and ABANDONED tasks; a started task's file lives in its worktree
+  receipts/<id>.json        # immutable, written once at finalize, hash-chained
+  BOARD.md                  # generated
+  sweep.json                # what the last sweep refused to remove
+  legacy/                   # sddx 5 state archived by `sddx migrate`
+  local/                    # machine-local, gitignored
 ```
 
-Every sddx-authored artifact — draft or registered — lives under `.sddx/`. A
-few things intentionally live outside it because they aren't sddx state:
+Outside `.sddx/`:
 
-- **Worktrees** live under `.sddx-worktrees/<id>` on branch `sddx/<id>`, not
-  inside `.sddx/` — each is a real git worktree checkout, and nesting one
-  inside `.sddx/` would break the per-task isolation `.sddx/` exists to keep
-  conflict-free. For a goal, root tasks fork from that goal's run branch
-  (`sddx/run-<goal-id>`, itself forked from `origin/HEAD` before any task
-  starts); a standalone task with no goal forks from `origin/HEAD` directly.
-  As each task passes its oracle, `sddx verify` merges it into the run branch
-  automatically (a real `git merge --no-ff`, never a cherry-pick) — see
-  [../how-to/ship-a-goal-as-a-pr.md](../how-to/ship-a-goal-as-a-pr.md). The
-  sweep and cleanup rules are documented in
-  [../tutorials/02-your-first-parallel-run.md](../tutorials/02-your-first-parallel-run.md).
-- **The goal record** lives in its own git ref, `refs/sddx/goals/<goal-id>`,
-  pointing straight at a JSON blob. Not a loose file, and not a file in the run
-  branch's tree.
+- **Run branch** `sddx/run-<goal-id>`: created by `plan start` at the base
+  commit, with one commit holding the approved spec bytes. Finalized tasks are
+  merged into it with `git merge --no-ff`. Merging it into the target branch is
+  always a person's decision.
+- **Task worktrees** `.sddx-worktrees/<id>` on branch `sddx/<id>`: created by
+  `task start`. A root forks from the run branch head; a dependent forks from its
+  parents' `DONE` commits. The task's state file lives here while it is started.
+  The finalize commit carries the verified tree, the state and the receipt
+  together; abandoning moves the state back to the main checkout. Either way a
+  finished task's worktree holds nothing it alone records, and sweep removes it
+  once nothing in it is uncommitted.
+- **Proof worktrees** `.sddx-worktrees/<id>--proof`: detached, created and
+  removed by one `sddx verify`, and locked to that process. A killed verify can
+  leave one behind; the sweep removes it once its owner is gone.
+- **Proof records** `.git/sddx-proofs/<id>.json`: what a passing `verify` proved,
+  kept in the git directory, outside every worktree and every commit. Review
+  and finalize trust only this record, never the task file's copy.
+- **Goal records** live in the git ref `refs/sddx/goals/<goal-id>`, pointing at a
+  JSON blob: not carried by merges or branch deletions, written with
+  compare-and-swap through `git update-ref`, pushed explicitly by `pr create`.
 
-  It holds `merges`, the single source of truth for integration state
-  (`task.integration` is a derived mirror). As uncommitted local state it was
-  the one run artifact that could not be audited, did not travel when the run
-  branch was pushed, and vanished if `.sddx/` was cleaned — while the receipts
-  it gives context to survived. As a file *inside* the run branch it was worse
-  in both directions: merging the run branch landed a frozen snapshot on the
-  default branch that then shadowed the live record, and deleting the merged
-  branch destroyed the record outright.
+Two invariants hold across all of it:
 
-  A ref outside `refs/heads` is carried by neither a merge nor a branch
-  deletion, and `git update-ref` gives every write compare-and-swap: a
-  concurrent verifier is detected rather than silently overwritten. It does not
-  travel on a normal push, so `sddx pr create` pushes it explicitly; a reviewer
-  fetches it with `git fetch origin 'refs/sddx/goals/*:refs/sddx/goals/*'`.
+- **One state file per task**, so parallel worktrees never edit the same file.
+- **Every finalized task is one commit**: code, task state and receipt.
 
-  A loose `.sddx/goals/<goal-id>.json` is read as a fallback, and stays loose
-  when written — it can only be a record written before refs existed, and
-  migrating one mid-run would move the merge log out from under anything
-  already reading it.
-- **Worktree isolation is a precondition, not a preference.** The canonical
-  initializer (`graph create`) never downgrades: `auto` means worktree, and a
-  failed precondition refuses the run before any state exists. The two
-  preconditions are deliberately narrow, because with no fallback left a false
-  positive costs the user the tool rather than a degraded mode:
-  - worktree support asks only whether `git worktree list` works, against the
-    main repository root. Being *inside* a linked worktree is not a refusal —
-    sddx puts its own agents there.
-  - a submodule refuses only when some task's declared `scope` overlaps a
-    recorded submodule path. One vendored dependency no task touches is not a
-    reason to refuse. A task declaring no `scope` at all does refuse in such a
-    repository: an undeclared write lane cannot be proven disjoint, and the
-    whole narrowing rests on that proof.
-- **The sweep lock and `.git/info/exclude`'s `.sddx-worktrees/` entry** live
-  under `.git/` — they're git-internal bookkeeping, not sddx state.
+## Verification and review
 
-Two invariants hold across all of `.sddx/`:
+`sddx verify` snapshots the task worktree's content into a git tree using a
+temporary index (neither the files nor the real index change), checks scope,
+then runs the boundary proof in the proof worktree: RED on the base commit plus
+the changed test files, GREEN on the verified tree. See
+[verification.md](../reference/verification.md).
 
-- **One file per task** — parallel worktrees merge `.sddx/` without conflicts.
-- **Every completed task is one atomic commit**: code + spec + receipt.
-
-## Design principles
-
-The tie-breakers for any design argument are covered in
-[design-principles.md](design-principles.md) — this page stays focused on
-where they land in the codebase.
+`sddx review record` snapshots the tree again and refuses if it changed, stores
+the sha256 of the verified diff, and on a pass finalizes: one commit, a version 5
+receipt, the merge into the run branch. sddx cannot judge whether a review was
+good; it makes "a passing review of exactly the merged diff" a recorded fact.

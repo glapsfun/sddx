@@ -50,6 +50,8 @@ const emit = (output: Record<string, unknown>): void => {
   console.log(JSON.stringify(output));
 };
 
+const FILE_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+
 function cmdTddGate(event: HookEvent): void {
   const decision = tddGate({
     filePath: event.tool_input?.file_path ?? event.tool_input?.notebook_path,
@@ -78,7 +80,17 @@ function cmdTddGate(event: HookEvent): void {
  * a disabled one. See src/lib/approvalgate.ts and its regression test.
  */
 function cmdApprovalGate(event: HookEvent): void {
-  const decision = approvalGate({ command: event.tool_input?.command, cwd: event.cwd });
+  const fileTool =
+    (typeof event.tool_name === "string" && FILE_TOOLS.has(event.tool_name)) ||
+    (event.tool_input?.file_path ?? event.tool_input?.notebook_path) !== undefined;
+  const decision = approvalGate(
+    fileTool
+      ? {
+          filePath: String(event.tool_input?.file_path ?? event.tool_input?.notebook_path ?? ""),
+          cwd: event.cwd,
+        }
+      : { command: event.tool_input?.command, cwd: event.cwd },
+  );
   if (decision.decision === "pass") {
     emit({});
     return;
@@ -86,7 +98,7 @@ function cmdApprovalGate(event: HookEvent): void {
   emit({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
-      permissionDecision: "ask",
+      permissionDecision: decision.decision,
       permissionDecisionReason: decision.reason,
     },
   });
@@ -115,35 +127,18 @@ function exitCodeOf(response: HookEvent["tool_response"]): number | undefined {
   return undefined;
 }
 
-function outputOf(response: HookEvent["tool_response"]): string {
-  let out = "";
-  for (const key of ["stdout", "stderr", "output"]) {
-    const v = response?.[key];
-    if (typeof v === "string") out += v;
-  }
-  return out;
-}
-
 function cmdRecordTest(event: HookEvent): void {
   const command = event.tool_input?.command;
   if (typeof command !== "string") {
     emit({});
     return;
   }
-  const res = recordTestRun(
-    event.cwd ?? process.cwd(),
-    command,
-    exitCodeOf(event.tool_response),
-    outputOf(event.tool_response),
+  const res = recordTestRun(event.cwd ?? process.cwd(), command, exitCodeOf(event.tool_response));
+  emit(
+    res.recorded
+      ? { systemMessage: `sddx: task ${res.taskId} recorded ${res.recorded} (observed test run)` }
+      : {},
   );
-  const parts: string[] = [];
-  if (res.transitioned)
-    parts.push(`sddx: task ${res.taskId} → ${res.transitioned} (observed test run)`);
-  if (res.stuck)
-    parts.push(
-      `sddx: task ${res.taskId} has failed identically ${res.stuck.count}× (threshold ${res.stuck.threshold}) — stuck; stop and escalate to the human instead of iterating.`,
-    );
-  emit(parts.length > 0 ? { systemMessage: parts.join("\n") } : {});
 }
 
 function cmdStopGate(event: HookEvent): void {
@@ -155,6 +150,23 @@ function cmdStopGate(event: HookEvent): void {
         ? { systemMessage: decision.note }
         : {},
   );
+}
+
+/** Task files in the main checkout plus each task worktree's own file. */
+function activeTaskFiles(root: string): string[] {
+  const files: string[] = [];
+  const main = join(root, ".sddx", "tasks");
+  if (existsSync(main)) {
+    for (const f of readdirSync(main).filter((n) => n.endsWith(".json"))) files.push(join(main, f));
+  }
+  const wts = join(root, ".sddx-worktrees");
+  if (existsSync(wts)) {
+    for (const id of readdirSync(wts)) {
+      const f = join(wts, id, ".sddx", "tasks", `${id}.json`);
+      if (existsSync(f)) files.push(f);
+    }
+  }
+  return files;
 }
 
 function cmdSessionStart(event: HookEvent): void {
@@ -175,15 +187,12 @@ function cmdSessionStart(event: HookEvent): void {
         lines.push(`sddx: board refresh failed: ${(e as Error).message}`);
       }
     }
-    const tasksDir = join(cwd, ".sddx", "tasks");
-    if (existsSync(tasksDir)) {
-      for (const file of readdirSync(tasksDir).filter((f) => f.endsWith(".json"))) {
-        try {
-          const t = JSON.parse(readFileSync(join(tasksDir, file), "utf8")) as TaskState;
-          if (!isTerminal(t.phase)) lines.push(`sddx task ${t.id}: phase ${t.phase} — ${t.task}`);
-        } catch {
-          lines.push(`sddx: task file ${file} is unreadable`);
-        }
+    for (const file of activeTaskFiles(cwd)) {
+      try {
+        const t = JSON.parse(readFileSync(file, "utf8")) as TaskState;
+        if (!isTerminal(t.phase)) lines.push(`sddx task ${t.id}: ${t.phase}, ${t.task}`);
+      } catch {
+        lines.push(`sddx: task file ${file} is unreadable`);
       }
     }
   }

@@ -3,26 +3,11 @@
 // natural-language reply, execute via existing git/PR primitives, report the
 // observable result. State is derived fresh on every call — never persisted.
 
-import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import {
-  commit,
-  commitsAheadOfUpstream,
-  currentBranch,
-  defaultBranch,
-  git,
-  headSha,
-  push,
-  stageAll,
-  upstreamBranch,
-} from "./git";
+import { commit, defaultBranch, git, push, stageAll } from "./git";
 import { currentlyMergedTaskIds, readGoal } from "./goal";
 import { createGoalPr } from "./pr";
-import { resolveBackend } from "./prhost";
 import { revertTaskMerge } from "./runbranch";
 import { resolveTaskState } from "./task";
-import { isDirty } from "./worktree";
 
 export interface ActionResult {
   ok: boolean;

@@ -2,26 +2,37 @@ import { describe, expect, test } from "bun:test";
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { boardData, renderBoard, writeBoard } from "../src/board";
-import { createTask, transition, writeTask } from "../src/lib/task";
+import {
+  createPlannedTask,
+  type PlannedTaskInput,
+  type TaskState,
+  transition,
+  writeTask,
+} from "../src/lib/task";
 import { fixtureRepo } from "./fixtures";
 
-const SPEC = {
-  task: "board demo",
-  context: [],
-  success_criteria: ["x"],
-  oracle: { type: "command" as const, run: "true", expect: "exit 0" },
-  stop_rules: [],
-  out_of_scope: [],
-  scope: [],
-  assumptions: [],
-};
+const GOAL = "2026-01-01-board";
 
-const makeTask = (repo: string, sentence = "board demo") =>
-  createTask(repo, { ...SPEC, task: sentence }, ".sddx/specs/x.yaml", {
-    mode: "worktree",
-    branch: null,
-    base_sha: "0".repeat(40),
+function makeTask(repo: string, id: string, input: Partial<PlannedTaskInput> = {}): TaskState {
+  return createPlannedTask(repo, {
+    id,
+    title: "board demo",
+    goal_id: GOAL,
+    spec_path: `.sddx/specs/${GOAL}.md`,
+    oracle: { type: "command", run: "true", expect: "exit 0" },
+    scope: [],
+    assumptions: [],
+    depends_on: [],
+    ...input,
   });
+}
+
+/** Moves a task along legal transitions and saves it. */
+function advance(repo: string, t: TaskState, ...phases: TaskState["phase"][]): TaskState {
+  for (const p of phases) transition(t, p);
+  writeTask(repo, t);
+  return t;
+}
 
 describe("renderBoard", () => {
   test("empty state renders deterministically", () => {
@@ -34,149 +45,129 @@ describe("renderBoard", () => {
 
   test("byte-identical re-render with tasks, receipts, and allow entries", () => {
     const repo = fixtureRepo();
-    const t = makeTask(repo);
+    const t = makeTask(repo, "T1");
     t.allow.push("src/migration.sql");
     writeTask(repo, t);
-    makeTask(repo, "second thing");
+    makeTask(repo, "T2", { title: "second thing" });
     mkdirSync(join(repo, ".sddx", "receipts"), { recursive: true });
-    writeFileSync(
-      join(repo, ".sddx", "receipts", `${t.id}.json`),
-      JSON.stringify({ seq: 3 }, null, 2),
-    );
+    writeFileSync(join(repo, ".sddx", "receipts", "T1.json"), JSON.stringify({ seq: 3 }, null, 2));
     const a = renderBoard(repo);
     expect(a).toBe(renderBoard(repo));
     expect(a).toContain(
-      `| ${t.id} | Ready | — | board demo | worktree | 0 | #3 | src/migration.sql |`,
+      `| T1 | ${GOAL} | PLANNED | - | board demo | 1 | 0 | #3 | allow: src/migration.sql |`,
     );
+    expect(a).toContain(`| T2 | ${GOAL} | PLANNED | - | second thing | 1 | 0 | - | - |`);
     expect(a).not.toMatch(/\d{4}-\d{2}-\d{2}T/); // no timestamps anywhere
   });
 
   test("dependent row shows its parent and a blocked marker until the parent is DONE", () => {
     const repo = fixtureRepo();
-    const parent = makeTask(repo, "parent task");
-    const child = createTask(
-      repo,
-      { ...SPEC, task: "child task" },
-      ".sddx/specs/c.yaml",
-      {
-        mode: "deferred",
-        materialize_as: "worktree",
-        branch: null,
-        base_sha: `pending:${parent.id}`,
-      },
-      { dependsOn: parent.id },
-    );
+    const parent = makeTask(repo, "T1", { title: "parent task" });
+    makeTask(repo, "T2", { title: "child task", depends_on: ["T1"] });
 
     const blocked = renderBoard(repo);
-    expect(blocked).toContain("| Task | Status | Depends |");
-    expect(blocked).toContain(`⏸blocked-on-${parent.id}`);
-    // the child names its parent in the Depends column
-    expect(blocked).toMatch(new RegExp(`\\| ${child.id} \\|.*\\| ${parent.id} \\|`));
+    expect(blocked).toContain("| Task | Goal | State | Depends |");
+    expect(blocked).toContain(`| T2 | ${GOAL} | PLANNED blocked-on-T1 | T1 | child task |`);
 
-    // once the parent reaches DONE, the child is no longer blocked
-    transition(parent, "RED", { testExit: 1 });
-    transition(parent, "GREEN", { testExit: 0 });
-    transition(parent, "VERIFY");
-    transition(parent, "DONE", { internal: true });
-    writeTask(repo, parent);
-    expect(renderBoard(repo)).not.toContain("blocked-on-");
+    advance(repo, parent, "IN_PROGRESS", "IN_REVIEW", "DONE");
+    const unblocked = renderBoard(repo);
+    expect(unblocked).not.toContain("blocked-on-");
+    expect(unblocked).toContain(`| T2 | ${GOAL} | PLANNED | T1 | child task |`);
   });
 
-  test("worktree task row wins over workspace copy and uses worktree receipts", () => {
+  test("worktree task row wins over the main checkout copy and uses worktree receipts", () => {
     const repo = fixtureRepo();
-    const t = makeTask(repo); // workspace copy in PLAN
-    const wt = join(repo, ".sddx-worktrees", t.id);
+    const t = makeTask(repo, "T1"); // main checkout copy, PLANNED
+    const wt = join(repo, ".sddx-worktrees", "T1");
     mkdirSync(join(wt, ".sddx", "tasks"), { recursive: true });
     mkdirSync(join(wt, ".sddx", "receipts"), { recursive: true });
-    const live = { ...t, phase: "GREEN", workspace: { ...t.workspace, mode: "worktree" } };
-    writeFileSync(join(wt, ".sddx", "tasks", `${t.id}.json`), JSON.stringify(live, null, 2));
-    writeFileSync(join(wt, ".sddx", "receipts", `${t.id}.json`), JSON.stringify({ seq: 1 }));
+    const live = {
+      ...t,
+      phase: "IN_PROGRESS",
+      workspace: { branch: "sddx/T1", base_sha: "0".repeat(40), path: ".sddx-worktrees/T1" },
+    };
+    writeFileSync(join(wt, ".sddx", "tasks", "T1.json"), JSON.stringify(live, null, 2));
+    writeFileSync(join(wt, ".sddx", "receipts", "T1.json"), JSON.stringify({ seq: 1 }));
     const board = renderBoard(repo);
-    expect(board).toContain(`| ${t.id} | Running |`);
-    expect(board).toContain("| worktree |");
+    expect(board).toContain(`| T1 | ${GOAL} | IN_PROGRESS |`);
     expect(board).toContain("| #1 |");
-    expect(board).not.toContain("| Ready |");
+    expect(board).not.toContain("PLANNED");
   });
 
-  test("corrupt task file renders a flagged row, board still renders others", () => {
+  test("corrupt or sddx 5 task files render a flagged row, the board still renders others", () => {
     const repo = fixtureRepo();
-    const ok = makeTask(repo);
-    writeFileSync(join(repo, ".sddx", "tasks", "20260101-bad.json"), "{broken");
+    makeTask(repo, "T1");
+    writeFileSync(join(repo, ".sddx", "tasks", "BAD.json"), "{broken");
+    writeFileSync(
+      join(repo, ".sddx", "tasks", "OLD.json"),
+      JSON.stringify({ id: "OLD", phase: "RED", task: "v5 task" }),
+    );
     const board = renderBoard(repo);
-    expect(board).toContain("20260101-bad");
-    expect(board).toContain("UNREADABLE");
-    expect(board).toContain(ok.id);
+    expect(board).toContain("| BAD | - | UNREADABLE |");
+    expect(board).toContain("| OLD | - | UNREADABLE |");
+    expect(board).toContain(`| T1 | ${GOAL} | PLANNED |`);
   });
 });
 
-describe("five-status board (Ready / Running / Blocked / Skipped / Completed)", () => {
-  test("a mixed graph renders all five buckets plus a distinct Abandoned marker", () => {
+describe("state labels", () => {
+  test("a mixed goal renders every v6 state with its stuck, blocked and abandon notes", () => {
     const repo = fixtureRepo();
 
-    const ready = makeTask(repo, "ready root");
+    makeTask(repo, "READY", { title: "ready root" });
 
-    const running = makeTask(repo, "running root");
-    transition(running, "RED", { testExit: 1 });
-    writeTask(repo, running);
+    const running = makeTask(repo, "RUN", { title: "running root" });
+    advance(repo, running, "IN_PROGRESS");
 
-    const failedParent = makeTask(repo, "failed parent");
-    transition(failedParent, "RED", { testExit: 1 });
-    transition(failedParent, "ABANDONED");
-    writeTask(repo, failedParent);
+    const stuck = makeTask(repo, "STUCK", { title: "stuck root" });
+    stuck.stuck = { fingerprint: "f", count: 3, since: new Date(0).toISOString() };
+    advance(repo, stuck, "IN_PROGRESS");
 
-    // default policy (skip) — reacts to the failed parent by skipping
-    const skipped = createTask(
-      repo,
-      { ...SPEC, task: "skipped dependent" },
-      ".sddx/specs/skip.yaml",
-      {
-        mode: "deferred",
-        materialize_as: "worktree",
-        branch: null,
-        base_sha: `pending:${failedParent.id}`,
-      },
-      { dependsOn: failedParent.id },
-    );
+    const review = makeTask(repo, "REVIEW", { title: "in review" });
+    advance(repo, review, "IN_PROGRESS", "IN_REVIEW");
 
-    // block policy — stays blocked on the same failed parent instead
-    const blocked = createTask(
-      repo,
-      { ...SPEC, task: "blocked dependent", on_dependency_failure: "block" },
-      ".sddx/specs/block.yaml",
-      {
-        mode: "deferred",
-        materialize_as: "worktree",
-        branch: null,
-        base_sha: `pending:${failedParent.id}`,
-      },
-      { dependsOn: failedParent.id },
-    );
+    const failed = makeTask(repo, "FAILED", { title: "failed parent" });
+    failed.abandon_reason = "dead end";
+    advance(repo, failed, "IN_PROGRESS", "ABANDONED");
 
-    const completed = makeTask(repo, "completed root");
-    transition(completed, "RED", { testExit: 1 });
-    transition(completed, "GREEN", { testExit: 0 });
-    transition(completed, "VERIFY");
-    transition(completed, "DONE", { internal: true });
-    writeTask(repo, completed);
+    // skip policy (default): `task abandon` marks it ABANDONED with reason "skipped"
+    const skipped = makeTask(repo, "SKIPPED", { title: "skipped", depends_on: ["FAILED"] });
+    skipped.abandon_reason = "skipped";
+    advance(repo, skipped, "ABANDONED");
+
+    // block policy: stays PLANNED and blocked on the same failed parent
+    makeTask(repo, "BLOCKED", {
+      title: "blocked dependent",
+      depends_on: ["FAILED"],
+      on_dependency_failure: "block",
+    });
+
+    const done = makeTask(repo, "DONE1", { title: "completed root" });
+    advance(repo, done, "IN_PROGRESS", "IN_REVIEW", "DONE");
 
     const data = boardData(repo);
-    const statusOf = (id: string) => data.tasks.find((t) => t.id === id)?.status;
-    expect(statusOf(ready.id)).toBe("Ready");
-    expect(statusOf(running.id)).toBe("Running");
-    expect(statusOf(failedParent.id)).toBe("Abandoned");
-    expect(statusOf(skipped.id)).toBe("Skipped");
-    expect(statusOf(blocked.id)).toBe("Blocked");
-    expect(statusOf(completed.id)).toBe("Completed");
-
-    const skippedRow = data.tasks.find((t) => t.id === skipped.id)!;
-    expect(skippedRow.skippedOnId).toBe(failedParent.id);
-    const blockedRow = data.tasks.find((t) => t.id === blocked.id)!;
-    expect(blockedRow.blockedOnId).toBe(failedParent.id);
+    const row = (id: string) => data.tasks.find((t) => t.id === id);
+    expect(row("READY")).toMatchObject({ state: "PLANNED", label: "PLANNED", blockedOnId: null });
+    expect(row("RUN")).toMatchObject({ state: "IN_PROGRESS", label: "IN_PROGRESS" });
+    expect(row("STUCK")).toMatchObject({
+      state: "IN_PROGRESS",
+      label: "IN_PROGRESS stuck",
+      stuck: true,
+    });
+    expect(row("REVIEW")).toMatchObject({ state: "IN_REVIEW", label: "IN_REVIEW" });
+    expect(row("FAILED")).toMatchObject({ state: "ABANDONED", note: "dead end" });
+    expect(row("SKIPPED")).toMatchObject({ state: "ABANDONED", note: "skipped" });
+    expect(row("BLOCKED")).toMatchObject({
+      state: "PLANNED",
+      label: "PLANNED blocked-on-FAILED",
+      blockedOnId: "FAILED",
+    });
+    expect(row("DONE1")).toMatchObject({ state: "DONE", label: "DONE" });
 
     const rendered = renderBoard(repo);
-    expect(rendered).toContain(`| ${skipped.id} | Skipped skipped-on-${failedParent.id} |`);
-    expect(rendered).toContain(`| ${blocked.id} | Blocked ⏸blocked-on-${failedParent.id} |`);
-    expect(rendered).toContain(`| ${failedParent.id} | Abandoned |`);
+    expect(rendered).toContain(`| STUCK | ${GOAL} | IN_PROGRESS stuck |`);
+    expect(rendered).toContain(`| BLOCKED | ${GOAL} | PLANNED blocked-on-FAILED | FAILED |`);
+    expect(rendered).toMatch(/\| FAILED \| [^\n]* \| dead end \|/);
+    expect(rendered).toMatch(/\| SKIPPED \| [^|]+ \| ABANDONED \| FAILED \|[^\n]* \| skipped \|/);
   });
 });
 
@@ -188,12 +179,12 @@ describe("flagged worktrees", () => {
 
   test("skipped worktrees render as a flagged section, ordered by path", () => {
     const repo = fixtureRepo();
-    makeTask(repo);
+    makeTask(repo, "T1");
     writeSweepState(
       repo,
       JSON.stringify({
         skipped: [
-          { path: ".sddx-worktrees/b", reason: "phase RED" },
+          { path: ".sddx-worktrees/b", reason: "phase IN_PROGRESS" },
           { path: ".sddx-worktrees/a", reason: "dirty" },
         ],
       }),
@@ -202,7 +193,7 @@ describe("flagged worktrees", () => {
     expect(board).toContain("Flagged worktrees");
     expect(board.indexOf(".sddx-worktrees/a")).toBeLessThan(board.indexOf(".sddx-worktrees/b"));
     expect(board).toContain("dirty");
-    expect(board).toContain("phase RED");
+    expect(board).toContain("phase IN_PROGRESS");
     expect(renderBoard(repo)).toBe(board); // still byte-deterministic
   });
 
@@ -219,7 +210,7 @@ describe("flagged worktrees", () => {
 
   test("no section when sweep state is absent or empty", () => {
     const repo = fixtureRepo();
-    makeTask(repo);
+    makeTask(repo, "T1");
     expect(renderBoard(repo)).not.toContain("Flagged worktrees");
     writeSweepState(repo, JSON.stringify({ skipped: [] }));
     expect(renderBoard(repo)).not.toContain("Flagged worktrees");
@@ -227,10 +218,10 @@ describe("flagged worktrees", () => {
 
   test("corrupt sweep state is flagged without breaking the board", () => {
     const repo = fixtureRepo();
-    const ok = makeTask(repo);
+    makeTask(repo, "T1");
     writeSweepState(repo, "{broken");
     const board = renderBoard(repo);
-    expect(board).toContain(ok.id);
+    expect(board).toContain("| T1 |");
     expect(board).toContain("Flagged worktrees");
     expect(board).toContain("unreadable");
   });
@@ -239,7 +230,7 @@ describe("flagged worktrees", () => {
 describe("writeBoard", () => {
   test("writes once, then skips unchanged renders", () => {
     const repo = fixtureRepo();
-    makeTask(repo);
+    makeTask(repo, "T1");
     const first = writeBoard(repo);
     expect(first.changed).toBe(true);
     const mtime = statSync(first.path).mtimeMs;

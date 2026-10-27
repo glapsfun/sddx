@@ -1,12 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { auditReceipts } from "../src/audit";
-import { headSha } from "../src/lib/git";
-import { parseSpec } from "../src/lib/spec";
-import { createTask, transition, writeTask } from "../src/lib/task";
-import { verifyTask } from "../src/lib/verify";
 import { fixtureRepo } from "./fixtures";
+import { completeTask, createRun } from "./helpers";
 
 describe("audit --ci", () => {
   test("repo with no sddx activity passes clean", () => {
@@ -16,17 +13,12 @@ describe("audit --ci", () => {
 
   test("DONE task without a receipt fails only under --ci", () => {
     const cwd = fixtureRepo();
-    const spec = parseSpec(
-      "task: ci fixture\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: x\n",
-    ).spec!;
-    const t = createTask(cwd, spec, "s", {
-      mode: "worktree",
-      branch: null,
-      base_sha: headSha(cwd),
-    });
+    createRun(cwd, { tasks: [{ id: "T1" }] });
     // forge DONE without a receipt — exactly what the gate must catch
+    const path = join(cwd, ".sddx", "tasks", "T1.json");
+    const t = JSON.parse(readFileSync(path, "utf8")) as Record<string, unknown>;
     t.phase = "DONE";
-    writeTask(cwd, t);
+    writeFileSync(path, `${JSON.stringify(t, null, 2)}\n`);
     expect(auditReceipts(cwd).findings).toEqual([]);
     const findings = auditReceipts(cwd, { ci: true }).findings;
     expect(findings).toHaveLength(1);
@@ -35,21 +27,8 @@ describe("audit --ci", () => {
 
   test("a verified task passes under --ci", () => {
     const cwd = fixtureRepo();
-    const spec = parseSpec(
-      'task: ci ok\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\n',
-    ).spec!;
-    let t = createTask(cwd, spec, ".sddx/specs/x.yaml", {
-      mode: "worktree",
-      branch: null,
-      base_sha: headSha(cwd),
-    });
-    t = transition(t, "RED", { testExit: 1 });
-    t = transition(t, "GREEN", { testExit: 0 });
-    t = transition(t, "VERIFY");
-    t.evidence.oracle_red = { exit_code: 1, at: new Date(0).toISOString() };
-    writeTask(cwd, t);
-    writeFileSync(join(cwd, "impl.txt"), "code\n");
-    expect(verifyTask(cwd, t.id, { pluginVersion: "0.2.0" }).verdict).toBe("pass");
-    expect(auditReceipts(cwd, { ci: true }).findings).toEqual([]);
+    createRun(cwd, { tasks: [{ id: "T1" }] });
+    const { worktree } = completeTask(cwd, "T1");
+    expect(auditReceipts(worktree, { ci: true }).findings).toEqual([]);
   });
 });

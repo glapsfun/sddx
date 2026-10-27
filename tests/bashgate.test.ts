@@ -1,9 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { bashGate, checkBashCommand } from "../src/lib/bashgate";
-import { headSha } from "../src/lib/git";
-import { parseSpec } from "../src/lib/spec";
-import { createTask, transition, writeTask } from "../src/lib/task";
-import { fixtureRepo } from "./fixtures";
+import { recordTestRun } from "../src/lib/recorder";
+import { fixtureRepo, writeConfig } from "./fixtures";
+import { createRun, startTask } from "./helpers";
 
 const allow = (cmd: string) => checkBashCommand(cmd, []).allow;
 
@@ -47,36 +46,36 @@ describe("checkBashCommand", () => {
 });
 
 describe("bashGate resolution", () => {
-  function repoInRed() {
+  /** A strict-profile task started, with no failing test recorded yet. */
+  function strictWorktree(): string {
     const cwd = fixtureRepo();
-    const spec = parseSpec(
-      "task: gate fixture\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: x\n",
-    ).spec!;
-    let t = createTask(cwd, spec, "s", { mode: "worktree", branch: null, base_sha: headSha(cwd) });
-    t = transition(t, "RED", { testExit: 1 });
-    writeTask(cwd, t);
-    return { cwd, t };
+    writeConfig(cwd, { interaction_mode: "human", profile: "strict" });
+    createRun(cwd, { tasks: [{ id: "T1" }] });
+    return startTask(cwd, "T1");
   }
 
-  test("blocks unlisted commands pre-GREEN, names the task", () => {
-    const { cwd, t } = repoInRed();
-    const d = bashGate({ command: "sed -i '' s/a/b/ src/x.ts", cwd });
+  test("blocks unlisted commands before a failing test is recorded, names the task", () => {
+    const wt = strictWorktree();
+    const d = bashGate({ command: "sed -i '' s/a/b/ src/x.ts", cwd: wt });
     expect(d.allow).toBe(false);
-    if (!d.allow) expect(d.reason).toContain(t.id);
+    if (!d.allow) expect(d.reason).toContain("T1");
   });
 
-  test("lifts after GREEN and without a task", () => {
-    const { cwd, t } = repoInRed();
-    let task = { ...t };
-    task = transition(task, "GREEN", { testExit: 0 });
-    writeTask(cwd, task);
-    expect(bashGate({ command: "sed -i '' s/a/b/ x", cwd }).allow).toBe(true);
-    expect(bashGate({ command: "sed -i '' s/a/b/ x", cwd: fixtureRepo() }).allow).toBe(true);
+  test("lifts once tests have been seen failing, through GREEN, and without a task", () => {
+    const wt = strictWorktree();
+    expect(recordTestRun(wt, "bun test", 1).recorded).toBe("RED");
+    expect(bashGate({ command: "sed -i '' s/a/b/ x", cwd: wt }).allow).toBe(true);
+    expect(recordTestRun(wt, "bun test", 0).recorded).toBe("GREEN");
+    expect(bashGate({ command: "sed -i '' s/a/b/ x", cwd: wt }).allow).toBe(true);
+    const noTask = fixtureRepo();
+    writeConfig(noTask, { profile: "strict" });
+    expect(bashGate({ command: "sed -i '' s/a/b/ x", cwd: noTask }).allow).toBe(true);
   });
 
   test("SDDX_RED_BASH_ALLOW extends the list", () => {
-    const { cwd } = repoInRed();
+    const wt = strictWorktree();
+    expect(bashGate({ command: "jq . package.json", cwd: wt }, {}).allow).toBe(false);
     const env = { SDDX_RED_BASH_ALLOW: "jq" } as NodeJS.ProcessEnv;
-    expect(bashGate({ command: "jq . package.json", cwd }, env).allow).toBe(true);
+    expect(bashGate({ command: "jq . package.json", cwd: wt }, env).allow).toBe(true);
   });
 });

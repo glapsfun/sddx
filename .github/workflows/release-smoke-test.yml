@@ -49,93 +49,17 @@ jobs:
             exit 1
           }
 
-      - name: clean-machine quickstart (init -> PLAN -> RED -> GREEN -> VERIFY -> board/audit)
-        run: |
-          set -euo pipefail
-
-          demo="$(mktemp -d)"
-          cd "$demo"
-          git init -q -b main .
-          git config user.email smoke-test@example.com
-          git config user.name smoke-test
-          # graph create forks a worktree from HEAD, so the repo needs one commit
-          git commit --allow-empty -q -m init
-
-          # Set the project up the way a user does, then COMMIT the setup: a
-          # task's worktree is a checkout of a commit, so an uncommitted
-          # .sddx/config.json would not exist inside it.
-          sddx init --yes --runtime global --adapter claude
-          git add -A
-          git commit -q -m "chore: sddx init"
-          sddx doctor
-
-          mkdir -p specs
-          cat > specs/health.yaml <<'SPEC'
-          task: health endpoint returns ok
-          success_criteria:
-            - "bun test tests/health.test.ts exits 0"
-          scope:
-            - "tests/**"
-          oracle:
-            type: command
-            run: "bun test tests/health.test.ts"
-            expect: exit 0
-          SPEC
-
-          cat > graph.yaml <<'GRAPH'
-          schema_version: "1.0"
-          interaction_mode: human
-          goal: prove the release candidate
-          tasks:
-            - alias: health
-              spec: specs/health.yaml
-          GRAPH
-
-          sddx graph approve --graph graph.yaml
-          sddx graph create --graph graph.yaml --output json > create.json
-          id="$(node -p 'require("./create.json").data.taskIds[0]')"
-          [ -n "$id" ] || { echo "could not parse the created task id" >&2; exit 1; }
-          echo "task: $id"
-
-          # The task lives in its own worktree — that is where the loop runs.
-          cd ".sddx-worktrees/$id"
-
-          mkdir -p tests
-          cat > tests/health.test.ts <<'RED'
-          import { test, expect } from "bun:test";
-          test("health", () => { expect(false).toBe(true); });
-          RED
-
-          set +e
-          bun test tests/health.test.ts
-          red_exit=$?
-          set -e
-          [ "$red_exit" -ne 0 ] || { echo "expected the RED-phase test to fail" >&2; exit 1; }
-          sddx task phase "$id" RED --test-exit "$red_exit"
-          sddx red-check "$id"
-
-          cat > tests/health.test.ts <<'GREEN'
-          import { test, expect } from "bun:test";
-          test("health", () => { expect(true).toBe(true); });
-          GREEN
-
-          bun test tests/health.test.ts
-          sddx task phase "$id" GREEN --test-exit 0
-          sddx task phase "$id" VERIFY
-          sddx verify "$id"
-
-          sddx board
-          sddx audit
-          sddx doctor
+      - name: clean-machine lifecycle (spec -> plan -> task -> verify -> review -> audit)
+        run: sh scripts/smoke.sh
 
       - name: the tarball ships what the distribution model promises
         run: |
           set -euo pipefail
           pkg="$RUNNER_TEMP/global/lib/node_modules/@glapsfun/sddx"
-          for required in bin/sddx bin/sddx-run dist/cli.mjs templates/claude/hooks/hooks.json; do
+          for required in bin/sddx bin/sddx-run dist/cli.mjs; do
             [ -e "$pkg/$required" ] || { echo "missing from the tarball: $required" >&2; exit 1; }
           done
-          for forbidden in .claude-plugin dist/bootstrap.mjs dist/hooks.mjs openspec tests; do
+          for forbidden in .claude-plugin templates dist/bootstrap.mjs dist/hooks.mjs openspec tests; do
             [ ! -e "$pkg/$forbidden" ] || { echo "should not ship: $forbidden" >&2; exit 1; }
           done
           # Bun is the only supported runtime, and nothing may claim otherwise.

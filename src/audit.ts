@@ -10,6 +10,66 @@ import { approvalsDir, readApproval } from "./lib/approval";
 import { findGoalForTask } from "./lib/goal";
 import { receiptsDir, sha256, verifyChain } from "./lib/receipt";
 import { verifySignature } from "./lib/sign";
+import { resolveMainRepoRoot } from "./lib/worktree";
+
+/**
+ * What a version 5 receipt can and cannot show, stated per receipt. Human
+ * approval is provable only when the receipt claims a signed binding AND the
+ * approval token's signature verifies now; a reported harness and a reviewer
+ * name are claims, so they are labelled as reported and never as verified.
+ */
+function v5Claims(
+  root: string,
+  rel: string,
+  r: Record<string, unknown>,
+  findings: string[],
+  notes: string[],
+): void {
+  const a = r.approval as Record<string, unknown> | undefined;
+  if (a) {
+    const harness =
+      typeof a.harness_reported === "string"
+        ? `; harness ${a.harness_reported} (reported, not verified)`
+        : "";
+    if (a.mode === "auto") {
+      notes.push(`${rel}: ran in auto mode; no person approved this plan${harness}`);
+    } else if (a.binding === "signed") {
+      // the receipt carries the token's signature, so a clone without the token
+      // can still check it; only a signature that fails to verify is a finding
+      const signer = typeof a.signer === "string" ? a.signer : null;
+      const verdict =
+        signer && typeof a.signature === "string"
+          ? verifySignature(
+              root,
+              String(a.plan_sha256),
+              { signature: a.signature, signer },
+              "sddx-approval",
+            )
+          : "invalid";
+      if (verdict === "valid") {
+        notes.push(`${rel}: human approval provable, signed by ${signer}${harness}`);
+      } else if (verdict === "unverifiable") {
+        notes.push(
+          `${rel}: signed approval cannot be checked here: set gpg.ssh.allowedSignersFile to verify ${signer}'s signature; until then human approval is not provable${harness}`,
+        );
+      } else {
+        findings.push(
+          `${rel}: receipt claims a signed approval, but the signature it carries does not verify${harness}`,
+        );
+      }
+    } else {
+      notes.push(`${rel}: human approval not provable (approval was not signed)${harness}`);
+    }
+  }
+  const rv = r.review as Record<string, unknown> | undefined;
+  if (rv) {
+    const who =
+      rv.reviewer === null ? "an unnamed reviewer" : `reported reviewer ${String(rv.reviewer)}`;
+    notes.push(
+      `${rel}: review recorded by ${who} for diff ${String(rv.diff_sha256).slice(0, 12)} (a recorded review, not a verified one)`,
+    );
+  }
+}
 
 export interface AuditResult {
   receipts: number;
@@ -47,6 +107,7 @@ function auditApprovals(cwd: string, findings: string[], notes: string[]): void 
       } catch {
         continue; // chain verification already reports unparseable receipts
       }
+      if (r.version === 5) v5Claims(mainRoot(cwd), rel, r, findings, notes);
       const a = r.approval as Record<string, unknown> | undefined;
       // pre-v4 receipts predate provenance — skipped, never a finding
       if (!a) continue;
@@ -118,6 +179,14 @@ function auditApprovals(cwd: string, findings: string[], notes: string[]): void 
   }
 }
 
+function mainRoot(cwd: string): string {
+  try {
+    return resolveMainRepoRoot(cwd);
+  } catch {
+    return cwd;
+  }
+}
+
 export function auditReceipts(
   cwd: string,
   opts: { signatures?: boolean; ci?: boolean } = {},
@@ -152,7 +221,7 @@ export function auditReceipts(
     } catch {
       // chain verification already reports unreadable receipts
     }
-    if (raw !== null && raw.includes('"signature"')) {
+    if (raw?.includes('"signature"')) {
       let parsed: Record<string, unknown> | null = null;
       try {
         parsed = JSON.parse(raw) as Record<string, unknown>;

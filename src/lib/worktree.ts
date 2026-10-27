@@ -1,7 +1,6 @@
 import { spawnSync } from "node:child_process";
 import {
   appendFileSync,
-  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -12,29 +11,30 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, relative } from "node:path";
+import { hostname } from "node:os";
+import { basename, dirname, isAbsolute, join, relative } from "node:path";
 import { branchExists, forceDeleteBranch, git } from "./git";
 import { scopesOverlap } from "./glob-overlap";
 import {
-  assertAdvanceable,
   dependsOnList,
-  isDeferred,
   type Phase,
   resolveTaskState,
   retryPolicyOf,
   sddxDir,
   type TaskState,
-  writeTask,
 } from "./task";
 
 export const worktreesDir = (cwd: string): string => join(cwd, ".sddx-worktrees");
+
+/** Suffix of the throwaway worktree `sddx verify` runs the boundary proof in. */
+export const PROOF_SUFFIX = "--proof";
 
 export interface BaseRef {
   sha: string;
   source: "origin/HEAD" | "origin/main" | "origin/master" | "HEAD";
 }
 
-function tryRev(cwd: string, ref: string): string | null {
+export function tryRev(cwd: string, ref: string): string | null {
   const r = spawnSync("git", ["rev-parse", "--verify", "--quiet", ref], {
     cwd,
     encoding: "utf8",
@@ -62,7 +62,7 @@ export function resolveBaseRef(cwd: string): BaseRef {
   return { sha: git(cwd, "rev-parse", "HEAD"), source: "HEAD" };
 }
 
-const gitCommonDir = (cwd: string): string => {
+export const gitCommonDir = (cwd: string): string => {
   const dir = git(cwd, "rev-parse", "--git-common-dir");
   // Absolute already when run from inside a linked worktree; relative (".git")
   // when run from the main worktree.
@@ -140,9 +140,9 @@ export function createWorktree(cwd: string, id: string, baseSha: string): string
 
 /** Sequentially `git merge --no-ff` each remaining parent commit into whatever is
  * already checked out in `worktreePath` (the first parent's commit). Never an
- * octopus merge. Aborts and rethrows naming the failing SHA on conflict — a
- * conflict here means a gate blind spot (STRICT scope proof missed a shared
- * file), not something to auto-resolve. Returns the final commit SHA. */
+ * octopus merge. Aborts and rethrows naming the failing SHA on conflict: a
+ * conflict here means the scope proof missed a shared file, not something to
+ * auto-resolve. Returns the final commit SHA. */
 function mergeParentsSequential(worktreePath: string, remaining: readonly string[]): string {
   for (const sha of remaining) {
     const r = spawnSync("git", ["merge", "--no-ff", "-m", `sddx: merge dependency ${sha}`, sha], {
@@ -158,197 +158,90 @@ function mergeParentsSequential(worktreePath: string, remaining: readonly string
 }
 
 /**
- * Materialize a deferred dependent task's workspace once every named parent is
- * DONE. With one parent, the workspace forks directly from its DONE commit
- * (tip of `sddx/<parent-id>`) rather than origin/HEAD, so the dependent's
- * writes land on top of the parent's committed tree. With several parents
- * (fan-in), it forks from the first-listed parent's commit and sequentially
- * merges the rest in — safe by construction because `graph create`'s overlap
- * ⟹ ordered gate already proved every pair of co-parents has disjoint scope.
+ * Builds a PLANNED task's worktree and moves its state into it.
  *
- * Always a worktree: the task state and spec move into it (where
- * resolveTaskState finds the live copy first) and the deferred main-checkout
- * copies are removed. Fails loud — never forks from a wrong or partial base —
- * if any parent is not DONE, a parent's commit is unresolvable, or the merge
- * conflicts.
- *
- * A 3.x dependent recorded `materialize_as: "branch"` is refused rather than
- * quietly built as a worktree. This is the one legacy path the mode check alone
- * cannot see — a deferred task's `mode` is `"deferred"` — and converting it
- * would construct exactly the worktree that branch mode existed to avoid.
+ * A root task forks from its goal's run branch head, which already carries the
+ * plan commit (the spec) and every task merged so far. A dependent forks from
+ * its first parent's DONE commit and merges the rest in sequence, which is safe
+ * because plan check proved co-parents have disjoint scopes. A worktree kept by
+ * a `reuse` retry is reused as is. Fails loud, never forking from a wrong base.
  */
-export function materializeDependent(
-  cwd: string,
-  taskId: string,
-): { path: string; baseSha: string; mode: "worktree" } {
-  const task = resolveTaskState(cwd, taskId);
-  if (!task) throw new Error(`no such task: ${taskId}`);
-  assertAdvanceable(task);
-  const parentIds = dependsOnList(task);
-  if (parentIds.length === 0) {
-    throw new Error(`task ${taskId} has no depends_on to materialize from`);
+export function startTaskWorkspace(
+  root: string,
+  task: TaskState,
+  runBranch: string,
+): { path: string; baseSha: string; reused: boolean } {
+  const id = task.id;
+  const branch = `sddx/${id}`;
+  const existing = join(worktreesDir(root), id);
+  if (existsSync(existing) && branchExists(root, branch)) {
+    const base = task.workspace?.base_sha ?? git(existing, "rev-parse", "HEAD");
+    return { path: existing, baseSha: base, reused: true };
   }
-  const parentShas: string[] = [];
-  for (const parentId of parentIds) {
-    const parent = resolveTaskState(cwd, parentId);
-    if (!parent) throw new Error(`cannot materialize ${taskId}: parent ${parentId} not found`);
-    if (parent.phase !== "DONE") {
-      throw new Error(
-        `cannot materialize ${taskId}: parent ${parentId} is ${parent.phase}, not DONE`,
-      );
+  const parents = dependsOnList(task);
+  let forkSha: string;
+  let rest: string[] = [];
+  if (parents.length === 0) {
+    const sha = tryRev(root, `refs/heads/${runBranch}`);
+    if (!sha) throw new Error(`cannot start ${id}: run branch ${runBranch} does not exist`);
+    forkSha = sha;
+  } else {
+    const shas: string[] = [];
+    for (const parentId of parents) {
+      const sha = tryRev(root, `refs/heads/sddx/${parentId}`);
+      if (!sha) throw new Error(`cannot start ${id}: parent ${parentId}'s commit is unresolvable`);
+      shas.push(sha);
     }
-    const sha = tryRev(cwd, `refs/heads/sddx/${parentId}`) ?? tryRev(cwd, `sddx/${parentId}`);
-    if (!sha) {
-      throw new Error(
-        `cannot materialize ${taskId}: parent ${parentId}'s DONE commit is unresolvable`,
-      );
-    }
-    parentShas.push(sha);
+    forkSha = shas[0] as string;
+    rest = shas.slice(1);
   }
-  const forkSha = parentShas[0] as string;
-  const rest = parentShas.slice(1);
-
-  const path = createWorktree(cwd, taskId, forkSha);
-  let finalSha = forkSha;
+  const path = createWorktree(root, id, forkSha);
+  let baseSha = forkSha;
   if (rest.length > 0) {
     try {
-      finalSha = mergeParentsSequential(path, rest);
+      baseSha = mergeParentsSequential(path, rest);
     } catch (e) {
-      removeWorktreeForced(cwd, path);
+      removeWorktreeForced(root, path);
+      if (branchExists(root, branch)) forceDeleteBranch(root, branch);
       throw new Error(
-        `cannot materialize ${taskId}: fan-in merge conflict combining parents [${parentIds.join(", ")}] — ${(e as Error).message}`,
+        `cannot start ${id}: merging parents [${parents.join(", ")}] conflicted: ${(e as Error).message}`,
       );
     }
   }
-  // carry the spec into the new worktree, then write the updated task state there
-  const relSpec = task.spec_path;
-  const specSrc = join(cwd, relSpec);
-  if (existsSync(specSrc)) {
-    mkdirSync(join(sddxDir(path), "specs"), { recursive: true });
-    copyFileSync(specSrc, join(path, relSpec));
-  }
-  task.workspace = {
-    mode: "worktree",
-    branch: `sddx/${taskId}`,
-    base_sha: finalSha,
-    path: join(".sddx-worktrees", taskId),
-  };
-  writeTask(path, task);
-
-  // remove the deferred copies from the main checkout so the worktree is the only
-  // live source (resolveTaskState prefers the worktree copy regardless, but a
-  // lingering stale main-checkout file would confuse the board and sweep)
-  rmSync(join(cwd, ".sddx", "tasks", `${taskId}.json`), { force: true });
-  if (existsSync(specSrc)) rmSync(specSrc, { force: true });
-
-  return { path, baseSha: finalSha, mode: "worktree" };
+  return { path, baseSha, reused: false };
 }
 
 /**
- * Applies a task's `retry.workspace` policy after `abandonOrRetry` resets it to
- * PLAN for another attempt: `fresh` (default) discards the current worktree/
- * branch and re-forks from the same recorded base, so a dirty build or partial
- * edit from the failed attempt can't poison the next one; `reuse` leaves the
- * workspace untouched. `cwd` may be the task's own worktree (the common case —
- * `task phase <id> ABANDONED` runs from inside it); the main repo root is
- * resolved independently since a `fresh` retry is about to discard that very
- * directory. Also discards and re-materializes any dependent that had already
- * materialized against this task's prior (now-superseded) commit — recursively,
- * through its own dependents — never rebasing any of them.
+ * Applies a retry's `workspace` policy once `abandonOrRetry` returned the task to
+ * PLANNED. `fresh` discards the worktree and branch so a broken attempt cannot
+ * leak into the next one, and re-homes the state in the main checkout; `reuse`
+ * keeps both, and the state stays in the worktree for the next `task start`.
  */
-export function retryWorkspace(cwd: string, task: TaskState): void {
-  const policy = retryPolicyOf(task);
-  const root = resolveMainRepoRoot(cwd);
-  if (policy.workspace === "fresh") {
-    const branch = `sddx/${task.id}`;
-    if (task.workspace.path) {
-      const oldAbs = join(root, task.workspace.path);
-      const specAbs = join(oldAbs, task.spec_path);
-      const specBytes = existsSync(specAbs) ? readFileSync(specAbs) : null;
-      if (existsSync(oldAbs)) {
-        try {
-          removeWorktreeForced(root, oldAbs);
-        } catch {
-          // best-effort — a manually-removed or already-gone worktree is fine
-        }
-      }
-      if (branchExists(root, branch)) forceDeleteBranch(root, branch);
-      const newAbs = createWorktree(root, task.id, task.workspace.base_sha);
-      mkdirSync(join(sddxDir(newAbs), "tasks"), { recursive: true });
-      if (specBytes) {
-        mkdirSync(dirname(join(newAbs, task.spec_path)), { recursive: true });
-        writeFileSync(join(newAbs, task.spec_path), specBytes);
-      }
-      task.workspace = { ...task.workspace, path: relative(root, newAbs) };
-    }
-  }
-  rematerializeStaleDependents(root, task.id);
+export function releaseForRetry(root: string, task: TaskState): void {
+  if (retryPolicyOf(task).workspace === "reuse") return;
+  const branch = `sddx/${task.id}`;
+  const abs = join(worktreesDir(root), task.id);
+  if (existsSync(abs)) removeWorktreeForced(root, abs);
+  if (branchExists(root, branch)) forceDeleteBranch(root, branch);
+  task.workspace = undefined;
+  mkdirSync(join(sddxDir(root), "tasks"), { recursive: true });
 }
-
-const allKnownTaskIds = (cwd: string): string[] => {
-  const ids = new Set<string>();
-  const mainDir = join(cwd, ".sddx", "tasks");
-  if (existsSync(mainDir)) {
-    for (const f of readdirSync(mainDir)) if (f.endsWith(".json")) ids.add(f.slice(0, -5));
-  }
-  for (const id of worktreeIds(cwd)) ids.add(id);
-  return [...ids];
-};
-
-/** A dependent counts as already-materialized once it has a workspace. */
-const isMaterialized = (t: TaskState): boolean => !isDeferred(t);
 
 /**
- * After `retriedTaskId` produces a new commit, discard and re-materialize any
- * dependent whose workspace was already built from its earlier (now stale)
- * commit — recursing into that dependent's own already-materialized
- * dependents. Never rebases; always tears down and recreates via the same
- * fork-or-merge path `materializeDependent` uses for a first materialization.
+ * Anything uncommitted at all, `.sddx/` included. A live task's state file is
+ * uncommitted until finalize and a draft spec may be too, so neither may be
+ * treated as disposable; a finished task's worktree is clean because finalize
+ * commits its state and abandonment moves its state to the main checkout.
  */
-export function rematerializeStaleDependents(cwd: string, retriedTaskId: string): string[] {
-  const rebuilt: string[] = [];
-  for (const id of allKnownTaskIds(cwd)) {
-    if (id === retriedTaskId) continue;
-    const t = resolveTaskState(cwd, id);
-    if (!t) continue;
-    if (!dependsOnList(t).includes(retriedTaskId)) continue;
-    if (!isMaterialized(t)) continue; // not yet materialized — nothing to discard
-
-    const staleBranch = `sddx/${id}`;
-    if (t.workspace.path) {
-      const abs = join(cwd, t.workspace.path);
-      if (existsSync(abs)) {
-        try {
-          removeWorktreeForced(cwd, abs);
-        } catch {
-          // best-effort
-        }
-      }
-    }
-    // the stale branch must go too, or re-materializing via createWorktree
-    // would collide with the old tip
-    if (branchExists(cwd, staleBranch)) forceDeleteBranch(cwd, staleBranch);
-    // reset to deferred so materializeDependent treats it as a fresh dispatch
-    t.workspace = {
-      mode: "deferred",
-      materialize_as: "worktree",
-      branch: null,
-      base_sha: `pending:${dependsOnList(t).join(",")}`,
-    };
-    mkdirSync(join(cwd, ".sddx", "tasks"), { recursive: true });
-    writeTask(cwd, t); // re-home the state to the main checkout before rebuilding
-    materializeDependent(cwd, id);
-    rebuilt.push(id);
-    rebuilt.push(...rematerializeStaleDependents(cwd, id));
-  }
-  return rebuilt;
-}
-
 export const isDirty = (worktreePath: string): boolean =>
-  git(worktreePath, "status", "--porcelain") !== "";
+  git(worktreePath, "status", "--porcelain", "--untracked-files=all") !== "";
 
-/** Non-forced removal: git itself refuses when the worktree is dirty. */
+/** Unforced removal, so git refuses if anything was written after the caller's
+ * `isDirty` check. */
 export function removeWorktree(cwd: string, path: string): void {
+  if (isDirty(path)) {
+    throw new Error(`worktree ${path} has uncommitted changes`);
+  }
   git(cwd, "worktree", "remove", path);
   git(cwd, "worktree", "prune");
 }
@@ -366,6 +259,8 @@ export interface WorktreeInfo {
   path: string;
   branch: string | null;
   head: string | null;
+  /** The lock reason ("" when locked without one), or null when unlocked. */
+  locked: string | null;
 }
 
 export function listSddxWorktrees(cwd: string): WorktreeInfo[] {
@@ -380,7 +275,9 @@ export function listSddxWorktrees(cwd: string): WorktreeInfo[] {
   let current: Partial<WorktreeInfo> = {};
   for (const line of `${out}\n`.split("\n")) {
     if (line.startsWith("worktree ")) {
-      current = { path: line.slice("worktree ".length), branch: null, head: null };
+      current = { path: line.slice("worktree ".length), branch: null, head: null, locked: null };
+    } else if (line === "locked" || line.startsWith("locked ")) {
+      current.locked = line.slice("locked ".length);
     } else if (line.startsWith("HEAD ")) {
       current.head = line.slice("HEAD ".length);
     } else if (line.startsWith("branch ")) {
@@ -457,6 +354,52 @@ export function submoduleScopeConflicts(
   return conflicts;
 }
 
+/** Lock reason `sddx verify` gives its proof worktree, naming the process that owns it. */
+export const proofLockReason = (): string => `sddx verify pid ${process.pid} on ${hostname()}`;
+
+/**
+ * Whether the `sddx verify` that created a proof worktree may still be running,
+ * read from the lock reason it set. A lock from another host cannot be checked
+ * from here, and a lock sddx did not set is someone else's, so both count as
+ * live. An unlocked proof worktree has no owner.
+ */
+export function proofOwner(locked: string | null): { alive: boolean; pid?: number } {
+  if (locked === null) return { alive: false };
+  const m = /^sddx verify pid (\d+) on (.+)$/.exec(locked);
+  if (!m) return { alive: true };
+  const pid = Number(m[1]);
+  if (m[2] !== hostname()) return { alive: true, pid };
+  try {
+    process.kill(pid, 0);
+    return { alive: true, pid };
+  } catch (e) {
+    return { alive: (e as NodeJS.ErrnoException).code === "EPERM", pid };
+  }
+}
+
+/**
+ * Removes a scratch worktree sddx owns (a proof or integration checkout),
+ * whether or not git still tracks it. One whose admin entry was pruned, or whose
+ * `worktree add` died halfway, is a plain directory that `git worktree remove`
+ * refuses, and leaving it would fail every later command that needs the path.
+ */
+export function removeScratchWorktree(root: string, path: string): void {
+  // doubled --force also drops a locked entry whose directory is already gone,
+  // which `worktree prune` would keep
+  if (listSddxWorktrees(root).some((w) => w.path === path)) {
+    git(root, "worktree", "remove", "--force", "--force", path);
+  }
+  rmSync(path, { recursive: true, force: true });
+  git(root, "worktree", "prune");
+}
+
+/** A checkout sddx makes, under its goal lock, to merge into or revert on a run branch. */
+export const isRunBranchScratch = (path: string): boolean =>
+  basename(dirname(path)) === ".sddx-worktrees" && /^(integrate|revert)-/.test(basename(path));
+
+/** An untracked proof directory younger than this may be a `worktree add` in progress. */
+const PROOF_DIR_GRACE_MS = 60_000;
+
 const LOCK_STALE_MS = 10 * 60_000;
 
 export interface SweepResult {
@@ -493,15 +436,6 @@ function acquireLock(lockPath: string, now: number): boolean {
   }
 }
 
-function readWorktreeTask(worktreePath: string, id: string): TaskState | null {
-  const path = join(worktreePath, ".sddx", "tasks", `${id}.json`);
-  try {
-    return JSON.parse(readFileSync(path, "utf8")) as TaskState;
-  } catch {
-    return null;
-  }
-}
-
 const DISPOSABLE: ReadonlySet<Phase> = new Set(["DONE", "ABANDONED"]);
 
 /** Persist skip results for the board: repo-relative paths, sorted, timestamp-free. */
@@ -525,13 +459,34 @@ export function sweep(cwd: string, opts: { now?: number } = {}): SweepResult {
   const removed: string[] = [];
   const skipped: Array<{ path: string; reason: string }> = [];
   try {
-    for (const wt of listSddxWorktrees(cwd)) {
+    const listed = listSddxWorktrees(cwd);
+    for (const wt of listed) {
+      // A proof worktree holds nothing but a checkout of committed objects. It
+      // is removed only once the verify that owns it is gone: another session's
+      // sweep must not pull the directory out from under a running oracle.
+      if (wt.branch === null && wt.path.endsWith(PROOF_SUFFIX)) {
+        const owner = proofOwner(wt.locked);
+        if (owner.alive) {
+          skipped.push({
+            path: wt.path,
+            reason: owner.pid ? `verify running (pid ${owner.pid})` : "locked",
+          });
+          continue;
+        }
+        try {
+          removeScratchWorktree(cwd, wt.path);
+          removed.push(wt.path);
+        } catch (e) {
+          skipped.push({ path: wt.path, reason: `remove failed: ${(e as Error).message}` });
+        }
+        continue;
+      }
       const id = wt.branch?.replace(/^sddx\//, "");
       if (!id) {
         skipped.push({ path: wt.path, reason: "no sddx branch" });
         continue;
       }
-      const task = readWorktreeTask(wt.path, id);
+      const task = resolveTaskState(cwd, id);
       if (!task) {
         skipped.push({ path: wt.path, reason: "no readable task state" });
         continue;
@@ -553,6 +508,18 @@ export function sweep(cwd: string, opts: { now?: number } = {}): SweepResult {
         removed.push(wt.path);
       } catch (e) {
         skipped.push({ path: wt.path, reason: `remove failed: ${(e as Error).message}` });
+      }
+    }
+    const tracked = new Set(listed.map((w) => w.path));
+    for (const name of worktreeIds(cwd)) {
+      const path = join(worktreesDir(cwd), name);
+      if (!name.endsWith(PROOF_SUFFIX) || tracked.has(path)) continue;
+      try {
+        if (now - statSync(path).mtimeMs < PROOF_DIR_GRACE_MS) continue;
+        removeScratchWorktree(cwd, path);
+        removed.push(path);
+      } catch (e) {
+        skipped.push({ path, reason: `remove failed: ${(e as Error).message}` });
       }
     }
     // scan completed — record what was refused so the board can flag it

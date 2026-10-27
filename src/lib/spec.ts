@@ -8,6 +8,8 @@ export interface Oracle {
   expect: string;
   /** Verify executes the oracle this many times; every run must pass. Default 1. */
   runs?: number;
+  /** Runs in the proof worktree before each half of the boundary proof, e.g. a dependency install. */
+  setup?: string;
 }
 
 export type DependencyFailurePolicy = "skip" | "block";
@@ -41,7 +43,12 @@ export interface Spec {
   retry?: Partial<RetryPolicy>;
 }
 
-const ORACLE_TYPES: ReadonlySet<string> = new Set(["command", "test-suite", "browser", "manual"]);
+export const ORACLE_TYPES: ReadonlySet<string> = new Set([
+  "command",
+  "test-suite",
+  "browser",
+  "manual",
+]);
 
 function toList(v: unknown): string[] {
   if (Array.isArray(v)) return v.map(String);

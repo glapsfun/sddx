@@ -14,7 +14,7 @@ import {
   writeMemory,
 } from "../src/lib/globalstate";
 import { fixtureClone, fixtureRepo } from "./fixtures";
-import { repoRoot } from "./helpers";
+import { CLI, goalSpec, repoRoot, writeSpec } from "./helpers";
 
 /** An isolated `~/.sddx` per test — nothing here touches the real home. */
 function sddxHome(): NodeJS.ProcessEnv {
@@ -166,10 +166,15 @@ describe("never required for correctness", () => {
       "src/lib/stopgate.ts",
       "src/lib/bashgate.ts",
       "src/lib/approvalgate.ts",
-      "src/lib/redcheck.ts",
+      "src/lib/protectedpaths.ts",
+      "src/lib/proof.ts",
+      "src/lib/review.ts",
+      "src/lib/finalize.ts",
+      "src/lib/lifecycle.ts",
+      "src/lib/plan.ts",
+      "src/lib/goalspec.ts",
       "src/lib/oracle.ts",
       "src/lib/worktree.ts",
-      "src/lib/graph.ts",
       "src/lib/goal.ts",
       "src/tdd-gate.ts",
       "src/lib/hookdispatch.ts",
@@ -181,14 +186,34 @@ describe("never required for correctness", () => {
     }
   });
 
-  test("init still succeeds when the global root cannot be written", () => {
+  test("plan start still succeeds when the global root cannot be written", () => {
     const root = fixtureRepo();
-    const r = spawnSync(
-      "bun",
-      [join(repoRoot, "src/cli.ts"), "init", "--yes", "--runtime", "global"],
-      { cwd: root, encoding: "utf8", env: { ...process.env, SDDX_HOME: "/proc/nope/sddx" } },
-    );
-    expect(r.status).toBe(0);
+    const spec = writeSpec(root, "2026-01-01-test-goal", goalSpec({ tasks: [{ id: "T1" }] }));
+    const env = { ...process.env, NO_COLOR: "1", SDDX_HOME: "/proc/nope/sddx" };
+    for (const args of [
+      ["plan", "approve", spec],
+      ["plan", "start", spec],
+    ]) {
+      const r = spawnSync("bun", [CLI, ...args], { cwd: root, encoding: "utf8", env });
+      expect(r.status).toBe(0);
+    }
     expect(existsSync(join(root, ".sddx", "config.json"))).toBe(true);
+  });
+
+  test("plan start is what records the project", () => {
+    const env = sddxHome();
+    const root = fixtureRepo();
+    const spec = writeSpec(root, "2026-01-01-test-goal", goalSpec({ tasks: [{ id: "T1" }] }));
+    const run = (...args: string[]) =>
+      spawnSync("bun", [CLI, ...args], {
+        cwd: root,
+        encoding: "utf8",
+        env: { ...process.env, ...env },
+      });
+    expect(run("plan", "approve", spec).status).toBe(0);
+    expect(existsSync(join(projectDir(root, env), "metadata.json"))).toBe(false);
+    expect(run("plan", "start", spec).status).toBe(0);
+    const metadata = JSON.parse(readFileSync(join(projectDir(root, env), "metadata.json"), "utf8"));
+    expect(metadata.project_key).toBe(projectKey(root).key);
   });
 });

@@ -1,131 +1,56 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { headSha } from "../src/lib/git";
-import { createGoal } from "../src/lib/goal";
-import { type Receipt, validateReceipt } from "../src/lib/receipt";
-import { parseSpec } from "../src/lib/spec";
-import { createTask, transition, writeTask } from "../src/lib/task";
-import { verifyTask } from "../src/lib/verify";
-import { fixtureRepo } from "./fixtures";
+import { type Receipt, sha256, validateReceipt } from "../src/lib/receipt";
+import { fixtureRepo, writeConfig } from "./fixtures";
+import { completeTask, createRun } from "./helpers";
 
-const SPEC = (task: string, assumptions?: string[]) => `task: ${task}
-success_criteria:
-  - "it works"
-${assumptions ? `assumptions:\n${assumptions.map((a) => `  - "${a}"`).join("\n")}\n` : ""}oracle:
-  type: command
-  run: "true"
-`;
-
-/** A task driven to VERIFY, ready for verifyTask. */
-function readyTask(cwd: string, spec: string) {
-  const parsed = parseSpec(spec);
-  expect(parsed.errors).toEqual([]);
-  const t = createTask(cwd, parsed.spec as NonNullable<typeof parsed.spec>, ".sddx/specs/x.yaml", {
-    mode: "worktree",
-    branch: null,
-    base_sha: headSha(cwd),
+/** One finished task in a goal run under `mode`, with its receipt and plan hash. */
+function finishedRun(mode: "human" | "auto", assumptions?: string[]) {
+  const cwd = fixtureRepo();
+  if (mode === "auto") writeConfig(cwd, { interaction_mode: "auto" });
+  const run = createRun(cwd, {
+    tasks: [{ id: "T1" }],
+    ...(assumptions ? { assumptions } : {}),
+    approve: mode === "human",
   });
-  let cur = transition(t, "RED", { testExit: 1 });
-  cur = transition(cur, "GREEN", { testExit: 0 });
-  cur = transition(cur, "VERIFY");
-  cur.evidence.oracle_red = { exit_code: 1, at: new Date(0).toISOString() };
-  writeTask(cwd, cur);
-  return cur;
+  const { receiptPath } = completeTask(cwd, "T1");
+  return {
+    receipt: JSON.parse(readFileSync(receiptPath, "utf8")) as Receipt,
+    planSha: sha256(readFileSync(join(cwd, run.specPath))),
+  };
 }
 
-const verify = (cwd: string, id: string) =>
-  verifyTask(cwd, id, { harness: "test", model: null, pluginVersion: "test" });
-
-describe("receipt v4 approval provenance", () => {
+describe("receipt approval provenance", () => {
   test("a goal task's receipt carries mode and plan hash", () => {
-    const cwd = fixtureRepo();
-    const t = readyTask(cwd, SPEC("do the widget work"));
-    createGoal(cwd, "ship the widget", [t.id], {
-      runBranch: "sddx/run-x",
-      baseSha: headSha(cwd),
-      approval: { mode: "auto", plan_sha256: "a".repeat(64), at: new Date().toISOString() },
-    });
-
-    const res = verify(cwd, t.id);
-    expect(res.verdict).toBe("pass");
-    const r = JSON.parse(
-      readFileSync(join(cwd, ".sddx", "receipts", `${t.id}.json`), "utf8"),
-    ) as Receipt;
-    expect(r.version).toBe(4);
+    const { receipt: r, planSha } = finishedRun("auto");
+    expect(r.version).toBe(5);
     expect(r.approval?.mode).toBe("auto");
-    expect(r.approval?.plan_sha256).toBe("a".repeat(64));
+    expect(r.approval?.plan_sha256).toBe(planSha);
     expect(r.approval?.amendments).toEqual([]);
     expect(validateReceipt(r)).toEqual([]);
   });
 
   test("the receipt is interpretable without opening the goal file", () => {
-    const cwd = fixtureRepo();
-    const t = readyTask(cwd, SPEC("do the widget work", ["the project uses Vite"]));
-    createGoal(cwd, "ship the widget", [t.id], {
-      runBranch: "sddx/run-x",
-      baseSha: headSha(cwd),
-      approval: { mode: "human", plan_sha256: "b".repeat(64), at: new Date().toISOString() },
-    });
-    verify(cwd, t.id);
-
-    const r = JSON.parse(
-      readFileSync(join(cwd, ".sddx", "receipts", `${t.id}.json`), "utf8"),
-    ) as Receipt;
+    const { receipt: r, planSha } = finishedRun("human", ["the project uses Vite"]);
     // everything needed to state the conditions of verification, in one file
     expect(r.approval?.mode).toBe("human");
-    expect(r.approval?.plan_sha256).toBe("b".repeat(64));
+    expect(r.approval?.plan_sha256).toBe(planSha);
     expect(r.approval?.assumptions).toEqual(["the project uses Vite"]);
   });
 
   test("auto-mode work is permanently marked", () => {
-    const cwd = fixtureRepo();
-    const t = readyTask(cwd, SPEC("do the widget work"));
-    createGoal(cwd, "ship the widget", [t.id], {
-      runBranch: "sddx/run-x",
-      baseSha: headSha(cwd),
-      approval: { mode: "auto", plan_sha256: "c".repeat(64), at: new Date().toISOString() },
-    });
-    verify(cwd, t.id);
-    const r = JSON.parse(
-      readFileSync(join(cwd, ".sddx", "receipts", `${t.id}.json`), "utf8"),
-    ) as Receipt;
+    const { receipt: r } = finishedRun("auto");
     expect(r.approval?.mode).toBe("auto");
+    expect(r.approval?.authorization).toBe("auto");
+    expect(r.approval?.binding).toBe("unsigned");
   });
 
-  test("a goal-less task omits approval and stays valid at v3", () => {
-    const cwd = fixtureRepo();
-    const t = readyTask(cwd, SPEC("do the standalone work"));
-    const res = verify(cwd, t.id);
-    expect(res.verdict).toBe("pass");
-    const r = JSON.parse(
-      readFileSync(join(cwd, ".sddx", "receipts", `${t.id}.json`), "utf8"),
-    ) as Receipt;
-    expect(r.approval).toBeUndefined();
-    expect(validateReceipt(r)).toEqual([]);
-  });
-
-  test("degradation from auto to human is recorded on the receipt", () => {
-    const cwd = fixtureRepo();
-    const t = readyTask(cwd, SPEC("do the widget work"));
-    createGoal(cwd, "ship the widget", [t.id], {
-      runBranch: "sddx/run-x",
-      baseSha: headSha(cwd),
-      approval: {
-        mode: "human",
-        requested_mode: "auto",
-        degraded_reason: "plan has 9 nodes, over the auto_max_tasks ceiling of 6",
-        plan_sha256: "d".repeat(64),
-        at: new Date().toISOString(),
-      },
-    });
-    verify(cwd, t.id);
-    const r = JSON.parse(
-      readFileSync(join(cwd, ".sddx", "receipts", `${t.id}.json`), "utf8"),
-    ) as Receipt;
-    expect(r.approval?.mode).toBe("human");
-    expect(r.approval?.requested_mode).toBe("auto");
-    expect(r.approval?.degraded_reason).toContain("auto_max_tasks");
+  test("a version 5 receipt without approval is invalid: every task belongs to a goal", () => {
+    const { receipt } = finishedRun("human");
+    expect(validateReceipt({ ...receipt, approval: undefined })).toContain(
+      "approval: missing or invalid",
+    );
   });
 });
 
@@ -218,10 +143,38 @@ describe("receipt schema back-compatibility", () => {
       { mode: "human", plan_sha256: "nothex", assumptions: [], amendments: [] },
       { mode: "human", plan_sha256: "a".repeat(64), assumptions: "no", amendments: [] },
       { mode: "human", plan_sha256: "a".repeat(64), assumptions: [], amendments: ["x"] },
+      // the binding is a version 5 field; a v4 receipt claiming one is forged
+      {
+        mode: "human",
+        plan_sha256: "a".repeat(64),
+        assumptions: [],
+        amendments: [],
+        binding: "signed",
+      },
     ]) {
       const errs = validateReceipt({ ...base, version: 4, ...v3runs, approval: bad });
       expect(errs.join("\n")).toContain("approval");
     }
+  });
+
+  test("a historical v4 receipt recording a degraded run still validates", () => {
+    // Nothing writes requested_mode/degraded_reason any more (an auto plan over a
+    // bound is refused), but receipts on disk carry them and must keep auditing.
+    expect(
+      validateReceipt({
+        ...base,
+        version: 4,
+        ...v3runs,
+        approval: {
+          mode: "human",
+          requested_mode: "auto",
+          degraded_reason: "plan has 9 nodes, over the auto_max_tasks ceiling of 6",
+          plan_sha256: "d".repeat(64),
+          assumptions: [],
+          amendments: [],
+        },
+      }),
+    ).toEqual([]);
   });
 
   test("v4 without approval is valid — a goal-less task", () => {

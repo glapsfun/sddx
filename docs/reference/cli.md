@@ -1,52 +1,76 @@
 # CLI reference
 
-`sddx` is `bin/sddx-run dist/cli.mjs`: a Bun-required launcher executing a
-dependency-free bundle. Run it from the root of the
-repository you're working in — all paths (`.sddx/`, worktrees) resolve against
-the current directory.
+`sddx` runs a dependency-free bundle under Bun. Run it from anywhere inside the
+repository you are working in: paths resolve against the main repository root,
+including when you call it from inside a task's worktree.
 
 ```
 usage:
-  sddx task phase <id> <PHASE> [--test-exit <n>]
-  sddx task allow <id> <path>
+  sddx spec check <spec.md>
+  sddx plan check <spec.md>
+  sddx plan approve <spec.md> [--harness <name>]
+  sddx plan start <spec.md>
+  sddx task ready --goal <goal-id>
+  sddx task start <id>
+  sddx task abandon <id> --reason <text>
   sddx task show <id>
-  sddx red-check <id>
-  sddx verify <id> [--model <m>] [--harness <h>]
-  sddx goal show <id>
-  sddx graph create --graph <path> [--dry-run]
-  sddx graph approve --graph <path>
-  sddx graph regenerate --graph <path>
-  sddx graph cancel --graph <path>
-  sddx pr create --goal <goal-id> [--title <title>]
+  sddx verify <id>
+  sddx review record <id> --verdict <pass|fail> [--findings <file>] [--reviewer <name>]
+                     [--harness <name>] [--model <name>]
+  sddx goal show <goal-id>
   sddx run report --goal <goal-id>
+  sddx pr create --goal <goal-id> [--title <title>]
+  sddx next-actions --goal <goal-id> [--select <reply>]
   sddx board
   sddx audit [--signatures] [--ci]
   sddx cleanup <id>
   sddx sweep
+  sddx config show
+  sddx config validate
+  sddx doctor
+  sddx migrate [--yes]
+strict profile only:
+  sddx task phase <id> <RED|GREEN> --test-exit <n>
+  sddx task allow <id> <path>
 ```
 
-Exit codes across all commands: `0` success, `1` operation failed (spec
-rejected, oracle failed, audit findings, refused cleanup), `2` usage error
-(unknown command/flag, missing argument), `3` **approval required** (`graph
-create` in `human` mode with no valid approval token — nothing was written).
-Exit codes never depend on `--output` — the same command run with a different
-output format always exits the same way.
+Exit codes, for every command: `0` success, `1` the operation failed or was
+refused, `2` usage error (unknown command or flag, missing argument, a command
+that does not exist in the current profile), `3` approval required (`plan
+start` in `human` mode with no approval token for the plan; nothing was
+written). Exit codes never depend on `--output`.
+
+A repository still holding sddx 5 state (a `schema_version` 1.x config, or a
+v5 task file) is refused by every command except `migrate`, `audit` and
+`doctor`, with a pointer to [sddx migrate](#sddx-migrate).
+
+## The lifecycle at a glance
+
+```
+ spec check -> plan check -> plan approve -> plan start
+                                               |
+                         task ready / task start <id>       (PLANNED -> IN_PROGRESS)
+                                               |
+                                verify <id>                 (IN_PROGRESS -> IN_REVIEW)
+                                               |
+                  review record <id> --verdict pass         (IN_REVIEW -> DONE: receipt, commit, merge)
+                  review record <id> --verdict fail         (IN_REVIEW -> IN_PROGRESS)
+```
+
+`task abandon` moves any unfinished task to `ABANDONED`, or back to `PLANNED`
+when its retry policy has attempts left. `DONE` and `ABANDONED` are terminal.
+There is no command that sets an arbitrary state.
 
 ## Output formats
 
-Every command accepts two global flags, in addition to its own:
+Every command accepts two global flags:
 
-- `--output <terminal|json|markdown|all>` (default `terminal`) — selects how
-  the command's result is rendered. An unrecognized value exits 2 naming the
-  accepted set.
-- `--no-color` — disables ANSI color in terminal output (also honored via the
-  `NO_COLOR` environment variable, and automatically when stdout isn't a TTY).
+- `--output <terminal|json|markdown|all>` (default `terminal`). An
+  unrecognized value exits 2.
+- `--no-color` disables ANSI color (also honored via `NO_COLOR`, and automatic
+  when stdout is not a TTY).
 
-`terminal` (the default) is unchanged from earlier sddx releases: plain,
-human-readable text, colorized only when attached to a TTY.
-
-`json` emits exactly one JSON object to stdout, versioned independently of
-the package version:
+`json` emits exactly one versioned envelope on stdout:
 
 ```json
 {
@@ -56,69 +80,126 @@ the package version:
   "data": { "...": "command-specific payload" },
   "warnings": [],
   "errors": [],
-  "metadata": { "plugin_version": "1.2.0", "harness": "claude-code", "messages": [] }
+  "metadata": { "plugin_version": "6.0.0", "harness": "unknown", "messages": [] }
 }
 ```
 
-`schema_version`'s minor component increases for additive fields; its major
-component increases only for a removed/renamed field or a type change — safe
-to depend on for automation and AI agents parsing sddx output. `data` holds
-the same information a human would read in terminal mode, just structured
-per command (see each command's section below for its shape).
+The minor part of `schema_version` grows for additive fields; the major part
+only for a removed or renamed field. `markdown` renders the same result as a
+report. `all` prints terminal output and also writes `sddx-<command>.json` and
+`sddx-<command>.md`. The format never changes what a command does.
 
-`markdown` emits a report — execution summary, task/receipt results (when
-the command has any), warnings/errors, and a raw-data block — suitable for
-pasting into a PR description or doc. `json` and `markdown` are always
-built from the exact same result a given command run produced: selecting an
-output format never changes what a command actually does, only how the
-outcome is displayed.
-
-`all` prints `terminal` to stdout as usual, and additionally writes
-`sddx-<command>.json` and `sddx-<command>.md` to the current directory
-(never overwriting an existing file — a numeric suffix is appended instead),
-printing both paths as a final line.
-
-## Creating tasks
-
-There is no `sddx task create`. **`sddx graph create` is the only creation
-surface**, and a single task is a one-node graph. Every task therefore belongs
-to a goal and forks its own worktree from that goal's run branch — there is no
-workspace strategy to choose, because worktree is the invariant.
-
-`sddx task create` and `sddx goal create` were removed in 4.0. Both still
-resolve as commands and exit non-zero naming their replacement, rather than
-falling through to a usage dump. See
-[migrate-to-v4.md](../how-to/migrate-to-v4.md).
-
-## sddx task phase
+## sddx spec check
 
 ```sh
-sddx task phase <id> <PHASE> [--test-exit <n>]
+sddx spec check .sddx/specs/2026-10-26-rate-limit.md
 ```
 
-Requests a phase transition on `.sddx/tasks/<id>.json`. Transitions demand
-evidence: `RED` requires `--test-exit` with a **non-zero** value (a passing
-test is not RED), `GREEN` requires `--test-exit 0`. Invalid transitions exit 1
-with the reason. Prints `<id> phase=<PHASE>`. Inside a Claude Code session the
-recorder hook usually does this for you from observed test runs
-([hooks.md](hooks.md)).
+Validates a goal spec and writes nothing. Exits 0 with status `ready`, or
+status `draft` while `### Open decisions` has items (those are listed as
+warnings). Exits 1 listing every error as `path:line: message`; with
+`--output json` the same errors are under `data.errors` as
+`{message, path, line}`. The format is in [spec-reference.md](spec-reference.md).
 
-## sddx task allow
+## sddx plan check
 
 ```sh
-sddx task allow <id> <path>
+sddx plan check <spec.md>
 ```
 
-Grants the sole, audited TDD-gate exemption: the exact path is appended to the
-task's allow list, shown on the board, and copied into the receipt at
-verification. Prints the full list: `<id> allow=[…]`.
+Everything `plan approve` and `plan start` would check, and nothing written:
+the spec itself, at least one task, known and acyclic dependencies, disjoint
+scopes for tasks that can run at the same time, an empty Open decisions list,
+task ids not used by any existing task, branch, worktree or receipt, no
+existing goal or run branch for this spec, and worktree preconditions (git can
+create worktrees; no task's scope reaches a submodule). On success it prints
+the plan hash, goal id, base commit, run branch, each task with its scope and
+oracle, the interaction mode and whether the plan is already approved.
 
-**Refused in `auto` mode.** The allow list is the only escape hatch from the TDD
-gate, so an unattended run that could widen it would have no gate. This is an
-absolute invariant, not a threshold: granting an exemption requires a human in
-both modes. Set `interaction_mode: "human"` in `.sddx/config.json` to grant it
-(there is no `--mode` flag, and no environment override — see
-[config.md](config.md#the-two-gate-keys-are-config-only-on-purpose)).
+The plan hash is the sha256 of the spec file's bytes. Any edit, prose included,
+is a different plan.
+
+## sddx plan approve
+
+```sh
+sddx plan approve <spec.md> [--harness <name>]
+```
+
+Runs `plan check` first and refuses an invalid plan. Writes the approval token
+`.sddx/approvals/<plan-hash>.json`, recording `mode: human`, the time, and the
+reported harness when `--harness` is given. When git is configured for SSH
+signing (`gpg.format ssh`, `user.signingkey`), the token is signed under the
+`sddx-approval` namespace; a signed token is what makes human approval provable
+in `sddx audit`. In `auto` mode a plan that breaks an autonomy bound is refused
+here too, so approving never produces a token the start would reject.
+
+## sddx plan start
+
+```sh
+sddx plan start <spec.md>
+```
+
+In `human` mode, refuses with exit 3 unless an approval token exists for the
+spec's current hash. In `auto` mode, refuses with exit 1 when any autonomy
+bound is exceeded (a manual oracle, a task with no scope, a scope reaching
+sddx's own enforcement paths or a protected area, a non-empty Open decisions
+list, more tasks than `auto_max_tasks`), with a structured blocker under
+`data.blocker`. The mode comes from `.sddx/config.json` only. See
+[interaction-modes.md](../explanation/interaction-modes.md).
+
+On success, all or nothing:
+
+- the run branch `sddx/run-<goal-id>` at the base commit, plus one commit on it
+  holding the exact spec bytes that were approved;
+- one `PLANNED` task file per task in `.sddx/tasks/` of the main checkout;
+- the goal record in the git ref `refs/sddx/goals/<goal-id>`;
+- `.sddx/config.json` with defaults, when the repository has none.
+
+No worktree is created here. Running `plan start` again for the same spec
+exits 1 naming the existing goal.
+
+## sddx task ready
+
+```sh
+sddx task ready --goal <goal-id>
+```
+
+Lists the goal's `PLANNED` tasks whose dependencies are all `DONE`, one per
+line (`data.ready` in JSON), so an orchestrator can start them at the same
+time. Lists nothing while the goal is halted by a `block` policy.
+
+## sddx task start
+
+```sh
+sddx task start <id>
+```
+
+Requires `PLANNED` and every dependency `DONE`. Creates the worktree
+`.sddx-worktrees/<id>` on branch `sddx/<id>`: a root task forks from the run
+branch head, a dependent from its first parent's `DONE` commit with the other
+parents merged in. A worktree kept by a `reuse` retry is reused. Moves the task
+file into the worktree, records the effective profile on the task, sets
+`IN_PROGRESS`, and prints the absolute worktree path. Refuses, naming the
+reason, when a dependency is not `DONE` or the goal is halted.
+
+## sddx task abandon
+
+```sh
+sddx task abandon <id> --reason "<why>"
+```
+
+Records the reason. When a started task's `retry.max_attempts` allows another
+attempt, the task returns to `PLANNED` with its attempt count increased: a
+`fresh` retry removes the worktree and branch, a `reuse` retry keeps them. A
+task that never started has no attempt to retry, so it is abandoned directly.
+Otherwise the task becomes `ABANDONED`, and every `PLANNED` descendant with
+`on_dependency_failure: skip` (the default) becomes `ABANDONED` with reason
+`skipped` and `skipped_on` naming the abandoned dependency. A descendant with
+`block` halts the whole goal: no further task in it can start.
+
+An abandoned task's state moves to the main checkout's `.sddx/tasks/`, so the
+record survives when its worktree is cleaned up. The worktree keeps any
+uncommitted work, and is removed only once it is clean.
 
 ## sddx task show
 
@@ -126,209 +207,85 @@ both modes. Set `interaction_mode: "human"` in `.sddx/config.json` to grant it
 sddx task show <id>
 ```
 
-Prints the task state file as JSON — phase, workspace, base SHA, allow list,
-iteration count, timestamps.
-
-## sddx red-check
-
-```sh
-sddx red-check <id>
-```
-
-Runs the task's oracle during RED and records its failure
-(`evidence.oracle_red`). Exits 1 if the oracle passes — a pre-passing oracle
-proves nothing and the spec must be fixed. `sddx verify` refuses tasks whose
-`oracle_red` is missing or dated after the first GREEN.
+Prints the task's state file as JSON, wherever it currently lives (its
+worktree, the main checkout, or its branch tip after the worktree was swept).
 
 ## sddx verify
 
 ```sh
-sddx verify <id> [--model <m>] [--harness <h>]
+sddx verify <id>
 ```
 
-Executes the spec's oracle and settles the task. On success: writes the
-hash-chained receipt, makes the atomic commit (code + spec + receipt), and
-prints `verdict=pass receipt=<path> commit=<sha> duration_ms=<n>`. If the task
-belongs to a goal, this same command then merges its commit into that goal's
-run branch automatically (`git merge --no-ff`, never a cherry-pick, no
-confirmation asked) and prints a second line: `integrated: merged into
-<run-branch> (<merge-sha>)`, or, on conflict, a loud error naming the task as
-verified-but-not-integrated — the task's own `DONE` phase and receipt are
-unaffected either way. On failure: prints `verdict=fail oracle_exit=<code>
-duration_ms=<n> iterations=<n>` and exits 1 — **no receipt is written for a
-failed verification.** `--model`/`--harness` are recorded in the receipt for
-provenance ([receipts-schema.md](receipts-schema.md)).
+Requires `IN_PROGRESS`, a non-manual oracle, the same profile the task was
+started under, and a task file whose `oracle` and `scope` match the approved
+spec. It records the worktree's content as a git tree (without touching the
+worktree's files or index), refuses any change under `.sddx/` and
+implementation changes outside the task's `scope`, then runs the boundary proof
+in a throwaway proof worktree:
+the oracle must **fail** on the base commit plus only the changed test files,
+and **pass** `runs` times on the verified tree. See
+[verification.md](verification.md).
 
-## sddx board
+A pass moves the task to `IN_REVIEW`, prints the verified tree, and writes the
+proof record that `review record` trusts to `.git/sddx-proofs/<id>.json`;
+nothing is committed and no receipt is written yet. A failure leaves the task
+`IN_PROGRESS`, records which half failed with its exit code, and exits 1. The
+same failure `stuck_threshold` times in a row marks the task stuck; reaching
+`max_iterations_default` (verify runs plus failed reviews) asks for a person.
+
+## sddx review record
 
 ```sh
-sddx board
+sddx review record <id> --verdict pass --reviewer critic
+sddx review record <id> --verdict fail --findings review.md
 ```
 
-Regenerates the deterministic `.sddx/BOARD.md` rollup and prints its path
-(suffixed `(unchanged)` when the content didn't move). Never hand-edit the
-board — regenerate it.
+Requires `IN_REVIEW`, and the proof record `verify` wrote for the task's
+current attempt (the task file's own `verified` block is never trusted). A
+`fail` verdict needs `--findings` (exit 2 otherwise).
 
-## sddx audit
+First the worktree's content is compared with the tree `verify` proved. If
+anything changed, the review is refused, the task returns to `IN_PROGRESS`, and
+the command exits 1: a review must cover exactly what gets merged. Otherwise the
+review entry stores the sha256 of the verified diff, the findings file's hash,
+and the reviewer as reported.
 
-```sh
-sddx audit [--signatures] [--ci]
-```
+- `fail`: the task returns to `IN_PROGRESS`; the review counts toward the
+  iteration limit.
+- `pass`: the task is finalized. One commit on the task's branch holds the
+  verified tree plus exactly two files, the task state and a version 5 receipt
+  (see [receipts-schema.md](receipts-schema.md)); that commit is merged into the
+  run branch with `git merge --no-ff`, and the task is `DONE`. A merge conflict
+  is aborted, leaves the run branch unchanged, is recorded in the goal's merge
+  log, and is reported with the conflicting paths.
 
-Re-walks and re-hashes the receipt chain and checks commit bindings;
-`--signatures` additionally verifies task-commit signatures. `--ci` also
-fails when a task marked `DONE` has no receipt (tamper-only CI gate — see
-[receipts-schema.md](receipts-schema.md)). Prints one line per finding
-to stderr and exits 1 on any finding — CI-friendly. Clean run:
-`audit: <n> receipt(s) verified, chain intact`.
+The finalize commit is built from the proven tree with git plumbing, never by
+staging the worktree, so a later edit, a stray file under `.sddx/`, or a
+`pre-commit` hook cannot put unproven content in it. Hooks do not run on sddx's
+commits or merges: run formatters and linters before `verify`, or make them
+part of the oracle. Commit signing still applies when `commit.gpgSign` is set.
 
-## Goal records
+Nothing is written until that commit exists. If it cannot be made (a failing
+signer, say), or the run branch is checked out in another worktree, the command
+exits 1 and the task stays `IN_REVIEW` with no receipt; fix the cause and record
+the review again. If the merge itself then fails for another reason, the task is
+`DONE` and committed on `sddx/<id>`, the run branch is unchanged, and the output
+says how to merge it by hand.
 
-Goals are created by `graph create`, which registers the goal and its run
-branch (`sddx/run-<goal-id>`, forked from the resolved `origin/HEAD`) **before**
-any task workspace exists. `sddx pr create --goal <goal-id>` later reads that
-record to know what to push.
-
-The removed `sddx goal create` assembled already-created tasks into a goal
-*after* execution had begun, producing a run branch that did not exist when
-those tasks started and whose base could not describe them — so tasks already
-`DONE` before the goal existed never retroactively appeared merged. `graph
-create` cannot hit that: its run branch always exists before any task's
-workspace does.
-
-The goal record itself is plain, never-committed local state (like
-`.sddx/sweep.json`), so it stays visible across branch switches.
+`--harness` and `--model` are recorded on the receipt as reported values. sddx
+cannot judge a review's quality; `audit` describes a review as recorded, never
+as verified.
 
 ## sddx goal show
 
 ```sh
-sddx goal show <id>
+sddx goal show <goal-id>
 ```
 
-Prints the goal state file as JSON — task ids, run branch, base SHA, the
-`merges` log (one entry per integration attempt: `merged`, `conflict`, or
-`reverted`), and the `shipped` marker once a PR has been opened for it.
-
-## sddx graph create
-
-```sh
-sddx graph create --graph <path> [--dry-run]
-```
-
-The atomic gate between a draft plan and a materialized one. Validates every
-node's oracle, the DAG (cycle-free, `overlap ⟹ ordered` including fan-in
-co-parents), and every `on_dependency_failure`/`retry` value; then creates the
-goal's run branch, every task file, and `.sddx/goals/<goal-id>.json` — or writes
-**nothing** and names the offending node.
-
-`--dry-run` runs the identical resolve-and-validate path and writes nothing,
-printing the goal, node list with each oracle and scope, dependency edges,
-topological execution order, the worktree count, the **resolved base SHA**, and
-the validation verdict. This is the approval screen: the base SHA and node set
-are decided inside `graph create` and are absent from the drafts. A second `--dry-run` of a revised plan prints only what
-changed — over every node's spec **and** over the Goal Brief header, so an
-edited constraint, acceptance criterion, or unresolved item is never reported as
-"none".
-
-In `human` mode (the default), creation requires a matching approval token and
-exits **3** without one, having written nothing. Validation runs first, so an
-invalid plan exits 1 and is never presented for approval. `auto` self-approves
-within its bounds; see
-[interaction-modes.md](../explanation/interaction-modes.md#auto-modes-bounds).
-
-## sddx graph approve
-
-```sh
-sddx graph approve --graph <path>
-```
-
-Records approval of the plan **as it currently stands on disk**, writing
-`.sddx/approvals/<plan_sha256>.json`. Refuses a plan that fails validation, so
-approval can never be granted to something that cannot execute. Prints the
-approved hash and the token path.
-
-`plan_sha256` covers the graph file's bytes plus every referenced spec's bytes,
-so any subsequent edit — including a semantically-neutral reorder — invalidates
-the token and re-arms the gate. Tokens are content-addressed, so a plan
-regenerated byte-identically reuses its approval.
-
-A token records the **workspace strategy** it was approved under. Worktree is
-now the only strategy, so this can only mismatch for a token written by an older
-sddx under `branch` or `none` — which must not authorize a canonical run it was
-never rendered for. `graph create` refuses on the mismatch and names it; re-render
-and re-approve the plan.
-
-A token always records `mode: human` — approving *is* the deliberate act, so a
-receipt reading `mode: auto` always means no human saw that plan. An autonomy
-bound never produces a token: exceeding one is a **hard refusal**, not a
-degradation to an interactive prompt, precisely so a run recorded `auto` can
-never have a human approval hiding underneath it. Tokens written by older
-versions may carry `requested_mode` and `degraded_reason`; both still parse
-during an audit, and neither is written any more.
-
-Signed best-effort under the `sddx-approval` SSH namespace when git signing is
-configured; an unsigned token is normal, never an error. A signature only binds
-approval to a person when the key is touch-required — see
-[what sddx can and cannot prove](../explanation/interaction-modes.md#what-sddx-can-and-cannot-prove).
-
-## sddx graph regenerate
-
-```sh
-sddx graph regenerate --graph <path>
-```
-
-The **Regenerate** plan action. Truncates the draft back to its Goal Brief
-header — dropping `tasks:` — and removes the node spec drafts it referenced, so
-the orchestrator can produce a new decomposition from the same brief.
-
-The header is truncated **textually**, so every recorded answer and assumption
-survives byte for byte: a re-plan is not a reason to re-ask questions the user
-already answered, and re-serializing the YAML would move the graph bytes and
-invalidate an approval over a brief nobody edited.
-
-Exits 3 once a goal has been created from the plan — regenerate applies while
-the plan is still a draft, and is not a way to unwind a materialized run. A
-goal record that exists but cannot be parsed counts as created: an unreadable
-record is still a materialized run.
-
-Both the `--graph` path and every node `spec:` path it names must resolve inside
-`.sddx/drafts/`; anything else exits 2 without writing. This command deletes,
-and neither the command line nor a draft's `spec:` strings are a trusted path
-source — the Bash gate lets the sddx CLI run in every phase.
-
-## sddx graph cancel
-
-```sh
-sddx graph cancel --graph <path>
-```
-
-The **Cancel** plan action. Removes the graph draft and its node spec drafts,
-and nothing else — before materialization there is no branch, worktree, task,
-goal record, or approval token to undo. That is the reason the approval gate
-sits before creation rather than after it.
-
-Exits 3 once a goal has been created from the plan, and refuses any path outside
-`.sddx/drafts/`, for the same reasons as `graph regenerate`. It also discards the
-cached render, so re-planning the same goal sentence renders in full rather than
-diffing against the plan that was cancelled.
-
-## sddx intake check
-
-```sh
-sddx intake check --batch <path>
-```
-
-Validates an intake question batch before it is rendered to the user: at most
-three questions per dispatch, each with an `id`, the `question`, and a `why`
-(an optional `default` may be given). Over the cap it exits nonzero **naming
-the cap** rather than truncating — silently dropping the fourth question would
-discard whichever one intake judged most important.
-
-An unreadable or malformed batch fails rather than passing as "no questions",
-so a broken batch cannot send an unreviewed plan past the question round. So
-does a readable file that is not a batch at all — a mapping with no `questions`
-key (the graph header is the one written here by mistake). Only an empty file,
-`{}`, or an explicitly empty `questions:` list is a valid batch of none.
+Prints the goal record (title, spec path, task ids, dependency edges, run
+branch, base commit, approval provenance, merge log) from
+`refs/sddx/goals/<goal-id>`. The ref is pushed by `pr create`; fetch it with
+`git fetch origin 'refs/sddx/goals/*:refs/sddx/goals/*'`.
 
 ## sddx run report
 
@@ -336,12 +293,10 @@ key (the graph header is the one written here by mistake). Only an empty file,
 sddx run report --goal <goal-id>
 ```
 
-The run-completion report: run branch, target branch (stated unchanged),
-merged/failed/outstanding task counts, a `git diff --stat` summary against
-the run branch, and the exact review commands (`git switch`, `git diff`,
-`git log --oneline`). Meaningful at any point in a run, not just the end —
-the header reads "Run in progress" while anything is still outstanding,
-"Run completed" once nothing is.
+The run summary: run branch, target branch (stated unchanged), counts of
+merged, failed, skipped, blocked, conflicted and outstanding tasks, each task
+with its state, attempt, abandon reason and receipt location, oracle results,
+a `git diff --stat` against the base, and the commands to review the result.
 
 ## sddx pr create
 
@@ -349,58 +304,12 @@ the header reads "Run in progress" while anything is still outstanding,
 sddx pr create --goal <goal-id> [--title <title>]
 ```
 
-Pushes the goal's run branch **exactly as it stands** — whatever subset of
-tasks has merged into it so far, no completeness gate — and opens a PR/MR
-from it via `gh` or `glab` (resolved from `userConfig.pr_host` or detected
-from the `origin` remote). No branch reconstruction happens here: every
-commit on the run branch is either a task's own atomic commit or a real
-`git merge --no-ff` that `sddx verify` already made as each task passed (see
-`sddx verify` below). The PR body is generated from the goal's `merges`
-log — only tasks currently merged, each with its receipt's oracle command,
-exit code, and hash — and states the outstanding count rather than implying
-full completion. On success, writes `shipped: {pr_url, at}` onto the goal
-file; re-running `pr create` for an already-shipped goal refuses rather than
-opening a duplicate.
-
-Refuses loudly, before any push, on: an already-shipped goal, or an
-unauthenticated or undetectable host CLI. Prints
-`pr=<url> branch=<branch> tasks=[...]` on success (`taskIds` here is the
-currently-merged subset, not the full goal).
-
-This is a deliberately separate, explicitly-invoked command — `/sddx:run`
-never calls it automatically, the same way it never merges into the
-*original target branch* automatically. See [/sddx:pr](../../templates/claude/skills/pr/SKILL.md).
-
-On GitLab this opens a **merge request** (`glab mr create`) — sddx calls the
-command and output `pr` uniformly across both hosts since the mechanics (one
-branch, receipt-derived body) are identical; only the underlying host
-object's name differs.
-
-## sddx cleanup
-
-```sh
-sddx cleanup <id>
-```
-
-Tears down one task's workspace: removes `.sddx-worktrees/<id>` (refuses if it
-has uncommitted changes) and deletes branch `sddx/<id>` (refuses if it is
-checked out). If the branch isn't merged into HEAD by ancestry, it's still
-accepted when the goal it belongs to (if any) currently lists it as `merged`
-in that goal's `merges` log — real bookkeeping sddx itself wrote, not a
-self-reported marker, and revert-aware (a reverted merge doesn't count). Each
-refusal prints `refusing: …` and exits 1.
-
-## sddx sweep
-
-```sh
-sddx sweep
-```
-
-Lock-guarded orphan sweep: removes leftover worktrees whose tasks are verified
-DONE, skips everything else with a reason (`skipped <path> (<reason>)` — dirty
-trees are never touched, they get flagged on the board). Prints
-`sweep: <n> removed, <n> skipped`; a concurrent sweep prints
-`sweep: another sweep holds the lock — skipped`.
+Pushes the run branch as it stands and opens a PR (`gh`) or MR (`glab`),
+resolved from `pr_host` or the `origin` remote. The body is built from the
+goal's merge log and the receipts of the tasks merged so far, and states how
+many are outstanding. The goal ref is pushed alongside. A goal already shipped
+is refused instead of opening a duplicate. Merging into your target branch is
+always your decision; nothing in sddx does it.
 
 ## sddx next-actions
 
@@ -408,70 +317,71 @@ trees are never touched, they get flagged on the board). Prints
 sddx next-actions --goal <goal-id> [--select "<reply>"]
 ```
 
-The deterministic, **goal-scoped** hand-off shown once after a run summary.
-`--goal` is required.
+The goal-scoped hand-off menu: review changes, create a PR, merge into the
+target branch, retry an abandoned task, revert a merged task. Built from current
+run state each time; a selection is re-validated before it runs.
 
-The current-branch variant (`sddx next-actions` with no `--goal`, filtering a
-static catalog by a detected `uncommitted` / `committed-unpushed` /
-`pushed-no-pr` / `pr-open` state) has been removed. It answered a question
-about the checkout rather than about the run, and it could offer per-task
-hand-offs before the run reached its single hand-off point — including for a
-branch that had nothing to do with the run.
+## sddx board
 
-**Selection is authorization.** The menu is recomputed from current run state
-at display time, and displaying it authorizes nothing. When the user selects an
-offered action, that selection *is* the authorization: a selected remote or
-target-branch action is performed without asking again. A second confirmation
-would train the user to click through the one prompt that carries meaning. The
-exception is an action destructive of existing work, which still confirms.
+```sh
+sddx board
+```
 
-Before executing, run state is re-derived and the selection re-validated: a
-reply that no longer matches a currently-valid action (state drifted since the
-menu was shown) or matches more than one is refused with the menu re-printed,
-exit 1 — nothing executes.
+Regenerates `.sddx/BOARD.md`: one row per task with its goal, state (plus
+` stuck` and ` blocked-on-<id>` flags), dependencies, title, attempt,
+iterations, receipt sequence number, and a note (abandon reason or strict
+allow list), followed by any worktrees the sweep refused to remove.
 
-### What the menu offers
+## sddx audit
 
-Built dynamically from the goal's `merges` log rather than a fixed catalog: Review
-Changes and Exit always appear; Create PR/MR and Merge Into Target Branch
-appear once at least one task has merged; one Retry `<task-id>` entry appears
-per `ABANDONED` task; one Revert `<task-id>` entry appears per currently-
-merged task (executing it runs `git revert -m 1` on the run branch and
-records a `reverted` entry in the goal's `merges` log — no history rewriting,
-no force-push). Selection (numeric or natural-language, e.g. `"revert
-<task-id>"`) works exactly like the per-task menu.
+```sh
+sddx audit [--signatures] [--ci]
+```
+
+Validates every receipt of versions 1 to 5 against its own schema, checks the
+`prev` hash links, binds each receipt to the commit that introduced it, checks
+approval provenance against the goal record, and verifies approval and receipt
+signatures. Exits 1 on any finding. For version 5 receipts it states what is and
+is not provable: human approval is provable only for a signed approval whose
+signature verifies; a reported harness is labelled as reported; a review is "a
+recorded review, not a verified one". `--signatures` also verifies the binding
+commits' git signatures. `--ci` adds the tamper-only checks a pull request gate
+needs (a `DONE` task without a receipt).
+
+## sddx cleanup
+
+```sh
+sddx cleanup <id>
+```
+
+Removes `.sddx-worktrees/<id>` and deletes branch `sddx/<id>` once it is merged
+into HEAD or into its goal's run branch, as the goal's merge log records. It
+refuses a task that is not `DONE` or `ABANDONED`, whose worktree holds its only
+state, and a worktree with anything uncommitted, `.sddx/` included. An
+abandoned task's branch is deleted only when it holds no commit beyond its
+base.
+
+## sddx sweep
+
+```sh
+sddx sweep
+```
+
+Removes worktrees of `DONE` (with a receipt) or `ABANDONED` tasks that are
+clean (nothing uncommitted, `.sddx/` included), and any proof worktree whose
+`verify` is no longer running. Everything else, a proof a running `verify`
+still owns included, is skipped with a reason and flagged on the board. Runs
+automatically at session start through the session hook.
 
 ## sddx config show
 
 ```sh
-sddx config show [--output <terminal|json|markdown|all>]
+sddx config show
 ```
 
-Prints every `userConfig` key fully resolved (environment variable, then
-`.sddx/config.json`, then built-in default — see
-[../how-to/install-sddx.md](../how-to/install-sddx.md) for the full key table). Read-only: never
-writes `.sddx/config.json` or any other file. `agent_model` is printed as
-parsed `role=model` pairs (malformed segments are silently dropped here —
-run `sddx config validate` to see why). `pr_host` prints
-`(auto-detected from origin remote)` when unset, since resolving it for real
-means inspecting the git remote (see [sddx pr create](#sddx-pr-create)) — this
-command doesn't shell out to git just to show config.
-
-`/sddx:run` calls `config show --output json` once at the
-start of its flow and uses `.data.agent_model` from the
-result — advisory only, since no hook enforces a skill's own instructions.
-
-When `verbose` is true, an extra `resolution detail` block follows the
-resolved values in `terminal` mode, naming which source — `env`, `config`, or
-`default` — won for each key. This is the one place `verbose` currently has
-an effect on `terminal` output; it does not change any other command's
-output.
-
-`--json` (bare, not `--output json`) still works as a **deprecated alias**
-for `--output json`: it emits the same versioned JSON envelope described in
-[Output formats](#output-formats) (the resolved config lives under `data`,
-not at the top level as in sddx releases before this one) and prints a
-one-line deprecation notice to stderr. Prefer `--output json` going forward.
+Prints every config key fully resolved (environment variable where the key has
+one, then `.sddx/config.json`, then the default). With `verbose: true`, also
+names which source won for each key. See [config.md](config.md).
 
 ## sddx config validate
 
@@ -479,15 +389,48 @@ one-line deprecation notice to stderr. Prefer `--output json` going forward.
 sddx config validate
 ```
 
-Checks `.sddx/config.json` against the known schema and reports, as warnings
-(exit 0): unrecognized top-level keys, values that fail their key's domain
-rule (not just a `typeof` mismatch — `stuck_threshold`/`oracle_runs_default`/
-`max_iterations_default` must be positive integers, `interaction_mode` must be
-one of `human|auto`, `pr_host` one of `gh|glab`), and malformed
-`agent_model` segments. Keys removed in 4.0 (`workspace_mode`, `prefer_solo`)
-are reported **as removed**, naming the replacement — not as an unrecognized
-typo, since a setting that used to work and silently stopped is a different
-problem from a misspelling. Missing `.sddx/config.json` is not an
-error — it just means built-in defaults apply. Unparseable JSON (or JSON
-that isn't an object) is the one case that fails loudly (exit 1): that's a
-broken file, not a schema mismatch.
+Checks `.sddx/config.json` against the schema and exits 1 on any issue:
+an unrecognized or removed key, a value outside its key's domain (for example
+`"profile": "strikt"`), a malformed `agent_model`, or a `schema_version` from
+sddx 5. A missing file is fine: defaults apply.
+
+## sddx doctor
+
+```sh
+sddx doctor
+```
+
+Read-only diagnosis, each problem with the exact command that fixes it: Bun,
+the git repository, the sddx version, the config, and leftover sddx 5
+integration files.
+
+## sddx migrate
+
+```sh
+sddx migrate         # preview
+sddx migrate --yes   # apply
+```
+
+Moves a repository from sddx 5 to 6. See
+[migrate-to-v6.md](../how-to/migrate-to-v6.md).
+
+## sddx task phase (strict profile)
+
+```sh
+sddx task phase <id> RED --test-exit <nonzero>
+sddx task phase <id> GREEN --test-exit 0
+```
+
+Records a test run the hook recorder could not observe (an unrecognized test
+runner). The exit code is checked: RED needs a failing run, GREEN a passing
+one. Exits 2 outside the strict profile. See [hooks.md](hooks.md).
+
+## sddx task allow (strict profile)
+
+```sh
+sddx task allow <id> <path>
+```
+
+Exempts one exact repository-relative path from the strict gate for this task.
+Every exemption is listed on the receipt and the board. Refused in `auto` mode,
+and exits 2 outside the strict profile.

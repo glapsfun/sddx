@@ -1,0 +1,12 @@
+{
+  "name": "sddx",
+  "version": "5.0.0",
+  "description": "Spec-driven development with proof: one approved spec per goal, a RED/GREEN boundary proof per task, a review bound to the verified diff, and hash-chained receipts.",
+  "author": {
+    "name": "glapsfun"
+  },
+  "homepage": "https://github.com/glapsfun/sddx",
+  "repository": "https://github.com/glapsfun/sddx",
+  "license": "MIT",
+  "keywords": ["sdd", "tdd", "spec-driven", "worktree", "receipts", "oracle", "review"]
+}

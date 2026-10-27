@@ -6944,8 +6944,17 @@ var require_public_api = __commonJS((exports) => {
 });
 
 // src/lib/hookdispatch.ts
-import { existsSync as existsSync11, readdirSync as readdirSync7, readFileSync as readFileSync10 } from "node:fs";
-import { join as join13 } from "node:path";
+import {
+  accessSync,
+  constants,
+  existsSync as existsSync13,
+  readdirSync as readdirSync8,
+  readFileSync as readFileSync12,
+  realpathSync as realpathSync2,
+  statSync as statSync4
+} from "node:fs";
+import { delimiter, dirname as dirname7, join as join16, resolve as resolve6 } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // src/board.ts
 import { existsSync as existsSync4, mkdirSync as mkdirSync5, readdirSync as readdirSync2, readFileSync as readFileSync4, writeFileSync as writeFileSync5 } from "node:fs";
@@ -9830,6 +9839,19 @@ function approvalGate(event) {
   }
 }
 
+// src/lib/shellcwd.ts
+import { resolve as resolve4 } from "node:path";
+var LEADING_CD = /^\s*cd\s+([^\s"'`$\\;&|~]+)\s*(?:&&|;)\s*/;
+function withLeadingCd(command, cwd) {
+  let rest = command;
+  let dir = cwd;
+  for (let m = LEADING_CD.exec(rest);m; m = LEADING_CD.exec(rest)) {
+    dir = resolve4(dir, m[1]);
+    rest = rest.slice(m[0].length);
+  }
+  return { command: rest, cwd: dir };
+}
+
 // src/lib/bashgate.ts
 var BASH_ALLOW_BASE = [
   "bun",
@@ -9877,6 +9899,8 @@ function checkBashCommand(command, extraAllow) {
     const cmd = commandBasename(words[0]);
     if (cmd === "sddx-run" || cmd === "sddx")
       continue;
+    if (cmd === "cd")
+      continue;
     if (["bunx", "npx"].includes(cmd) && words.map(commandBasename).includes("sddx"))
       continue;
     if (cmd === "git") {
@@ -9913,10 +9937,19 @@ function blockMessage2(task, why) {
 function bashGate(input, env = process.env) {
   if (typeof input.command !== "string" || input.command.trim() === "")
     return { allow: true };
-  const cwd = input.cwd ?? process.cwd();
+  const started = input.cwd ?? process.cwd();
+  const moved = withLeadingCd(input.command, started);
+  for (const cwd of new Set([started, moved.cwd])) {
+    const decision = gateIn(cwd, moved.command, env);
+    if (!decision.allow)
+      return decision;
+  }
+  return { allow: true };
+}
+function gateIn(cwd, command, env) {
   if (profile(mainRootOf(cwd)) !== "strict")
     return { allow: true };
-  if (checkBashCommand(input.command, []).allow)
+  if (checkBashCommand(command, []).allow)
     return { allow: true };
   const res = resolveTask(cwd);
   if (res.kind === "none")
@@ -9930,10 +9963,402 @@ function bashGate(input, env = process.env) {
   if (t.phase !== "IN_PROGRESS" || t.profile !== "strict" || t.strict?.phase)
     return { allow: true };
   const extra = splitList(env.SDDX_RED_BASH_ALLOW ?? readConfig(mainRootOf(res.root)).red_bash_allow);
-  const decision = checkBashCommand(input.command, extra);
+  const decision = checkBashCommand(command, extra);
   if (decision.allow)
     return decision;
   return { allow: false, reason: blockMessage2(t, decision.reason) };
+}
+
+// src/lib/frontmatter.ts
+var FRONTMATTER = /^---\n([\s\S]*?)\n---\n?/;
+var lf = (markdown) => markdown.replace(/\r\n?/g, `
+`);
+var withoutFrontmatter = (markdown) => lf(markdown).replace(FRONTMATTER, "").trim();
+
+// src/lib/migrate.ts
+import { spawnSync as spawnSync7 } from "node:child_process";
+import {
+  existsSync as existsSync11,
+  mkdirSync as mkdirSync9,
+  readdirSync as readdirSync7,
+  readFileSync as readFileSync11,
+  renameSync,
+  rmSync as rmSync5,
+  writeFileSync as writeFileSync10
+} from "node:fs";
+import { dirname as dirname5, join as join13 } from "node:path";
+
+// src/lib/legacy/v5-claude.ts
+import { existsSync as existsSync10, readFileSync as readFileSync10 } from "node:fs";
+import { join as join12 } from "node:path";
+// src/lib/legacy/v5-claude-ownership.json
+var v5_claude_ownership_default = {
+  sddx_version: "5.0.0",
+  invocations: ["sddx", "npm exec --offline --no -- sddx", "bunx --no-install sddx"],
+  files: {
+    ".claude/agents/sddx-intake.md": [
+      "d844d296cc81cb1055cc4ed547c5d11a5eafac5753ec60b21d38409bd2ac03e6"
+    ],
+    ".claude/agents/sddx-orchestrator.md": [
+      "1e3fbe630edd66103c79881a45f1fe80b69e3084005d0a634ebe54bf783b9def",
+      "34d133e2ed654fb62ccdae7cbb9d869504036ba81da90fcecfcc067efe063b04",
+      "398bff50cbe37d7d4640e46e1d8cfc7d4c703ff43b1b6661a325cd766ef8e360"
+    ],
+    ".claude/agents/sddx-planner.md": [
+      "0139f2cd94b1983e2a5ff31f501b147083b2694a0a7997160777cca12cf4449a"
+    ],
+    ".claude/agents/sddx-tdd-executor.md": [
+      "464df6da8cfc94dff617c030eb50f84a6a0dc43e1dba07f39c4e6af2c7b4dda2",
+      "79c35b32218a0451596fd32e33b9713c745afd5ca62fd9e927b4e9b9a3ba946b",
+      "a2439a3f763c6121042125a7c0481e40d43a4dbfcb999ef6bce511f6612954ff"
+    ],
+    ".claude/agents/sddx-verifier.md": [
+      "3c6941890ba743487c748c4fa7f1131d4e65f420a1c1e8e1212ececbafff810a",
+      "6656887d457a9e190732be3b517d77e9429acee81f8fea64ad21d4ee8601df78",
+      "fb3bb258a076c9104351dbe45eff01b0462afa34d5f4ee5b744cdd799450052c"
+    ],
+    ".claude/skills/sddx-audit/SKILL.md": [
+      "47774c6b82e49966a83c7d97713d588deaa3156f04b421a1fa34e05f0e199d62",
+      "510a5b2713dd8497314a93526ba7aa6688b83e4c16b21a1d7075818c96eee4f6",
+      "f5888c303271f8c63b4aa546ba82e433bdb46df1aca02b771cc5fdff266b99ca"
+    ],
+    ".claude/skills/sddx-board/SKILL.md": [
+      "be43cd08e4e801d305b5938973cd60ae5755aa3460c3adad07c5a96f6c5e2231",
+      "c276f6265ac19b8ec0b1c34773544a8bcdf2b33af570653bb8448509e9e0c84c",
+      "e21b9ba983d9d40c61f2d7192f00576e96d3deb85123baa235d037b7998d6500"
+    ],
+    ".claude/skills/sddx-plan/SKILL.md": [
+      "03b8ffebf4c8b9c0fb004c5fee30edf8730dfd7f722d785225239a59e5767234",
+      "1d64e4c090035a113ee9a5179779ddf31fafa8dc6f72d140ad765072effcc479",
+      "9107c2db210a428c831ae9b19e533f1bb908c5f8ce02eed9556c67ef92647c75"
+    ],
+    ".claude/skills/sddx-pr/SKILL.md": [
+      "88feb94bbebab16b611ec2648751ea62f1f911a529a9bfb7685743917a6e5f93",
+      "c9755b04836c7a61a3192efeef9ccf881f27af6c5d641e3636c7447ddbf93e5f",
+      "d7359126bfd7cac285682f704613ee855d85cf396581a0c74a7c200e9bf75bd5"
+    ],
+    ".claude/skills/sddx-run/SKILL.md": [
+      "079829680a2f48b30a6a2e26632d0bca6e70a4348e9f7f674e3be4dd55d427f3",
+      "f1ae008b71e9c1cf6d0393f7d27aad1832cdc859dd6b308fef1d4b2f9fbceddf",
+      "fe99bf70b7e78b41a33f0916becba8e1d40171c004392849b4f916382b3f9aa8"
+    ],
+    ".claude/skills/sddx-verify/SKILL.md": [
+      "540472a2ce44bffdafdbbc64759fef598cdc5d3daad5122a383e75f1faed97e3",
+      "5e6c45a70b3841ccaadd1dd33c06957504ceb3aa585c776c9298343cdaa178b3",
+      "66eb84ab2b44f58be9d6a752a94f54ba797f0bd996a81b117520a5ff357e6354"
+    ]
+  }
+};
+
+// src/lib/legacy/v5-claude.ts
+var V5_MANIFEST_PATH = ".sddx/local/adapters/claude-install.json";
+var V5_DECLARATION_PATH = ".sddx/adapters/claude.json";
+var V5_SETTINGS_PATH = ".claude/settings.json";
+var V5_OWNED = v5_claude_ownership_default.files;
+function readV5Manifest(root) {
+  try {
+    const raw = JSON.parse(readFileSync10(join12(root, V5_MANIFEST_PATH), "utf8"));
+    const files = raw.files;
+    return typeof files === "object" && files !== null && !Array.isArray(files) ? files : {};
+  } catch {
+    return {};
+  }
+}
+function v5Ownership(root, path, manifest) {
+  const abs = join12(root, path);
+  if (!existsSync10(abs))
+    return "absent";
+  const hash = sha256(readFileSync10(abs));
+  if (manifest[path] === hash || (V5_OWNED[path] ?? []).includes(hash))
+    return "owned";
+  return "modified";
+}
+var HOOK_EVENTS = [
+  "session-start",
+  "tdd-gate",
+  "bash-gate",
+  "approval-gate",
+  "record-test",
+  "stop-gate"
+];
+var SDDX_HOOK_COMMAND = new RegExp(`(?:^|[\\s"'/])(?:sddx|hooks\\.mjs)["']?\\s+(?:hook\\s+)?(?:${HOOK_EVENTS.join("|")})\\s*$`);
+var isSddxEntry = (entry) => Array.isArray(entry.hooks) && entry.hooks.length > 0 && entry.hooks.every((h) => typeof h?.command === "string" && SDDX_HOOK_COMMAND.test(h.command.trim()));
+function detectIndent(source) {
+  const m = /\n(\x20+)"/.exec(source);
+  return m ? m[1].length : 2;
+}
+function unmergeV5Settings(existing) {
+  let doc;
+  try {
+    const parsed = JSON.parse(existing);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return { text: existing, removed: 0 };
+    }
+    doc = parsed;
+  } catch {
+    return { text: existing, removed: 0 };
+  }
+  let removed = 0;
+  const hooks = { ...doc.hooks ?? {} };
+  for (const [event, entries] of Object.entries(hooks)) {
+    const theirs = (entries ?? []).filter((e) => !isSddxEntry(e));
+    removed += (entries ?? []).length - theirs.length;
+    if (theirs.length === 0)
+      delete hooks[event];
+    else
+      hooks[event] = theirs;
+  }
+  if (removed === 0)
+    return { text: existing, removed: 0 };
+  const next = { ...doc };
+  if (Object.keys(hooks).length === 0)
+    delete next.hooks;
+  else
+    next.hooks = hooks;
+  return { text: `${JSON.stringify(next, null, detectIndent(existing))}
+`, removed };
+}
+
+// src/lib/migrate.ts
+var LEGACY_DIR = ".sddx/legacy";
+var TERMINAL = new Set(["DONE", "ABANDONED"]);
+var REMOVED_KEYS = ["runtime_scope", "package_manager", "adapters"];
+function readJson(path) {
+  try {
+    return JSON.parse(readFileSync11(path, "utf8"));
+  } catch {
+    return null;
+  }
+}
+function v5TasksIn(root, dir, inWorktree) {
+  const abs = join13(root, dir);
+  if (!existsSync11(abs))
+    return [];
+  const out = [];
+  for (const f of readdirSync7(abs).filter((n) => n.endsWith(".json"))) {
+    const raw = readJson(join13(abs, f));
+    if (raw === null || isV6Task(raw))
+      continue;
+    const phase = String(raw.phase ?? "unknown");
+    out.push({ id: f.slice(0, -".json".length), phase, path: `${dir}/${f}`, inWorktree });
+  }
+  return out;
+}
+function v5Goals(root) {
+  const r = spawnSync7("git", ["for-each-ref", "--format=%(refname)", "refs/sddx/goals/"], {
+    cwd: root,
+    encoding: "utf8"
+  });
+  const goals = [];
+  for (const ref of (r.stdout ?? "").split(`
+`).map((s) => s.trim())) {
+    if (!ref.startsWith("refs/sddx/goals/"))
+      continue;
+    const blob = spawnSync7("git", ["cat-file", "-p", ref], { cwd: root, encoding: "utf8" });
+    try {
+      const g = JSON.parse(blob.stdout ?? "");
+      if (g.spec_path === undefined)
+        goals.push({ id: g.id, task_ids: g.task_ids ?? [] });
+    } catch {}
+  }
+  return goals;
+}
+function v5Phase(root, id) {
+  for (const p of [
+    join13(root, ".sddx-worktrees", id, ".sddx", "tasks", `${id}.json`),
+    join13(root, ".sddx", "tasks", `${id}.json`)
+  ]) {
+    const raw = readJson(p);
+    if (raw !== null)
+      return String(raw.phase);
+  }
+  const r = spawnSync7("git", ["show", `sddx/${id}:.sddx/tasks/${id}.json`], {
+    cwd: root,
+    encoding: "utf8"
+  });
+  if (r.status !== 0)
+    return null;
+  try {
+    return String(JSON.parse(r.stdout).phase);
+  } catch {
+    return null;
+  }
+}
+function detectV5Signals(root) {
+  const cfg = readJson(configPath(root));
+  const configVersion = cfg && typeof cfg.schema_version === "string" && cfg.schema_version.startsWith("1.") ? cfg.schema_version : null;
+  const tasks = v5TasksIn(root, ".sddx/tasks", false);
+  const wts = join13(root, ".sddx-worktrees");
+  if (existsSync11(wts)) {
+    for (const id of readdirSync7(wts)) {
+      tasks.push(...v5TasksIn(root, `.sddx-worktrees/${id}/.sddx/tasks`, true).filter((t) => t.id === id));
+    }
+  }
+  const manifest = readV5Manifest(root);
+  const claudeOwned = [];
+  const claudeModified = [];
+  for (const path of Object.keys(V5_OWNED)) {
+    const o = v5Ownership(root, path, manifest);
+    if (o === "owned")
+      claudeOwned.push(path);
+    else if (o === "modified")
+      claudeModified.push(path);
+  }
+  let settingsHooks = 0;
+  if (existsSync11(join13(root, V5_SETTINGS_PATH))) {
+    settingsHooks = unmergeV5Settings(readFileSync11(join13(root, V5_SETTINGS_PATH), "utf8")).removed;
+  }
+  return {
+    configVersion,
+    tasks,
+    claudeOwned,
+    claudeModified,
+    settingsHooks,
+    declaration: existsSync11(join13(root, V5_DECLARATION_PATH))
+  };
+}
+function detectV5State(root) {
+  const signals = detectV5Signals(root);
+  const specDir = join13(root, ".sddx", "specs");
+  const specYamls = existsSync11(specDir) ? readdirSync7(specDir).filter((f) => f.endsWith(".yaml") || f.endsWith(".yml")).map((f) => `.sddx/specs/${f}`) : [];
+  const dirsToArchive = ["drafts", "context", "goals"].map((d) => `.sddx/${d}`).filter((d) => existsSync11(join13(root, d)) && readdirSync7(join13(root, d)).some((f) => f !== ".gitkeep"));
+  const goalsInFlight = v5Goals(root).map((g) => ({
+    id: g.id,
+    outstanding: g.task_ids.filter((id) => !TERMINAL.has(v5Phase(root, id) ?? "missing"))
+  })).filter((g) => g.outstanding.length > 0);
+  const pkg = readJson(join13(root, "package.json"));
+  const packageDependency = Boolean(pkg && ["dependencies", "devDependencies"].some((k) => pkg[k]?.["@glapsfun/sddx"] !== undefined));
+  return { ...signals, specYamls, dirsToArchive, goalsInFlight, packageDependency };
+}
+function v5Blockers(s) {
+  const out = [];
+  if (s.configVersion)
+    out.push(`.sddx/config.json has schema_version ${s.configVersion}`);
+  for (const t of s.tasks) {
+    if (!t.inWorktree || !TERMINAL.has(t.phase))
+      out.push(`v5 task state ${t.path}`);
+  }
+  return out;
+}
+function inFlight(s) {
+  const out = s.tasks.filter((t) => !TERMINAL.has(t.phase)).map((t) => `task ${t.id} is ${t.phase} (${t.path})`);
+  for (const g of s.goalsInFlight) {
+    out.push(`goal ${g.id} has unfinished tasks: ${g.outstanding.join(", ")}`);
+  }
+  return [...new Set(out)];
+}
+function planMigration(s) {
+  const actions = [];
+  for (const p of s.claudeOwned) {
+    actions.push({ kind: "remove", path: p, detail: "generated by sddx 5, unmodified" });
+  }
+  for (const p of s.claudeModified) {
+    actions.push({
+      kind: "keep",
+      path: p,
+      detail: "generated by sddx 5 but edited since; remove it by hand"
+    });
+  }
+  if (s.settingsHooks > 0) {
+    actions.push({
+      kind: "rewrite",
+      path: V5_SETTINGS_PATH,
+      detail: `remove ${s.settingsHooks} sddx hook entr${s.settingsHooks === 1 ? "y" : "ies"}, keep everything else`
+    });
+  }
+  if (s.declaration) {
+    actions.push({
+      kind: "remove",
+      path: V5_DECLARATION_PATH,
+      detail: "sddx 5 adapter declaration"
+    });
+  }
+  for (const d of s.dirsToArchive) {
+    actions.push({ kind: "move", path: d, detail: `to ${LEGACY_DIR}/${d.slice(".sddx/".length)}` });
+  }
+  for (const t of s.tasks.filter((x) => !x.inWorktree)) {
+    actions.push({ kind: "move", path: t.path, detail: `to ${LEGACY_DIR}/tasks/` });
+  }
+  for (const p of s.specYamls) {
+    actions.push({ kind: "move", path: p, detail: `to ${LEGACY_DIR}/specs/` });
+  }
+  if (s.configVersion) {
+    actions.push({
+      kind: "rewrite",
+      path: ".sddx/config.json",
+      detail: `schema_version ${CONFIG_SCHEMA_VERSION}, drop ${REMOVED_KEYS.join(", ")}`
+    });
+  }
+  if (s.packageDependency) {
+    actions.push({
+      kind: "manual",
+      path: "package.json",
+      detail: "lists @glapsfun/sddx; remove it or upgrade it to 6 yourself (migrate never edits package manifests)"
+    });
+  }
+  return actions;
+}
+function move(root, from, to) {
+  const dest = join13(root, to);
+  mkdirSync9(dirname5(dest), { recursive: true });
+  renameSync(join13(root, from), dest);
+}
+function applyMigration(root, s) {
+  for (const p of s.claudeOwned)
+    rmSync5(join13(root, p), { force: true });
+  for (const p of s.claudeOwned) {
+    const dir = dirname5(join13(root, p));
+    if (existsSync11(dir) && readdirSync7(dir).length === 0)
+      rmSync5(dir, { recursive: true });
+  }
+  if (s.settingsHooks > 0) {
+    const path = join13(root, V5_SETTINGS_PATH);
+    writeFileSync10(path, unmergeV5Settings(readFileSync11(path, "utf8")).text);
+  }
+  if (s.declaration)
+    rmSync5(join13(root, V5_DECLARATION_PATH), { force: true });
+  for (const d of s.dirsToArchive)
+    move(root, d, `${LEGACY_DIR}/${d.slice(".sddx/".length)}`);
+  for (const t of s.tasks.filter((x) => !x.inWorktree)) {
+    move(root, t.path, `${LEGACY_DIR}/tasks/${t.id}.json`);
+  }
+  for (const p of s.specYamls)
+    move(root, p, `${LEGACY_DIR}/specs/${p.slice(".sddx/specs/".length)}`);
+  if (s.configVersion) {
+    const cfg = readJson(configPath(root));
+    const next = { schema_version: CONFIG_SCHEMA_VERSION };
+    for (const [k, v] of Object.entries(cfg)) {
+      if (k === "schema_version" || REMOVED_KEYS.includes(k))
+        continue;
+      next[k] = v;
+    }
+    writeFileSync10(configPath(root), `${JSON.stringify(next, null, 2)}
+`);
+  }
+}
+var nothingToDo = (actions) => actions.every((a) => a.kind === "keep" || a.kind === "manual");
+
+// src/lib/optin.ts
+import { statSync as statSync3 } from "node:fs";
+import { dirname as dirname6, join as join14, resolve as resolve5 } from "node:path";
+var isDir = (p) => {
+  try {
+    return statSync3(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
+function optedInRoot(cwd) {
+  const start = resolve5(cwd);
+  const top = workspaceRoot(start);
+  if (top === null)
+    return isDir(join14(start, ".sddx")) ? start : null;
+  for (let d = start;; d = dirname6(d)) {
+    if (isDir(join14(d, ".sddx")))
+      return d;
+    if (d === top)
+      return null;
+  }
 }
 
 // src/lib/recorder.ts
@@ -9956,7 +10381,8 @@ function matchTestRunner(command) {
   }
   return null;
 }
-function recordTestRun(cwd, command, exitCode) {
+function recordTestRun(started, fullCommand, exitCode) {
+  const { command, cwd } = withLeadingCd(fullCommand, started);
   if (matchTestRunner(command) === null || exitCode === undefined) {
     return { matched: false, recorded: null };
   }
@@ -10002,8 +10428,8 @@ function recordManualRun(task, phase, exitCode) {
 }
 
 // src/lib/stopgate.ts
-import { existsSync as existsSync10 } from "node:fs";
-import { join as join12 } from "node:path";
+import { existsSync as existsSync12 } from "node:fs";
+import { join as join15 } from "node:path";
 var NEXT_STEP = {
   PLANNED: "start it with: sddx task start <id>",
   IN_PROGRESS: "make the change, then prove it with: sddx verify <id>",
@@ -10031,8 +10457,8 @@ function stopGate(event) {
   }
   const { task } = res;
   if (isTerminal(task.phase)) {
-    const receipt = join12(res.root, ".sddx", "receipts", `${task.id}.json`);
-    if (task.phase === "DONE" && !existsSync10(receipt)) {
+    const receipt = join15(res.root, ".sddx", "receipts", `${task.id}.json`);
+    if (task.phase === "DONE" && !existsSync12(receipt)) {
       return {
         block: true,
         reason: `sddx: task ${task.id} is DONE but .sddx/receipts/${task.id}.json is missing — completion is unproven. Restore the receipt or abandon the task.`
@@ -10066,7 +10492,7 @@ function stopGate(event) {
 // src/lib/hookdispatch.ts
 function readEvent() {
   try {
-    const raw = readFileSync10(0, "utf8");
+    const raw = readFileSync12(0, "utf8");
     const parsed = raw.trim() === "" ? {} : JSON.parse(raw);
     return typeof parsed === "object" && parsed !== null ? parsed : {};
   } catch {
@@ -10149,55 +10575,164 @@ function cmdStopGate(event) {
 }
 function activeTaskFiles(root) {
   const files = [];
-  const main = join13(root, ".sddx", "tasks");
-  if (existsSync11(main)) {
-    for (const f of readdirSync7(main).filter((n) => n.endsWith(".json")))
-      files.push(join13(main, f));
+  const main = join16(root, ".sddx", "tasks");
+  if (existsSync13(main)) {
+    for (const f of readdirSync8(main).filter((n) => n.endsWith(".json")))
+      files.push(join16(main, f));
   }
-  const wts = join13(root, ".sddx-worktrees");
-  if (existsSync11(wts)) {
-    for (const id of readdirSync7(wts)) {
-      const f = join13(wts, id, ".sddx", "tasks", `${id}.json`);
-      if (existsSync11(f))
+  const wts = join16(root, ".sddx-worktrees");
+  if (existsSync13(wts)) {
+    for (const id of readdirSync8(wts)) {
+      const f = join16(wts, id, ".sddx", "tasks", `${id}.json`);
+      if (existsSync13(f))
         files.push(f);
     }
   }
   return files;
 }
-function cmdSessionStart(event) {
-  const cwd = event.cwd ?? process.cwd();
-  const lines = [];
-  if (existsSync11(join13(cwd, ".sddx"))) {
+var NOT_OPTED_IN_LINE = "sddx is installed. To plan a change with it in this repository, run /sddx:brainstorm.";
+var ROUTER = join16("skills", "using-sddx", "SKILL.md");
+var ROUTER_MAPPING = join16("skills", "using-sddx", "references", "claude-code.md");
+function pluginRoot() {
+  const fromEnv = process.env.CLAUDE_PLUGIN_ROOT;
+  if (fromEnv)
+    return fromEnv;
+  let d = dirname7(fileURLToPath(import.meta.url));
+  for (let i = 0;i < 4; i++, d = dirname7(d)) {
+    if (existsSync13(join16(d, ROUTER)))
+      return d;
+  }
+  return null;
+}
+function shadowingSddx(pluginBin) {
+  const own = pluginBin ? realOrNull(join16(pluginBin, "sddx")) : null;
+  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
+    if (dir === "")
+      continue;
+    const candidate = join16(dir, "sddx");
     try {
-      const res = sweep(cwd);
-      if (res.removed.length > 0)
-        lines.push(`sddx: swept ${res.removed.length} orphan worktree(s)`);
+      accessSync(candidate, constants.X_OK);
+      if (!statSync4(candidate).isFile())
+        continue;
+      if (own !== null && realpathSync2(candidate) === own)
+        continue;
+      if (pluginBin && resolve6(dir) === resolve6(pluginBin))
+        continue;
+      return candidate;
     } catch {}
-    if (boardEnabled(cwd)) {
-      try {
-        writeBoard(cwd);
-      } catch (e) {
-        lines.push(`sddx: board refresh failed: ${e.message}`);
-      }
-    }
-    for (const file of activeTaskFiles(cwd)) {
-      try {
-        const t = JSON.parse(readFileSync10(file, "utf8"));
-        if (!isTerminal(t.phase))
-          lines.push(`sddx task ${t.id}: ${t.phase}, ${t.task}`);
-      } catch {
-        lines.push(`sddx: task file ${file} is unreadable`);
-      }
+  }
+  return null;
+}
+var realOrNull = (path) => {
+  try {
+    return realpathSync2(path);
+  } catch {
+    return null;
+  }
+};
+function runCommandLines(plugin) {
+  const pluginBin = plugin ? join16(plugin, "bin") : null;
+  const shadow = shadowingSddx(pluginBin);
+  if (!shadow || !pluginBin)
+    return ["Run sddx as: sddx"];
+  return [
+    `Run sddx as: ${join16(pluginBin, "sddx")}`,
+    `Warning: another sddx at ${shadow} comes first on PATH and would shadow the plugin's, so use the command above wherever a skill says sddx. Removing the other one lets plain sddx work; the sddx troubleshooting guide shows how.`
+  ];
+}
+function routerText(plugin) {
+  if (!plugin)
+    return "sddx: the router skill could not be located (CLAUDE_PLUGIN_ROOT is unset)";
+  const parts = [];
+  for (const rel of [ROUTER, ROUTER_MAPPING]) {
+    try {
+      parts.push(withoutFrontmatter(readFileSync12(join16(plugin, rel), "utf8")));
+    } catch {
+      parts.push(`sddx: ${join16(plugin, rel)} could not be read`);
     }
   }
-  if (lines.length === 0) {
-    emit({});
-    return;
+  return parts.join(`
+
+`);
+}
+function v5Check(root) {
+  let s;
+  try {
+    s = detectV5Signals(root);
+  } catch (e) {
+    return {
+      pending: false,
+      lines: [`sddx: could not check for sddx 5 leftovers: ${e.message}`]
+    };
   }
-  emit({
-    hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: lines.join(`
-`) }
-  });
+  const registered = s.claudeOwned.length > 0 || s.settingsHooks > 0;
+  if (v5Blockers(s).length > 0 || registered || s.declaration) {
+    const lines = [
+      "This repository was set up by sddx 5, which sddx 6 does not run. Run `sddx migrate` to preview the move, then `sddx migrate --yes` to apply it."
+    ];
+    if (registered) {
+      lines.push("Until then its sddx 5 files and hooks under .claude/ stay registered, so both sets of hooks would fire: sddx 5's and the plugin's.");
+    }
+    return { pending: true, lines };
+  }
+  if (s.claudeModified.length === 0)
+    return { pending: false, lines: [] };
+  return {
+    pending: false,
+    lines: [
+      `Note: sddx 5 generated ${s.claudeModified.join(", ")}, and they were edited since, so sddx migrate kept them. Remove them once they are no longer needed.`
+    ]
+  };
+}
+function optedInLines(root, plugin, notes) {
+  const lines = [
+    `sddx is active in this repository (${root}).`,
+    ...runCommandLines(plugin),
+    ...notes
+  ];
+  try {
+    const res = sweep(root);
+    if (res.removed.length > 0)
+      lines.push(`sddx: swept ${res.removed.length} orphan worktree(s)`);
+  } catch {}
+  if (boardEnabled(root)) {
+    try {
+      writeBoard(root);
+    } catch (e) {
+      lines.push(`sddx: board refresh failed: ${e.message}`);
+    }
+  }
+  for (const file of activeTaskFiles(root)) {
+    try {
+      const t = JSON.parse(readFileSync12(file, "utf8"));
+      if (!isTerminal(t.phase))
+        lines.push(`sddx task ${t.id}: ${t.phase}, ${t.task}`);
+    } catch {
+      lines.push(`sddx: task file ${file} is unreadable`);
+    }
+  }
+  return [...lines, "", routerText(plugin)];
+}
+function sessionStartContext(cwd) {
+  const root = optedInRoot(cwd);
+  if (root === null)
+    return NOT_OPTED_IN_LINE;
+  const plugin = pluginRoot();
+  const v5 = v5Check(root);
+  if (v5.pending)
+    return [...v5.lines, ...runCommandLines(plugin)].join(`
+`);
+  return optedInLines(root, plugin, v5.lines).join(`
+`);
+}
+function cmdSessionStart(event) {
+  let context;
+  try {
+    context = sessionStartContext(event.cwd ?? process.cwd());
+  } catch (e) {
+    context = `sddx: session start failed: ${e.message}`;
+  }
+  emit({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: context } });
 }
 function dispatchHook(sub, event) {
   try {

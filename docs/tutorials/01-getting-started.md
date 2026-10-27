@@ -1,107 +1,171 @@
-# Getting started: your first verified task
+# Getting started: your first goal
 
-This walks a **one-node run** by hand from the CLI, so you can see every phase
-transition as it happens. A single task is not a special mode — it is a run
-with one node, and it gets the same goal, run branch, worktree, oracle, and
-receipt as a ten-node one. This is what `/sddx:run` drives for you inside
-Claude Code. The exact commands are also a copy-paste-able scaffold at
+This tutorial takes one small goal from an empty repository to a pull request,
+in a Claude Code session with the sddx plugin. At each step you will see what
+the agent does and the sddx command that gates it. The same lifecycle driven by
+hand from the CLI, with no agent at all, is the runnable scaffold at
 [examples/01-single-task](../../examples/01-single-task/).
 
-## The loop
+## Before you start
 
-```
-PLAN ──► RED ──► GREEN ──► REFACTOR ──► VERIFY ──► DONE
-```
-
-Every arrow is a hook or a CLI command reacting to a real exit code, never a
-model claim — see
-[design-principles.md](../explanation/design-principles.md#why-phases-are-evidence-not-claims)
-for why that's the whole point.
-
-## 1. Write a spec and a one-node graph
-
-A spec is one YAML file with a one-sentence goal, binary success criteria,
-and a mandatory **oracle** — the command that proves the task is done:
-
-```yaml
-# spec.yaml
-task: health check returns ok
-success_criteria:
-  - "bun test tests/health.test.ts exits 0"
-scope:
-  - "health.ts"
-  - "tests/**"
-oracle:
-  type: command
-  run: "bun test tests/health.test.ts"
-  expect: exit 0
-```
-
-A graph names the **goal** that owns the run branch. Even one task needs one,
-because a task with no goal is a task no run branch describes:
-
-```yaml
-# graph.yaml
-schema_version: "1.0"
-interaction_mode: human
-goal: health endpoint reports ok
-tasks:
-  - alias: health
-    spec: spec.yaml
-```
-
-`sddx graph create --graph graph.yaml --dry-run` validates everything and
-writes nothing. Then `sddx graph approve --graph graph.yaml` followed by
-`sddx graph create --graph graph.yaml` creates the run branch, the task's
-`sddx/<id>` branch, its worktree, and the goal record — atomically, or not at
-all. A spec without an oracle is rejected right here — "no oracle, no goal" —
-see [spec-reference.md](../reference/spec-reference.md#oracle).
-
-**The rest of the loop runs inside the task's worktree**, at
-`.sddx-worktrees/<id>/`. Your own checkout stays untouched and writable.
-
-## 2. Write the failing test first
-
-The task starts in `PLAN`. Write a test against code that doesn't exist yet,
-run it, and watch it fail — that failure **is** the RED-phase evidence:
+Install Bun and the plugin (details in [Install sddx](../how-to/install-sddx.md)):
 
 ```sh
-bun test tests/health.test.ts   # fails: module not found
+curl -fsSL https://bun.sh/install | bash
 ```
 
-`sddx task phase <id> RED --test-exit 1` records that observed exit code;
-passing `--test-exit 0` here is refused outright — the transition demands
-real evidence, not a claim.
+```
+/plugin marketplace add glapsfun/sddx
+/plugin install sddx@sddx
+```
 
-## 3. Prove the oracle itself discriminates
+Then make a repository with one commit and a test runner. This tutorial uses
+Bun's:
 
-Before implementing, run `sddx red-check <id>` — it executes the spec's own
-oracle command right now, while the implementation is still missing, and
-records the failure as `evidence.oracle_red`. `sddx verify` later refuses any
-task missing this: an oracle that never failed proves nothing.
+```sh
+mkdir greeter && cd greeter && git init
+bun init -y
+git add -A && git commit -m init
+```
 
-## 4. Implement, go green
+Start Claude Code there. The repository has no `.sddx/` yet, so session start
+adds a single line: sddx is installed, and `/sddx:brainstorm` plans a change
+with it. Nothing else about the session changes until you opt in.
 
-Write the implementation, re-run the test, and once it passes,
-`sddx task phase <id> GREEN --test-exit 0` records that too. The optional
-`REFACTOR` phase is free cleanup time — tests just have to stay green.
+## 1. Brainstorm the design
 
-## 5. Verify
+Type:
 
-`sddx task phase <id> VERIFY` then `sddx verify <id>` executes the oracle for
-real, writes a hash-chained receipt to `.sddx/receipts/<id>.json`, and makes
-one atomic commit of the code, the spec, and the receipt. `sddx board` and
-`sddx audit` confirm the result — the full receipt schema and what audit
-checks are in
-[receipts-schema.md](../reference/receipts-schema.md).
+```
+/sddx:brainstorm add a greet(name) function that returns "Hello, <name>"
+```
 
-## Inside Claude Code
+The agent asks one question at a time, for example what an empty name should
+return, and you can answer "skip" to let it decide. Then it writes the design
+into `.sddx/specs/<date>-greeting.md`:
 
-The same loop, without the by-hand phase commands: `/sddx:run` drives this
-exact sequence — for one node or many — ending in the deterministic **Next
-Actions** menu instead of free-form "what's next" prose. Next:
-[your first parallel run](02-your-first-parallel-run.md), which is the same
-lifecycle with more than one node in the graph.
+```markdown
+# Greeting
 
-Coming from sddx 3.x, where this was `/sddx:quick` or `--solo`? See
-[migrate-to-v4.md](../how-to/migrate-to-v4.md).
+## Design
+
+### Goal
+Greet a person by name.
+
+### Acceptance
+- greet("Ada") returns "Hello, Ada"
+- greet("") returns "Hello, stranger"
+
+### Non-goals
+- localized greetings
+
+### Assumptions
+- an empty name gets the stranger greeting, decided without asking
+
+### Open decisions
+```
+
+Every Acceptance line must be provable by a command, and Open decisions must be
+empty. The agent closes the step with:
+
+```sh
+sddx spec check .sddx/specs/2026-10-27-greeting.md
+```
+
+`.sddx/` now exists, so the repository is opted in. Every new session here
+starts with the sddx router and a list of unfinished tasks.
+
+## 2. Plan and approve
+
+The plan skill appends `## Tasks`, one task per independently provable piece.
+Here one is enough:
+
+````markdown
+## Tasks
+
+### greet-1 greet function
+
+```sddx
+oracle:
+  type: command
+  run: bun test tests/greet.test.ts
+  expect: exit 0
+scope: [src/greet.ts, tests/greet.test.ts]
+```
+````
+
+The agent commits the spec, then runs the three plan gates:
+
+```sh
+sddx plan check .sddx/specs/2026-10-27-greeting.md
+sddx plan approve .sddx/specs/2026-10-27-greeting.md --harness claude-code
+sddx plan start .sddx/specs/2026-10-27-greeting.md
+```
+
+`plan approve` raises Claude Code's permission dialog, naming the plan's hash.
+**That dialog is your approval.** Read the plan before you accept: the agent
+cannot answer it for you, and the approval covers exactly these bytes. Change
+the spec afterwards and the hash no longer matches, so `plan start` refuses.
+
+`plan start` creates the goal, its run branch `sddx/run-2026-10-27-greeting`,
+and the task `greet-1` in state `PLANNED`.
+
+## 3. Execute
+
+```sh
+sddx task start greet-1
+```
+
+This creates the task's worktree at `.sddx-worktrees/greet-1` on branch
+`sddx/greet-1`. Your own checkout is never touched. A worker subagent writes
+`tests/greet.test.ts`, watches it fail, writes `src/greet.ts`, and finishes
+with:
+
+```sh
+sddx verify greet-1
+```
+
+`verify` is the boundary proof. It runs the oracle twice in a scratch worktree:
+on the base commit with only the task's test files applied, where it must
+**fail**, and on the finished tree, where it must **pass**. A test that passes
+without the change proves nothing, so `verify` refuses it. A pass moves the
+task to `IN_REVIEW`. [Verification](../reference/verification.md) has the
+details.
+
+## 4. Review
+
+A critic subagent, in a clean context and with no file-editing tools, reviews
+exactly the proven diff against the spec. The agent records its verdict:
+
+```sh
+sddx review record greet-1 --verdict pass --reviewer sddx:critic --harness claude-code
+```
+
+A pass makes the task `DONE`. sddx commits the proven tree together with the
+task state and a receipt, `.sddx/receipts/greet-1.json`, and merges that commit
+into the run branch. A fail sends the task back to the worker with the
+critic's findings.
+
+## 5. Finish
+
+```sh
+sddx run report --goal 2026-10-27-greeting
+sddx pr create --goal 2026-10-27-greeting
+```
+
+The run report shows every task merged, and `pr create` opens a pull request
+from the run branch. In between, the agent runs `sddx audit` in a temporary
+checkout of the run branch, where the receipts were committed, to check the
+chain before it ships. Merging the pull request into your branch is your
+decision; sddx never does it.
+
+## Where to look
+
+- `sddx board` shows every task and its state.
+- [Receipts schema](../reference/receipts-schema.md) explains what a receipt
+  proves and what `audit` checks.
+- [Hooks and the plugin](../reference/hooks.md) lists what the plugin
+  registers and what session start says.
+
+Next: [your first parallel run](02-your-first-parallel-run.md), the same
+lifecycle with tasks that run side by side.

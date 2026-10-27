@@ -13,7 +13,7 @@ PR merges to main (conventional commits: feat:, fix:, docs:, ci:, ...)
         ▼
 release-please opens/updates a standing "chore: release vX.Y.Z" PR
   • new CHANGELOG.md section drafted from the commits since the last release
-  • package.json#version bumped
+  • package.json#version and .claude-plugin/plugin.json#version bumped together
         │
         ▼
 required checks run on that PR, including the published-package install
@@ -32,6 +32,26 @@ release-please tags v<version> and publishes the GitHub Release
 release workflow checks out that tag (no rebuild — dist/cli.mjs is
 already committed and CI-verified) and runs `npm publish --provenance`
 — authenticated via npm OIDC trusted publishing, no stored NPM_TOKEN
+```
+
+## The plugin
+
+The repository is also the Claude Code plugin and its own marketplace: users
+add it with `/plugin marketplace add glapsfun/sddx`, which serves the plugin
+from `main`. `.claude-plugin/plugin.json` carries the same version as
+`package.json`, and release-please bumps both in the release PR
+(`release-please-config.json`, `extra-files`). Claude Code updates an installed
+plugin only when that version changes, so commits landing on `main` between
+releases reach nobody; merging the release PR is what ships the plugin, at the
+same moment as the npm package. `tests/plugin-manifest.test.ts` fails if the two
+versions ever disagree, and runs `claude plugin validate . --strict` in CI.
+
+Major versions are built on an integration branch (`v6` for sddx 6) and merged
+into `main` when ready. To try one before release, install from the branch:
+
+```
+/plugin marketplace add glapsfun/sddx#v6
+/plugin install sddx@sddx
 ```
 
 ## The maintainer's job

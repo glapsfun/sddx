@@ -8,7 +8,7 @@ everything around it. This guide moves a repository that sddx 5 set up.
 
 | sddx 5 | sddx 6 |
 | --- | --- |
-| `npm install -g @glapsfun/sddx` then `sddx init --adapter claude`, which generated `.claude/` files | install the sddx plugin for your harness; nothing is generated into the repository |
+| `npm install -g @glapsfun/sddx` then `sddx init --adapter claude`, which generated `.claude/` files | install the sddx plugin; nothing is generated into the repository |
 | a graph YAML plus one spec YAML per task in `.sddx/drafts/` | one markdown spec per goal in `.sddx/specs/<date>-<slug>.md` ([spec-reference.md](../reference/spec-reference.md)) |
 | `sddx graph create --dry-run`, `graph approve`, `graph create` | `sddx plan check`, `plan approve`, `plan start` |
 | phases PLAN, RED, GREEN, REFACTOR, VERIFY, DONE | states PLANNED, IN_PROGRESS, IN_REVIEW, DONE, ABANDONED |
@@ -20,17 +20,30 @@ everything around it. This guide moves a repository that sddx 5 set up.
 Receipts, approval tokens and goal records are history and stay where they are.
 `sddx audit` validates versions 1 to 5 in one chain.
 
-## 1. Finish or close in-flight work with sddx 5
+## 1. Install the plugin
+
+Install Bun and the plugin as in [Install sddx](install-sddx.md). Open the
+repository in Claude Code: session start recognizes the sddx 5 setup and points
+to `sddx migrate` instead of loading the workflow.
+
+Run the steps below by asking the agent, whose shell has the plugin's `sddx`.
+From your own terminal, use `bunx @glapsfun/sddx@6` in place of `sddx`.
+
+If a global sddx 5 is still installed, it comes first on your `PATH`. Session
+start notices and gives the agent the plugin's CLI by absolute path; remove the
+old one once you have migrated (step 6).
+
+## 2. Finish or close in-flight work with sddx 5
 
 Migration refuses while any sddx 5 task is unfinished or any sddx 5 goal has
 outstanding tasks, because moving the state out from under it would strand the
 work. `sddx migrate` lists each one. Finish them with sddx 5, or close them out:
 
-```sh skip
+```sh sddx5 skip
 npx @glapsfun/sddx@5 task phase <task-id> ABANDONED
 ```
 
-## 2. Preview
+## 3. Preview
 
 ```sh
 sddx migrate
@@ -43,7 +56,7 @@ write), files it will keep because you edited them, the sddx hook entries it
 will take out of `.claude/settings.json` (your own hooks stay), the v5 state it
 will move to `.sddx/legacy/`, and the config rewrite.
 
-## 3. Apply
+## 4. Apply
 
 ```sh
 sddx migrate --yes
@@ -57,7 +70,7 @@ git add -A .sddx .claude
 git commit -qm "chore: migrate sddx 5 to 6"
 ```
 
-## 4. Check
+## 5. Check
 
 ```sh
 sddx audit
@@ -71,12 +84,16 @@ sddx doctor
 `v5-leftovers`. Files migration kept because you edited them are listed in the
 preview; remove them by hand when you are ready.
 
-## 5. Install the plugin
+## 6. Remove sddx 5
 
-Install the sddx plugin for your harness and remove the old global package if
-your scripts no longer need it. If `package.json` lists `@glapsfun/sddx` as a
-dependency, upgrade or remove it yourself: migration never edits package
-manifests.
+Remove the old global package once your scripts no longer need it:
+
+```sh sddx5 skip
+npm uninstall -g @glapsfun/sddx
+```
+
+If `package.json` lists `@glapsfun/sddx` as a dependency, upgrade or remove it
+yourself: migration never edits package manifests.
 
 ## Going back
 

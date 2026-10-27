@@ -1,70 +1,69 @@
 # Model DAG dependencies
 
-`depends_on` in `graph.yaml` turns a flat task set into a general DAG — fan-out
-(one parent, several children) **and** fan-in (several parents, one child).
-This guide covers the two rules that make it safe, and the two ways a
-dependent's workspace gets built. A full runnable walkthrough is
+`depends_on` in a task's `sddx` block turns a goal's tasks into a general DAG:
+fan-out (one parent, several children) and fan-in (several parents, one
+child). This guide covers the rule that keeps it safe and how a dependent's
+worktree is built. A runnable walkthrough is
 [examples/03-dag-dependencies](../../examples/03-dag-dependencies/).
 
-## The rule: overlap ⟹ ordered
+## Fan-out and fan-in
 
-Every pair of tasks a graph does **not** order — including two parents that
-both feed the same fan-in child — must have disjoint `scope`. `graph create`
-and `goal create` share one checker (`validateSchedule`) that walks every
-unordered pair and refuses with `scope overlap between concurrent tasks
-"<a>" and "<b>" — order one after the other or make their scopes disjoint`
-the moment it finds one. This is checked, atomically, before anything is
-created — a violation refuses the whole graph, not just the offending node.
+````markdown
+### a Parser
 
-A dependent may legally overlap its *own* ancestor's scope (that's what
-`depends_on` buys you): a child scoped `src/a/child.ts` depending on a parent
-scoped `src/a/**` is fine, because the edge already orders them.
-
-## Fan-out and fan-in in `graph.yaml`
-
-```yaml
-schema_version: "1.0"
-interaction_mode: human
-goal: ship the dashboard
-tasks:
-  - alias: a
-    spec: specs/a.yaml
-  - alias: b
-    spec: specs/b.yaml
-  - alias: c
-    spec: specs/c.yaml
-    depends_on: a # fan-out: a single parent
-  - alias: d
-    spec: specs/d.yaml
-    depends_on: [a, b] # fan-in: a list of parents
+```sddx
+oracle:
+  type: command
+  run: bun test tests/parser.test.ts
+  expect: exit 0
+scope: [src/parser/**, tests/parser.test.ts]
 ```
 
-`depends_on` is a bare scalar for one parent or a list for several; a legacy
-single-string value still reads correctly either way.
+### b Renderer
 
-## Deferred creation, then materialize
+```sddx
+oracle:
+  type: command
+  run: bun test tests/renderer.test.ts
+  expect: exit 0
+scope: [src/renderer/**, tests/renderer.test.ts]
+```
 
-A task with any `depends_on` entries is created **deferred**: no worktree,
-base recorded as `pending:<parent-id>[,...]`, status **Blocked** on the board
-until every named parent reaches `DONE`. Once unblocked (status flips to
-**Ready**), `sddx task materialize <id>` builds the real workspace:
+### c Pipeline
 
-- **One parent** — the worktree forks directly from that parent's `DONE`
-  commit (the tip of `sddx/<parent-id>`).
-- **Several parents (fan-in)** — the worktree forks from the *first* parent,
-  then sequentially `git merge --no-ff` the rest in. This is safe by
-  construction: the graph gate already proved every pair of co-parents has
-  disjoint scope, so the merge cannot conflict. A conflict aborts
-  materialization loudly rather than auto-resolving — never an octopus merge,
-  never a rebase.
+```sddx
+oracle:
+  type: command
+  run: bun test tests/pipeline.test.ts
+  expect: exit 0
+scope: [src/pipeline.ts, tests/pipeline.test.ts]
+depends_on: [a, b]
+```
+````
 
-`sddx task materialize <id>` refuses with `not DONE` if any named parent
-hasn't finished yet.
+`depends_on` takes one task id, or a list for several parents.
 
-## Fan-in leaves no scratch state behind
+## The rule: overlap means ordered
 
-A fan-in merge happens inside the dependent's own worktree, forked from the
-first-listed parent's commit with each remaining parent merged in sequentially
-— never an octopus merge. If a merge conflicts, materialization aborts and
-reports the failing SHA rather than auto-resolving: a conflict here means the
-`overlap ⟹ ordered` gate had a blind spot, not something to paper over.
+Two tasks the plan does not order can run at the same time, so they must have
+disjoint `scope`. That includes two parents of the same fan-in child.
+`sddx plan check` checks every unordered pair and refuses with:
+
+```
+scope overlap between concurrent tasks "<a>" and "<b>"; order one after the other or make their scopes disjoint
+```
+
+Nothing is created while the plan is refused. A dependent may overlap its own
+ancestor's scope: the edge already orders them.
+
+## How a dependent starts
+
+A task with dependencies stays `PLANNED` until every parent is `DONE`. Then
+`sddx task ready --goal <goal-id>` lists it and `sddx task start` creates its
+worktree from the tip of the goal's run branch. Every parent was merged into the
+run branch when its review passed, so the child starts from all of its parents'
+work, with no merge inside its worktree. For a single parent this is the same
+rule.
+
+If a parent is abandoned instead, see
+[Configure retry and skip/block](configure-retry-and-skip.md).

@@ -54,7 +54,12 @@ jobs:
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
+      # the plugin manifest test runs Claude Code's own validator, and refuses to
+      # skip when SDDX_REQUIRE_CLAUDE is set
+      - run: npm install -g @anthropic-ai/claude-code@2.1.311
       - run: bun test
+        env:
+          SDDX_REQUIRE_CLAUDE: "1"
       # openspec/ is private planning state and never committed, so this skips
       # explicitly here; it enforces scenario-to-test links in local checkouts.
       - run: bun run spec-coverage

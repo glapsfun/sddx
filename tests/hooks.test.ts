@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { NOT_OPTED_IN_LINE } from "../src/lib/hookdispatch";
 import { fixtureRepo, writeConfig } from "./fixtures";
 import { CLI, completeTask, createRun, doneFile, sddx, startTask } from "./helpers";
 
@@ -35,8 +36,10 @@ describe("session-start", () => {
     expect(ctx).toContain("sddx task T2: PLANNED, Planned");
   });
 
-  test("is silent in a repository without sddx state", () => {
-    expect(hook("session-start", fixtureRepo())).toEqual({});
+  test("says only that sddx is available in a repository without sddx state", () => {
+    expect(hook("session-start", fixtureRepo()).hookSpecificOutput?.additionalContext).toBe(
+      NOT_OPTED_IN_LINE,
+    );
   });
 });
 

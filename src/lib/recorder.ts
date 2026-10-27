@@ -4,6 +4,7 @@
 // are ignored: the recorder never guesses whether a command was a test run.
 import { profile } from "./config";
 import { resolveTask } from "./resolve";
+import { withLeadingCd } from "./shellcwd";
 import { mainRootOf, type TaskState, writeTask } from "./task";
 
 export const TEST_RUNNER_PREFIXES: readonly string[] = [
@@ -33,10 +34,12 @@ export interface RecordResult {
 }
 
 export function recordTestRun(
-  cwd: string,
-  command: string,
+  started: string,
+  fullCommand: string,
   exitCode: number | undefined,
 ): RecordResult {
+  // the run counts for the task in the directory it ran in
+  const { command, cwd } = withLeadingCd(fullCommand, started);
   if (matchTestRunner(command) === null || exitCode === undefined) {
     return { matched: false, recorded: null };
   }

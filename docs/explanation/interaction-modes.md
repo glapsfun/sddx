@@ -1,342 +1,248 @@
 # Interaction modes: human-in-the-loop and unattended
 
-sddx has two interaction modes. They are **not** two workflows — there is one
-execution engine, one receipt format, one completion summary. They differ only
-in whether the plan-approval gate is armed.
+sddx has two interaction modes. They are **not** two workflows: there is one
+lifecycle, one receipt format, one run report. They differ only in whether a
+person must approve the plan before anything is created.
 
 ```
- goal ─► discover ─► clarify ─► plan ──[G1]──► execute ─► verify ─► run branch ──[G2]──► target
-                        ▲                ▲                                          ▲
-                       G0                │                                          │
-        ask only what blocks       human: ARMED                              ALWAYS ARMED
-        an oracle; assume          auto:  self-approved                      both modes.
-        the rest                          unless a bound trips               no exceptions.
+ idea ─► brainstorm ─► spec ─► plan ──[G1]──► execute ─► verify ─► review ─► run branch ──[G2]──► your branch
+                                        │                                                 │
+                              human: you approve                                 always you,
+                              auto:  self-approved                               in both modes
+                                     unless a bound trips
 ```
 
-`auto` is `human` with G1 pre-satisfied. That is not a metaphor — it is how the
-code works, which is why "the plan exceeded its blast radius" needs no special
-path: the token simply is not granted and the gate arms as it always would.
+`auto` is `human` with G1 pre-satisfied. That is how the code works, which is
+why "the plan exceeded its blast radius" needs no special path: the
+self-approval is simply not granted.
 
 ## "Fully autonomous" would be a lie, so we don't say it
 
-**G2 is armed in both modes.** Merging or pushing the *target* branch is always
-the user's decision — that guarantee predates this feature and is unchanged.
-
-What `auto` actually buys you is an **unattended run ending at a reviewable run
-branch with a receipt chain**. You come back to `sddx/run-<goal>`, read the
-report, and decide. That is a better proposition than an unattended merge, and
-it is the honest one.
+**G2 holds in both modes.** Merging the run branch into your branch is always
+your decision. What `auto` buys is an unattended run that ends at a reviewable
+run branch with a receipt chain: you come back to `sddx/run-<goal-id>`, read the
+run report and the pull request, and decide.
 
 ## Which mode to use
 
 | | `human` (default) | `auto` |
 |---|---|---|
-| Use when | the plan is the risky part — unfamiliar codebase, wide blast radius, work you'll have to defend | the plan is routine — a shape you've run before, tight scope, good oracles |
-| You review | the plan, before anything exists | the run branch, after everything is verified |
-| Cost of being wrong | seconds (delete the drafts) | a run branch you discard |
+| Use when | the plan is the risky part: an unfamiliar codebase, a wide blast radius, work you will have to defend | the plan is routine: a shape you have run before, tight scope, good oracles |
+| You review | the plan, before anything exists | the run branch, after everything is proven and reviewed |
+| Cost of being wrong | seconds: edit or delete the spec | a run branch you discard |
 
-Start in `human`. Move a *shape* of task to `auto` once you've watched it work
-a few times — not a whole project at once.
+Start in `human`. Move a shape of work to `auto` once you have watched it run a
+few times, not a whole project at once.
 
 ## The gate is a permission dialog, not a prompt instruction
 
-This is the part that matters, and it is worth being precise about why.
+The boundary proof works because its evidence, an oracle's exit code on two
+trees, comes from processes the model cannot forge. Approval is a different
+shape:
 
-The TDD gate works because its evidence — a test runner's exit code — comes from
-a process the model cannot forge. Approval is a different shape:
-
-| | TDD gate | Approval gate |
+| | Boundary proof | Approval |
 | --- | --- | --- |
-| Shape | **prohibition** — deny a write | **permission** — a positive act |
-| Evidence | test-runner exit code | a human's intent |
-| Forgeable by the model? | no | **yes, trivially** — it is a CLI call |
+| Shape | a check on evidence | a positive act |
+| Evidence | exit codes on the base and the finished tree | a person's intent |
+| Forgeable by the model? | no | **yes, trivially**: it is a CLI call |
 
-A model can type `sddx graph approve`. So a CLI-only gate proves the plan that
-runs is the plan that was approved — and nothing about who approved it.
+A model can type `sddx plan approve`. So a check in the CLI alone proves that
+the plan started is the plan approved, and nothing about who approved it.
 
-The one external process only a human drives is the harness's own permission
-dialog. sddx raises it from a `PreToolUse` hook using `permissionDecision:
-"ask"`, which per the hook API fires **even when the session is in an
-auto-accept permission mode**. A permissive session config cannot silently turn
-human mode into a no-op.
+The one thing only a person drives is the harness's own permission dialog. The
+sddx plugin raises it from a `PreToolUse` hook with `permissionDecision: "ask"`,
+which fires **even when the session auto-accepts permissions**. A permissive
+session cannot quietly turn human mode into a no-op. Three rules close the ways
+around it:
 
-Three things make that airtight, and each closes a way the gate was defeatable:
+- **`plan approve` always asks.** Recording approval is the human act, so it is
+  the command whose dialog carries the meaning. No mode and no existing token
+  pre-satisfies it. `plan start` asks too when no valid token covers the plan.
+- **Approval tokens and the config cannot be written by tools.** A file-tool
+  write to `.sddx/approvals/` or `.sddx/config.json` is denied in every
+  repository, whether or not it uses sddx yet. A shell command naming those
+  paths is refused unless it is a plain read. That shell check is textual: it
+  sees `..` and doubled slashes but not shell expansion, so it raises the bar
+  behind the file-tool block rather than sealing it.
+- **The mode is read from `.sddx/config.json` only.** There is no `--mode`
+  flag and no environment variable: either would be part of the command line
+  the agent composes, so honoring it would let the constrained thing switch off
+  the constraint.
 
-- **`graph approve` is gated too, and always asks.** Gating only `graph create`
-  left the obvious hole: run `graph approve` first, and `create` then finds a
-  token and sails through. Recording approval *is* the human act, so it is the
-  command whose dialog carries the meaning — no mode and no existing token
-  pre-satisfies it.
-- **Approval tokens cannot be written by hand.** `.sddx/**` is exempt from the
-  TDD gate, so a direct `Write` to `.sddx/approvals/` would forge a token. That
-  path is blocked unconditionally for `Edit`/`Write`, in every phase, task or no
-  task. Bash is covered too, but by a *textual* check: a command naming the path
-  is refused unless it is a plain read (an approval token is not a secret). That
-  check sees `..`, doubled slashes and concatenation, and does **not** see shell
-  expansion — `.sddx/approv?ls/` or `${d}dx/approvals/` never spell the path out.
-  It raises the bar behind the `Edit`/`Write` block; it is not a second proof.
-- **Mode is read from `.sddx/config.json` only.** A `--mode` flag or an inline
-  `SDDX_INTERACTION_MODE=auto` is part of the command line the agent composes, so
-  honoring either would let the constrained thing switch off the constraint.
-  There is no `--mode` flag. The file itself is not tool-writable either, for
-  the same reason: leaving it open would hand back the same choice one
-  indirection later. Edit it yourself; read the effective values with
-  `sddx config show`.
-
-Four tiers, weakest first. sddx stacks all of them because 1–3 are cheap:
+Four tiers, weakest first. sddx stacks all of them because the first three are
+cheap:
 
 ```
- tier 0  a system prompt saying "wait for approval"   ← theatre on its own
- tier 1  approval token + plan_sha256                 ← approve-A-execute-B impossible
- tier 2  PreToolUse "ask" permission dialog           ← model cannot self-grant
- tier 3  ssh-signed token, touch-required key         ← cryptographically human-bound
+ tier 0  a system prompt saying "wait for approval"   theatre on its own
+ tier 1  approval token over the spec's sha256        approve-A-start-B impossible
+ tier 2  PreToolUse "ask" permission dialog           the model cannot self-grant
+ tier 3  ssh-signed approval, touch-required key      cryptographically human-bound
 ```
 
-The gate also **fails closed**: any error inside it — unreadable config, corrupt
-token, an unexpected throw — resolves to `ask`. A prohibition gate that fails
-open loses one assertion; a permission gate that fails open disables the mode
-the user chose.
+The gate also **fails closed**: an unreadable config, an unreadable plan, an
+unexpected error, or a missing Bun all resolve to `ask`. A gate that checks
+evidence can fail open and lose one assertion; a permission gate that fails
+open disables the mode you chose.
 
 ### What sddx can and cannot prove
 
-Stated plainly, because the framework's credibility depends on not overclaiming:
-
 - **Can prove:** which plan a receipt descends from (`plan_sha256`), which mode
-  it ran under, and — with a valid signature — that it was produced by the named
-  signer's key.
-- **Cannot prove:** that a particular human approved, unless a touch-required
-  hardware key (`sk-*`) is configured. With a passphrase-less file key or a
-  cached agent, the model's own shell can sign, so tier 3 collapses to tier 1.
+  it ran under, and, with a valid signature, that the approval was made with the
+  named signer's key.
+- **Cannot prove:** that a person approved, unless the approval was signed with
+  a key that needs a touch or a passphrase. The dialog leaves no trace a third
+  party can check, so a receipt records the harness only as reported
+  (`harness_reported`), and its approval `binding` is `signed` only when a
+  signature verifies.
 
-`sddx audit` is worded to stay inside that claim.
+`sddx audit` is worded to stay inside that claim: it reports human approval as
+provable only for a signed binding.
 
-## The plan is the drafts
+## The plan is the spec
 
-There is no separate plan document. `.sddx/drafts/<date>-<slug>-graph.yaml` plus
-its spec files **is** the plan, which is why "edit the plan" means editing YAML
-and "cancel" means `rm`.
+There is no separate plan document. The goal's spec file,
+`.sddx/specs/<date>-<slug>.md`, holds the design and the tasks, and it is what
+you approve. Approving hashes its bytes:
 
 ```
- Approve     → sddx graph approve --graph <path>
- Edit        → edit the YAML, re-render (shows the plan, plus what changed)
- Regenerate  → delete the drafts, re-plan
- Cancel      → delete the drafts. nothing else to undo.
+ Review   → sddx plan check <spec>     the hash, the base commit, the task count
+ Approve  → sddx plan approve <spec>   raises your dialog
+ Start    → sddx plan start <spec>     refuses without a matching approval
+ Edit     → edit the spec, commit, check and approve again
+ Cancel   → delete or never start the spec. Nothing else exists yet.
 ```
 
-Review it with `sddx graph create --graph <path> --dry-run`, which runs the
-*same* resolve-and-validate path a real create runs and writes nothing. That
-matters: three facts a human needs are decided inside `graph create` and are
-absent from the drafts — the effective workspace mode (including the submodule
-auto-downgrade), the resolved base SHA, and the validation verdict. Approving
-without them would mean approving less than the command knows.
-
-Validation runs **before** you are asked, so a plan that would be rejected never
-costs you a read.
+`plan check` runs the same validation `plan start` runs and writes nothing, so a
+plan that would be refused never costs you a read. The spec must be committed:
+the plan you start is then in history.
 
 ### Any edit invalidates approval, on purpose
 
-`plan_sha256` covers the graph file's raw bytes plus every referenced spec's
-bytes. Reordering nodes invalidates it. A comment change invalidates it.
-
-The token additionally records the **workspace strategy** it was approved under.
-Worktree is now the only strategy, so a mismatch can only mean a token written
-by an older sddx under `branch` or `none` — which must not authorize a canonical
-run it was never rendered for. `graph create` refuses and names it; re-render
-and re-approve.
-
-That is deliberate. A canonical *semantic* hash would have to enumerate every
-meaningful field correctly, and missing one — say `retry.max_attempts` — would
-leave an edit from 1 to 50 silently approved. False invalidation costs a
-re-approval, and a re-render shows the plan again with the diff called out.
-False validation is unbounded.
+The approval covers the spec file's raw bytes. Reordering tasks invalidates it;
+so does a comment. A semantic hash would have to enumerate every meaningful
+field, and missing one, say `retry.max_attempts`, would let an edit from 1 to 50
+through silently approved. A false invalidation costs one re-approval. A false
+validation is unbounded.
 
 ## Approval reaches the receipt chain
 
-Every receipt a goal produces carries the mode and the plan hash it descends
-from (schema v4):
+Every receipt a goal produces carries how its plan was approved:
 
 ```jsonc
 "approval": {
-  "mode": "auto",
-  "plan_sha256": "9f2c…",
-  "assumptions": ["the project uses Vite"],
-  "amendments": []
+  "mode": "human",
+  "plan_sha256": "2b36…",
+  "assumptions": [],
+  "amendments": [],
+  "binding": "unsigned",
+  "harness_reported": "claude-code"
 }
 ```
 
-So `sddx audit` answers a question it could not before: not just "is this chain
-intact" but **"was this work human-approved, and against exactly which plan?"**
-A receipt recording `mode: auto` is a permanent, honest marker that no human saw
-that plan — reviewers can filter on it.
+So `sddx audit` answers more than "is this chain intact": it says whether the
+work was approved by a person, against exactly which plan, and whether that is
+provable. A receipt recording `mode: auto` is a permanent, honest marker that no
+person approved that plan.
 
-`assumptions` are denormalized onto the receipt rather than resolved through the
-goal at read time. A receipt that needs another file to be interpreted stops
-being a receipt.
-
-`amendments` is **reserved and always empty** in this version. Plans are frozen
-after approval: a later task whose spec turns out stale fails its oracle, goes
-ABANDONED, and escalates — you re-plan and re-approve. Mid-run per-node
-amendment (with its own scoped approval and a recorded spec diff) is the natural
-next step, and the field exists now so the receipt shape stays stable when it
-lands.
+`assumptions` are copied onto the receipt rather than looked up at read time: a
+receipt that needs another file to be understood stops being a receipt.
+`amendments` is reserved and always empty. Plans are frozen once approved: a
+task that turns out to be wrong fails or is abandoned, and you revise the spec
+and approve it again.
 
 ## Auto mode's bounds
 
-Every bound is a **hard refusal**. None of them prompts, degrades, or arms an
-approval gate you could satisfy — because a run recorded `auto` must never have
-a human approval hiding underneath it. Asking a human to approve a plan that
-tripped an autonomy bound would produce exactly that hybrid.
+Every bound is a **hard refusal**. None prompts or falls back to asking you,
+because a run recorded as `auto` must never have a human approval hiding
+underneath it.
 
-| Bound | Why it's the right proxy |
+| Bound | Why it is the right proxy |
 |---|---|
-| a `manual` oracle | it means a human observes the result; an unattended run has nobody. Incoherence, not risk appetite. (`browser` is fine — headless browser oracles genuinely execute) |
-| granting a `task allow` TDD-gate exemption | the allow-list is the only escape hatch from the TDD gate; a run that could widen its own gate has no gate. Needs a human in **both** modes |
-| a node with no `scope` at all | unconfined: it may write anything, including every path below. Treating "no scope" as "no reach" would make omitting `scope` the cheapest bypass |
-| any `scope` reaching `hooks/**`, `templates/**`, `dist/**`, `bin/**`, `.claude/**`, or CI workflows | a plan that edits the machinery enforcing the plan — including the *compiled* gates, which are what actually run |
-| any `scope` naming a protected area — `auth`, `migrations`, `secrets`, `credentials`, `billing` — or reaching `infra/**`, `terraform/**`, `k8s/**`, a `Dockerfile*`, a `docker-compose*`, or a `.env*` | a security, data, billing, or deployment decision is not one an unattended run may take |
-| a non-empty `unresolved` list in the Goal Brief header | intake reported a decision it could not safely take, so the plan rests on a choice nobody has made |
-| node count > `auto_max_tasks` (default 6) | blast radius ≈ worktrees forked |
+| a `manual` oracle | a person must observe the result, and an unattended run has nobody. `browser` is fine: a headless browser oracle really runs |
+| a strict-profile `task allow` exemption | the allow list is the only escape from the strict gate; a run that could widen its own gate has none. It needs a person in both modes |
+| a task with no `scope` | unconfined: it may write anything, including every path below |
+| a `scope` reaching `hooks/**`, `templates/**`, `dist/**`, `bin/**`, `.claude/**` or CI workflows | a plan that edits the machinery enforcing the plan, including the compiled gates that actually run |
+| a `scope` naming `auth`, `migrations`, `secrets`, `credentials` or `billing`, or reaching `infra/**`, `terraform/**`, `k8s/**`, a `Dockerfile*`, a `docker-compose*` or a `.env*` | a security, data, billing or deployment decision is not one an unattended run may take |
+| items under `### Open decisions` | the plan rests on a choice nobody has made |
+| more tasks than `auto_max_tasks` (default 6) | blast radius: one worktree per task |
 
-The path bounds use **two matchers**, because one does not work. Plain glob
-overlap asks "could any path match both", which against a pattern like
-`**/auth/**` is true of *every* scope ending in a doubled star — `src/widget/**`
-overlaps, since `src/widget/auth/x` matches both. Measured against a naive list,
-`src/**`, `docs/**`, and `tests/unit/**` all refused: auto mode would have been
-off, not bounded. So a scope is protected when a **literal segment** of its
-pattern names a protected area at any depth (catching `services/api/auth/**`
-without the wildcard blowup, since a wildcard segment names nothing), or when it
-overlaps a root-anchored location like `infra/**`.
-
-A gap is accepted deliberately: a broad scope naming nothing protected
-(`src/**`) passes, even though it could write `src/auth/session.ts`. Closing it
-means refusing every broad scope, which is the failure mode above. The
-unconfined bound catches the extreme case, and human mode reviews the rest.
-
-**The deterministic bounds do not consult the intake role's self-report.** The
-`unresolved` list is an *additional* trigger layered on top, never a substitute:
-a model that assumes its way past an auth decision and reports nothing unresolved
-still cannot run unattended, because the path bound is a code constant with unit
-tests rather than a judgment. Not every critical decision is path-shaped
-("should signup collect date of birth?"), so `unresolved` catches the residue —
-but it is the residue, not the mechanism.
+The path bounds use two matchers, because one does not work. Plain glob overlap
+asks whether any path could match both patterns, and against `**/auth/**` that
+is true of every scope ending in `**`: `src/widget/**` overlaps it through
+`src/widget/auth/x`. So a scope counts as protected when a literal segment of
+its pattern names a protected area at any depth, or when it overlaps a
+root-anchored location such as `infra/**`. A broad scope naming nothing
+protected, such as `src/**`, passes even though it could write
+`src/auth/session.ts`. Closing that gap would mean refusing every broad scope;
+the unconfined bound catches the extreme case, and human mode reviews the rest.
 
 ### A human blocker and an auto blocker are different events
 
-Both stop the run before anything is created. They differ in what they are
-asking of you.
-
-| | **human mode** | **auto mode** |
+| | human mode | auto mode |
 |---|---|---|
-| what stopped it | the plan is ready and awaiting your decision | an autonomy bound was exceeded |
-| what you are shown | the plan summary and four actions — Approve, Edit, Regenerate, Cancel | a structured blocker: the missing decision, its impact, and the recommended next step |
-| exit code | `3` — approval required | `1` — refused |
-| how to continue | Approve, or edit the drafts and re-render | **not** by approving. Narrow the scope, resolve the decision, split the goal, or set `"interaction_mode": "human"` in `.sddx/config.json` and review it yourself |
-| is it an error? | no — it is the gate doing its job | yes: the plan asked for more autonomy than the configuration grants |
+| what stopped it | the plan is ready and waiting for you | an autonomy bound was exceeded |
+| `sddx plan start` exits | `3`: approval required | `1`: refused |
+| how to continue | review and approve | **not** by approving: narrow the scope, resolve the decision, split the goal, or set `"interaction_mode": "human"` in `.sddx/config.json` and review it yourself |
 
-A human blocker is a **pause**; an auto blocker is a **refusal**. That is why
-the refusal message names a reviewed-configuration edit rather than a command:
-mode is config-only precisely so the thing being constrained cannot lift the
-constraint. And it never names `--mode` or an environment variable, because
-neither exists.
+A human blocker is a pause; an auto blocker is a refusal. In both cases nothing
+was created: no goal record, run branch, task, worktree or approval.
 
-In both cases the drafts survive for inspection, and no goal record, run branch,
-task branch, worktree, task state, receipt, or approval token was created.
+## Questions are gated on what they produce
 
-## Clarification questions are oracle-blockers
+Brainstorming is an open conversation: the agent asks one question at a time,
+as many as the design needs, and you can answer "skip". What sddx checks is the
+result. `sddx spec check` requires the design's sections, and the plan gates
+refuse a spec while `### Open decisions` lists anything. Before finishing, the
+brainstorm skill checks that every Acceptance line can become an executable
+oracle; a line that cannot is the one question still owed.
 
-"Ask only high-value questions" is unenforceable. sddx uses a nearly mechanical
-rule instead, and it is one the framework already had:
-
-> **If you can write the oracle, you don't get to ask.**
-
-The planner already must report back rather than emit a spec when it cannot name
-an executable success signal. That escalation — previously swallowed inside a
-subagent — is the pre-planning gate.
-
-| Question | Blocks an oracle? | What happens |
-|---|---|---|
-| "Which test runner?" | yes — `oracle.run` is unwritable | asked |
-| "Is auth in scope?" | yes — changes `success_criteria` | asked |
-| "Who's the target audience?" | no | assumed, recorded |
-| "Preferred brand colors?" | no | assumed, recorded |
-
-This is now the intake role's job, and it runs before the orchestrator in both
-modes. Under `human` it returns **one** batch of at most three questions — a cap
-enforced by `sddx intake check`, not by instruction — which the session renders,
-since a subagent has no channel to the user. Under `auto` it asks nothing:
-open decisions are resolved conservatively and recorded as `assumptions` with
-their rationale, and anything that genuinely cannot be decided safely goes in
-`unresolved`, which refuses the run.
-
-An oracle that cannot be named even after conservative assumption still halts an
-unattended run. Not a vibe — a testable state.
+In `auto` mode the agent asks nothing: it decides, and records each decision
+under `### Assumptions`. A decision it cannot safely make stays under
+`### Open decisions`, which refuses the run.
 
 ## Resume never re-asks
 
-Approval is **per-plan-hash**, and the gate is armed only on `graph create`,
-which does not re-run for an existing goal. So an interrupted `human` run picks
-up its Ready tasks with no prompt. Only a new plan, or one whose drafts changed,
-meets the gate again.
+Approval is per plan hash, and `plan start` runs once per goal. Starting tasks,
+verifying and reviewing need no approval, so an interrupted run carries on with
+no prompt. Only a new plan, or a changed one, meets the gate again. A gate that
+nags on every resume gets clicked through blindly, which is worse than none.
 
-This is what keeps human mode livable. A gate that nags on every resume gets
-clicked through blindly, which is worse than no gate at all.
+## Incremental confidence is a plan shape
 
-## Incremental confidence is a graph shape
-
-If you want to see one task land before committing to the rest, that is not a
-second gate — it is how you draw the graph:
+To see one task land before committing to the rest, draw it into the plan:
 
 ```
    ┌───────┐
-   │ spike │ ◄── every other node depends_on it,
+   │ spike │ ◄── every other task depends_on it,
    └───┬───┘     with on_dependency_failure: block
-    ┌──┼──┐      → a failure halts the graph rather than
+    ┌──┼──┐      → a failure halts the goal rather than
     ▼  ▼  ▼        skipping past it (the skip default)
    [a][b][c]
 ```
 
-There is deliberately **no per-task approval prompt**. Reviewing every action is
-the anti-pattern this design exists to avoid; the DAG already expresses staged
+There is deliberately no per-task approval. Reviewing every action is the
+anti-pattern this design avoids; the dependency graph already expresses staged
 confidence.
 
 ## Configuration
 
 ```jsonc
-// .sddx/config.json — materialized from the plugin manifest's userConfig
+// .sddx/config.json
 {
-  "interaction_mode": "human",  // human | auto        (default: human)
-  "auto_max_tasks": 6         // positive integer    (default: 6)
+  "interaction_mode": "human", // human | auto (default: human)
+  "auto_max_tasks": 6 // positive integer (default: 6)
 }
 ```
 
-These two keys are **config-only** — no CLI flag, no environment variable, unlike
-every other key. That is the point: both would otherwise be command-line surface
-the agent composes, and therefore a way to switch off its own constraint. For
-unattended CI, commit `interaction_mode: "auto"`.
-
-An unreadable config, a typo, or an out-of-domain value all resolve to `human` —
-nothing can accidentally yield unattended execution.
-
-`auto_max_tasks` is the one value here not derived from first principles. 6 is a
-starting point; tune it to the node counts your goals actually produce.
+These keys are config-only: no flag, no environment variable. For unattended CI,
+commit `"interaction_mode": "auto"`. An unreadable config, a typo or an
+out-of-range value all resolve to `human`: nothing can accidentally yield
+unattended execution.
 
 ## Headless and deferred approval
 
-In `human` mode with no token, `graph create` writes **nothing** and exits **3**
-(distinct from 2 for usage and 1 for failure), printing the plan path and its
-digest. So a pending plan is durable for free — the drafts *are* the approval
-request:
-
-```console
-$ sddx graph create --graph .sddx/drafts/2026-07-26-widget-graph.yaml
-graph create: no approval on file for plan 9f2c1a4b8e03 — review it with:
-  sddx graph create --graph <path> --dry-run
-then approve with:
-  sddx graph approve --graph <path>
-$ echo $?
-3
-```
-
-A cron job can draft plans overnight and you approve them in the morning, from
-any session, on any machine with the repo. Nothing extra was built for that; it
-falls out of the gate's placement.
+In `human` mode, `plan start` without an approval writes nothing and exits 3,
+naming the plan's hash, so a pending plan is durable for free: the committed
+spec is the approval request. Under `claude -p` there is no dialog, so the agent
+cannot approve; a person approves later, from any interactive session or a
+terminal on any machine with the repository, and `plan start` then proceeds.

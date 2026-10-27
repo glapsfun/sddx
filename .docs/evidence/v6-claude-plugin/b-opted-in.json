@@ -1,0 +1,51 @@
+{
+  "run": "B. Opted-in repository with two tasks",
+  "plugin": {
+    "name": "sddx",
+    "path": "<checkout>",
+    "source": "sddx@inline",
+    "version": "5.0.0"
+  },
+  "sddx_skills": [
+    "sddx:brainstorm",
+    "sddx:debug",
+    "sddx:execute",
+    "sddx:finish",
+    "sddx:plan",
+    "sddx:review",
+    "sddx:using-sddx"
+  ],
+  "sddx_agents": ["sddx:critic", "sddx:worker"],
+  "sddx_hook_outputs": [
+    {
+      "hook": "SessionStart:startup",
+      "exit_code": 0,
+      "output": {
+        "hookSpecificOutput": {
+          "hookEventName": "SessionStart",
+          "additionalContext": "sddx is active in this repository (/tmp/ev-opted-lqzsxs).\nRun sddx as: sddx\nsddx task greet-2: PLANNED, polite suffix\nsddx task greet-1: IN_PROGRESS, greet function\n\n# Using sddx\n\nsddx is the gate and the manager, not the coder. You write code your usual\nway; the `sddx` CLI decides when work may start, proves each change with its\noracle, and records the review. Every guarantee is enforced by the CLI and git.\nThese skills tell you which gate comes next.\n\n## When to route work through sddx\n\nIn a repository with `.sddx/`, route every change to behavior through a goal:\na feature, a bug fix, a refactor that changes what code does. Answering\nquestions, reading code and running commands need no goal. If the user says to\nskip sddx for a request, do it directly and say that it will leave no receipt.\n\n## The flow\n\n| Step | Skill | Done when |\n| --- | --- | --- |\n| idea to design | brainstorm | `sddx spec check <spec>` reports the spec ready |\n| design to tasks | plan | `sddx plan start <spec>` has created the tasks |\n| task to proven change | execute | `sddx verify <id>` passes |\n| proven change to reviewed | review | `sddx review record <id> --verdict pass` |\n| every task done | finish | `sddx pr create --goal <goal-id>` opened the PR |\n| a failure you cannot explain | debug | `sddx verify <id>` passes |\n\nNo spec yet: start with brainstorm. A spec with a ready design and no\n`## Tasks`: plan. A started goal: `sddx next-actions --goal <goal-id>` names\nthe next step.\n\n## Where things stand\n\n- `sddx board`: every task and its state.\n- `sddx goal show <goal-id>` and `sddx task show <id>`: one goal or task.\n- `sddx run report --goal <goal-id>`: what merged, what was skipped or failed.\n\n## Rules\n\n- Run sddx with the command the session context gave you. It is plain `sddx`\n  unless another sddx shadows the plugin's on PATH.\n- Never write `.sddx/tasks/`, `.sddx/approvals/`, `.sddx/config.json` or\n  `.sddx/receipts/` by hand. The CLI owns them, and the approval gate refuses\n  writes to approvals and config.\n- Never approve a plan for the user. `sddx plan approve` raises the user's own\n  permission dialog, and their answer is the approval.\n- A task is done only when `sddx review record` has passed it. Do not claim\n  done before that.\n- When a command refuses, read its message: it names the fix. Do not work\n  around a gate.\n- Tool names in these skills are generic: dispatch a subagent, ask the user,\n  track the steps. The harness mapping that follows says which tool does each.\n\n# sddx in Claude Code\n\n| The skills say | In Claude Code |\n| --- | --- |\n| use the `<name>` skill | the Skill tool with `sddx:<name>`; the user can type `/sddx:<name>` |\n| ask the user a question | AskUserQuestion, one question per call |\n| track the steps | TodoWrite |\n| dispatch the worker for a task | the Agent tool with `subagent_type: \"sddx:worker\"` |\n| dispatch the critic | the Agent tool with `subagent_type: \"sddx:critic\"` |\n| dispatch workers in parallel | several Agent tool calls in one message |\n| `--harness <name>` | `claude-code` |\n| `--model <name>` | the model id you are running as |\n\n`sddx plan approve` raises Claude Code's permission dialog through the plugin's\napproval gate, even in auto-accept mode. Under `claude -p` there is no dialog\nand the command is refused: stop, and ask the user to run\n`sddx plan approve <spec>` themselves, for example as `! sddx plan approve <spec>`\nin an interactive session."
+        }
+      }
+    }
+  ],
+  "tool_calls": [
+    {
+      "tool": "Bash",
+      "input": {
+        "command": "sddx --version",
+        "description": "Print sddx version"
+      }
+    },
+    {
+      "tool": "Bash",
+      "input": {
+        "command": "command -v sddx",
+        "description": "Locate sddx on PATH"
+      }
+    }
+  ],
+  "tool_results": ["5.0.0", "<checkout>/bin/sddx"],
+  "final_reply": "Verbatim lines from my context:\n\n```\nRun sddx as: sddx\nsddx task greet-2: PLANNED, polite suffix\nsddx task greet-1: IN_PROGRESS, greet function\n```\n\nCommand outputs:\n\n```\n$ sddx --version\n5.0.0\n\n$ command -v sddx\n<checkout>/bin/sddx\n```",
+  "claude_code_version": "2.1.311",
+  "model": "claude-haiku-5-5"
+}

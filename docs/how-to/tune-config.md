@@ -1,21 +1,22 @@
 # Tune config
 
-Every `userConfig` key, its env var, and its default are in
-[config.md](../reference/config.md). This guide is the mechanics: where to
-put an override, what wins when several sources disagree, and what
-`sddx config validate` actually checks. A full runnable walkthrough is
+Every key, its environment variable and its default are in
+[the config reference](../reference/config.md). This guide is the mechanics:
+where an override goes, what wins when sources disagree, and what
+`sddx config validate` checks. A runnable walkthrough is
 [examples/09-config-tuning](../../examples/09-config-tuning/).
 
 ## Where overrides live
 
-Inside Claude Code, enabling the plugin prompts for these settings and
-materializes them into `.sddx/config.json` — there's nothing to hand-edit.
-Outside Claude Code, write `.sddx/config.json` yourself — and it should be *you*:
-the file carries `interaction_mode`, so an agent's `Edit`/`Write` to it is blocked
-outright, and a Bash command naming it is refused unless it is a plain read.
-That Bash check is textual, so it is a deterrent rather than a proof — an
-expansion that never spells the path out is not caught. Reading the file back is
-always fine (`sddx config show` reports the effective values).
+sddx needs no configuration: defaults apply when `.sddx/config.json` is absent,
+and `sddx plan start` writes it the first time it creates state. To change a
+setting, edit that file yourself and commit it, so the whole team gets it.
+
+It should be you who edits it. The file carries `interaction_mode` and
+`profile`, which decide whether a plan needs your approval and how strictly
+edits are gated, so the approval gate refuses an agent's file-tool write to it
+and any shell command that writes it. That shell check is textual, a deterrent
+rather than a proof. Reading the file is always fine.
 
 ```json
 {
@@ -26,47 +27,35 @@ always fine (`sddx config show` reports the effective values).
 
 ## Precedence
 
-Environment variable → `.sddx/config.json` → built-in default, highest
-first. Only some keys have an environment variable at all (see the table in
-[config.md](../reference/config.md)) — setting `SDDX_STUCK_THRESHOLD=7`
-outranks a config-file `stuck_threshold`, but there's no equivalent variable
-for `interaction_mode` — which is deliberate, since an env var would be a
-second way for an agent to switch off the gate it is subject to.
+Environment variable, then `.sddx/config.json`, then the built-in default,
+highest first. Only some keys have an environment variable: setting
+`SDDX_STUCK_THRESHOLD=7` outranks a config-file `stuck_threshold`.
+`interaction_mode` and `profile` deliberately have none: a variable would be a
+second way for an agent to switch off a gate it is subject to.
 
 ## Seeing what won
 
-`sddx config show` prints every key fully resolved. Set `verbose: true` and
-it also prints, per key, which source actually won (`env`, `config`, or
-`default`) — the one place `verbose` changes `terminal` output; `--output
-json`/`--output markdown` already carry the fully-resolved values regardless
-of `verbose`.
-
-## Renaming `execution_mode`
-
-The key that decides whether a human is consulted is now `interaction_mode`.
-The old name is still read, so nothing breaks — but `sddx config validate`
-reports it, naming the replacement:
-
-```diff
- {
--  "execution_mode": "auto"
-+  "interaction_mode": "auto"
- }
+```sh
+sddx config show
 ```
 
-Set both and `interaction_mode` wins, with a warning saying so. See
-[config.md](../reference/config.md#migrating-execution_mode--interaction_mode).
+It prints every key fully resolved. With `"verbose": true` it also prints, per
+key, which source won: `env`, `config` or `default`.
 
-## Validating without guessing
+## Validating
 
-`sddx config validate` checks `.sddx/config.json` against the schema and
-reports unrecognized keys and out-of-domain values (not just wrong
-`typeof` — `stuck_threshold: -2` and a typo'd `interaction_mode` are both
-caught) as **warnings** — exit 0, since a structurally-parseable file with a
-bad key shouldn't block anything. Keys removed in 4.0 (`workspace_mode`,
-`prefer_solo`) are reported **as removed** rather than as unrecognized typos,
-and naming the replacement — see
-[migrate-to-v4.md](migrate-to-v4.md). The one case that fails outright (exit 1)
-is unparseable JSON, or JSON that isn't an object — that's a broken file, not
-a schema disagreement. A missing `.sddx/config.json` is not an error either
-way; built-in defaults apply.
+```sh
+sddx config validate
+```
+
+It reports unrecognized keys and out-of-range values as warnings and exits 0,
+since a parseable file with a bad key should not block anything. A value such
+as `stuck_threshold: -2` or a misspelled `interaction_mode` is caught, not just
+a wrong type. Keys sddx 6 removed (`runtime_scope`, `package_manager`,
+`adapters`) are reported as removed rather than as typos. Unparseable JSON, or
+JSON that is not an object, fails with exit 1.
+
+A config whose `schema_version` is 1.x was written by sddx 5, and sddx 6
+commands refuse it until you run `sddx migrate`
+([Migrate to sddx 6](migrate-to-v6.md)). The old key `execution_mode` is still
+read when `interaction_mode` is absent.

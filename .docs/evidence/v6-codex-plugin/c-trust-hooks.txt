@@ -1,0 +1,37 @@
+  Hooks need review
+  5 hooks are new or changed.
+  Hooks can run outside the sandbox after you trust them.
+› 1. Review hooks
+  2. Trust all and continue
+  3. Continue without trusting (hooks won't run)
+  enter confirm · esc skip
+  >_ OpenAI Codex (v0.164.0)
+     <fixture>/optin
+  Hooks
+  Lifecycle hooks from config and enabled plugins.
+  ⚠ 5 hooks need review before they can run.
+  Event                 Installed   Active      Review      Description
+› PreToolUse            2           0           2           Before a tool executes
+  PermissionRequest     0           0           0           When permission is requested
+  PostToolUse           0           0           0           After a tool executes
+  PreCompact            0           0           0           Before context compaction
+  PostCompact           0           0           0           After context compaction
+  SessionStart          2           1           1           When a new session starts
+  SessionEnd            0           0           0           Right before a session ends
+  UserPromptSubmit      0           0           0           When the user submits a prompt
+↓
+  t trust all · enter review · esc close
+  >_ OpenAI Codex (v0.164.0)
+     <fixture>/optin
+  PreToolUse hooks
+  2 hooks need review before they can run.
+› [!]  1  Unnamed hook · new
+  [!]  2  Unnamed hook · new
+  Event     PreToolUse
+  Matcher   Bash
+  Source    Plugin - sddx@sddx
+  Command   sh "~/.codex/plugins/cache/sddx/sddx/5.0.0/hooks/run-hook" approval-gate codex
+  Mode      Sync
+  Timeout   30s
+  Trust     New hook - review required
+  t trust · esc back

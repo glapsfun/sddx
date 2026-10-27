@@ -9662,7 +9662,7 @@ function protectedWriteBlock(path) {
     return [
       `sddx approval gate: blocked write to ${path}; approval tokens are not editable.`,
       "A token records that a person approved a plan, so writing one directly would forge that.",
-      "Approve a plan the only way that counts (it raises your own permission dialog):",
+      "Approve a plan the only way that counts, by a person running:",
       "  sddx plan check <spec>     # review it first",
       "  sddx plan approve <spec>"
     ].join(`

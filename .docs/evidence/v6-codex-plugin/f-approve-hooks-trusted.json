@@ -1,0 +1,15 @@
+{
+  "fixture": "<fixture>/optin",
+  "sddx_hooks": "trusted",
+  "command": "codex exec --json --ephemeral -s workspace-write",
+  "items": [
+    {
+      "type": "agent_message",
+      "text": "I\u2019ll run the command once and quote the result.\n"
+    },
+    {
+      "type": "agent_message",
+      "text": "The command was blocked by the PreToolUse hook before execution. I did not retry or run any other command.\n\n```text\nCommand blocked by PreToolUse hook: sddx: this records YOUR approval of plan 88a7205d89a5.\nApprove only if you have reviewed it:\n  sddx plan check .sddx/specs/2026-10-27-hello.md\n\nIn Codex only a person can approve a plan, so this was refused. Ask the user to review the plan and type:\n  !~/.codex/plugins/cache/sddx/sddx/5.0.0/bin/sddx plan approve .sddx/specs/2026-10-27-hello.md. Command: ~/.codex/plugins/cache/sddx/sddx/5.0.0/bin/sddx plan approve .sddx/specs/2026-10-27-hello.md\n```"
+    }
+  ]
+}

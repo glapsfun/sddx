@@ -1,7 +1,14 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   ALWAYS_ON_BUDGET,
   frontmatterValue,
@@ -15,6 +22,7 @@ import { scenario } from "./scenario";
 import {
   AGENTS,
   agentTools,
+  CODEX_MAPPING_FILE,
   contractViolations,
   harnessToolsIn,
   knownCommands,
@@ -92,6 +100,26 @@ describe("reading commands out of skill text", () => {
 });
 
 describe("contract violations in fixtures", () => {
+  scenario("workflow-skills", "Codex tool named in a skill body", () => {
+    const root = fixture({
+      "skills/demo/SKILL.md": skill("demo", "Start the worker with spawn_agent."),
+    });
+    const v = contractViolations(root, known);
+    expect(v).toHaveLength(1);
+    expect(v[0]).toContain(join("skills", "demo", "SKILL.md"));
+    expect(v[0]).toContain("spawn_agent");
+  });
+
+  test("each harness's tools are allowed only in that harness's mapping file", () => {
+    const root = fixture({
+      [MAPPING_FILE]: "Dispatch with the Agent tool.\n",
+      [CODEX_MAPPING_FILE]: "Dispatch with spawn_agent and fork_turns, track with update_plan.\n",
+    });
+    expect(contractViolations(root, known)).toEqual([]);
+    const crossed = fixture({ [CODEX_MAPPING_FILE]: "Ask with AskUserQuestion.\n" });
+    expect(contractViolations(crossed, known)).toHaveLength(1);
+  });
+
   scenario("workflow-skills", "A removed command is caught", () => {
     const root = fixture({
       "skills/demo/SKILL.md": skill("demo", "Then run `sddx red-check T1`."),
@@ -174,18 +202,66 @@ describe("the shipped plugin as a whole", () => {
 
   scenario("workflow-skills", "Mapping file exempt", () => {
     expect(contractViolations(repoRoot, known)).toEqual([]);
-    const naming = [...SKILLS.map((s) => join("skills", s, "SKILL.md")), MAPPING_FILE].filter(
-      (f) => harnessToolsIn(shipped(f)).length > 0,
+    const naming = [
+      ...SKILLS.map((s) => join("skills", s, "SKILL.md")),
+      MAPPING_FILE,
+      CODEX_MAPPING_FILE,
+    ].filter((f) => harnessToolsIn(shipped(f)).length > 0);
+    expect(naming).toEqual([MAPPING_FILE, CODEX_MAPPING_FILE]);
+  });
+
+  scenario("workflow-skills", "Router names both mappings", () => {
+    const body = shipped(join("skills", "using-sddx", "SKILL.md"));
+    expect(body).toContain("references/claude-code.md");
+    expect(body).toContain("references/codex.md");
+  });
+
+  /** Every `../` path in code in the Codex mapping, resolved against its folder. */
+  const codexPaths = (): string[] =>
+    [...shipped(CODEX_MAPPING_FILE).matchAll(/`(\.\.\/[^`\s]+)`/g)].map((m) =>
+      resolve(repoRoot, dirname(CODEX_MAPPING_FILE), m[1] as string),
     );
-    expect(naming).toEqual([MAPPING_FILE]);
+
+  scenario("codex-plugin", "Relative path in the mapping resolves", () => {
+    const sddx = codexPaths().filter((p) => p.endsWith(join("bin", "sddx")));
+    expect(sddx).not.toHaveLength(0);
+    for (const p of sddx) expect(p).toBe(join(repoRoot, "bin", "sddx"));
+  });
+
+  scenario("workflow-skills", "Role files reachable from the mapping", () => {
+    const paths = codexPaths();
+    for (const role of ["worker", "critic"]) {
+      expect(paths).toContain(join(repoRoot, "agents", `${role}.md`));
+    }
+    for (const p of paths) expect({ p, exists: existsSync(p) }).toEqual({ p, exists: true });
+  });
+
+  scenario("workflow-skills", "Mapping names the Codex rules", () => {
+    const text = shipped(CODEX_MAPPING_FILE);
+    expect(text).toContain('fork_turns: "none"');
+    expect(text).toContain("escalation");
+    expect(text).toContain("!sddx plan approve");
+    expect(text).toContain("--harness codex");
   });
 
   scenario("workflow-skills", "Shipped files within budget", () => {
     const always = measureAlwaysOn(repoRoot);
-    const router = measureRouter(repoRoot);
-    console.log(`${renderReport("always-on", always)}\n\n${renderReport("router", router)}`);
+    const routers = (["claude-code", "codex"] as const).map((h) => ({
+      harness: h,
+      report: measureRouter(repoRoot, h),
+    }));
+    console.log(
+      [
+        renderReport("always-on", always),
+        ...routers.map((r) => renderReport(`router (${r.harness})`, r.report)),
+      ].join("\n\n"),
+    );
     expect(always.items).toHaveLength(SKILLS.length + AGENTS.length);
     expect(always.total).toBeLessThanOrEqual(ALWAYS_ON_BUDGET);
-    expect(router.total).toBeLessThanOrEqual(ROUTER_BUDGET);
+    for (const { report } of routers) {
+      expect(report.items.map((i) => i.file)).toHaveLength(2);
+      expect(report.total).toBeLessThanOrEqual(ROUTER_BUDGET);
+    }
+    expect(routers[1]?.report.items[1]?.file).toBe(CODEX_MAPPING_FILE);
   });
 });

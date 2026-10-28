@@ -37,8 +37,8 @@ strict profile only:
 Exit codes, for every command: `0` success, `1` the operation failed or was
 refused, `2` usage error (unknown command or flag, missing argument, a command
 that does not exist in the current profile), `3` approval required (`plan
-start` in `human` mode with no approval token for the plan; nothing was
-written). Exit codes never depend on `--output`.
+start` in `human` mode with no approval token for the plan, or `plan approve`
+run by a Codex agent; nothing was written). Exit codes never depend on `--output`.
 
 A repository still holding sddx 5 state (a `schema_version` 1.x config, or a
 v5 task file) is refused by every command except `migrate`, `audit` and
@@ -132,6 +132,12 @@ signing (`gpg.format ssh`, `user.signingkey`), the token is signed under the
 `sddx-approval` namespace; a signed token is what makes human approval provable
 in `sddx audit`. In `auto` mode a plan that breaks an autonomy bound is refused
 here too, so approving never produces a token the start would reject.
+
+Only a person may approve. When `CODEX_TOOL_CALL_ID` is set, which Codex sets on
+every command its agent runs and not on a command you type with `!`, it refuses
+with exit 3, writes nothing, and prints the command for you to type. An agent
+that clears the variable gets past this check; the plugin's approval hook, once
+trusted in `/hooks`, is what stops it.
 
 ## sddx plan start
 

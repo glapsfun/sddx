@@ -1,7 +1,7 @@
 import { describe, expect } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { repoRoot } from "./helpers";
 import { scenario } from "./scenario";
 
@@ -34,6 +34,49 @@ describe("plugin and marketplace manifests", () => {
       extra.some((f) => f.type === "json" && f.path === path && f.jsonpath === "$.version");
     expect(bumps("package.json")).toBe(true);
     expect(bumps(".claude-plugin/plugin.json")).toBe(true);
+  });
+
+  scenario("codex-plugin", "Versions agree", () => {
+    const codex = json(".codex-plugin/plugin.json");
+    expect(codex.name).toBe("sddx");
+    const version = json("package.json").version as string;
+    expect(codex.version).toBe(version);
+    expect(json(".claude-plugin/plugin.json").version).toBe(version);
+  });
+
+  scenario("codex-plugin", "Referenced paths exist", () => {
+    const codex = json(".codex-plugin/plugin.json");
+    expect(codex.skills).toBe("./skills/");
+    expect(codex.hooks).toBe("./hooks/hooks-codex.json");
+    const paths: string[] = [];
+    const collect = (v: unknown): void => {
+      if (typeof v === "string" && v.startsWith(".")) paths.push(v);
+      else if (Array.isArray(v)) v.forEach(collect);
+      else if (v && typeof v === "object") Object.values(v).forEach(collect);
+    };
+    collect(codex);
+    expect(paths.length).toBeGreaterThan(1);
+    for (const p of paths) {
+      expect({ p, relative: p.startsWith("./") }).toEqual({ p, relative: true });
+      const abs = resolve(repoRoot, p);
+      expect({ p, inside: abs.startsWith(repoRoot), exists: existsSync(abs) }).toEqual({
+        p,
+        inside: true,
+        exists: true,
+      });
+    }
+  });
+
+  scenario("codex-plugin", "A release bumps the Codex manifest", () => {
+    const config = json("release-please-config.json");
+    const root = (config.packages as Record<string, Record<string, unknown>>)["."];
+    const extra = (root?.["extra-files"] ?? []) as Record<string, string>[];
+    expect(
+      extra.some(
+        (f) =>
+          f.type === "json" && f.path === ".codex-plugin/plugin.json" && f.jsonpath === "$.version",
+      ),
+    ).toBe(true);
   });
 
   scenario(

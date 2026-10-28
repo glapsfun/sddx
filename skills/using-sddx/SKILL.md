@@ -52,4 +52,6 @@ the next step.
 - When a command refuses, read its message: it names the fix. Do not work
   around a gate.
 - Tool names in these skills are generic: dispatch a subagent, ask the user,
-  track the steps. The harness mapping that follows says which tool does each.
+  track the steps. The mapping for your harness says which tool does each:
+  `references/claude-code.md` or `references/codex.md`, beside this file.
+  Session start usually includes it already.

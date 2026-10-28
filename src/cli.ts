@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { auditReceipts } from "./audit";
 import { computeBoard } from "./board";
 import { approvalPath, findApproval, writeApproval } from "./lib/approval";
@@ -40,6 +41,7 @@ import { createGoalPr } from "./lib/pr";
 import { recordManualRun } from "./lib/recorder";
 import { recordReview } from "./lib/review";
 import { generateRunReport, renderRunReport } from "./lib/runreport";
+import { shellWord } from "./lib/shellcwd";
 import {
   allowPath,
   isTerminal,
@@ -287,6 +289,20 @@ function cmdPlanApprove(cwd: string, args: string[], format: OutputFormat, noCol
   const harness = flag(args, "--harness");
   const specArg = args.find((a, i) => !a.startsWith("-") && args[i - 1] !== "--harness");
   if (!specArg) fail(USAGE, 2);
+  // Codex sets CODEX_TOOL_CALL_ID on every command its agent runs, and never on
+  // one the user types with `!`. This stops an agent that runs the command as
+  // it is; one that clears the variable gets past it, which only the plugin's
+  // trusted approval hook stops.
+  if (process.env.CODEX_TOOL_CALL_ID) {
+    const own = join(dirname(fileURLToPath(import.meta.url)), "..", "bin", "sddx");
+    failWith(
+      [
+        "plan approve: only a person can approve a plan, and this ran as a Codex agent's tool call",
+        `ask the user to review the plan and type: !${shellWord(own)} plan approve ${shellWord(specArg)}`,
+      ],
+      3,
+    );
+  }
   const plan = resolvePlan(cwd, specArg);
   if (plan.errors.length > 0) failWith(plan.errors.map((e) => `plan approve: ${e}`));
   // The hard refusals run here too: approving a plan `auto` mode will refuse
@@ -988,7 +1004,7 @@ async function main(argv: string[]): Promise<void> {
   // `hook` speaks the harness's protocol (event JSON in, decision JSON out,
   // always exit 0), not sddx's, so it is routed before anything else can
   // contaminate a decision the harness is waiting on.
-  if (argv[0] === "hook") runHook(argv[1]);
+  if (argv[0] === "hook") runHook(argv[1], argv[2]);
   const { format, noColor, rest: cleaned } = parseOutputFlag(argv);
   currentFormat = format;
   currentNoColor = noColor;

@@ -7,7 +7,8 @@ with no harness at all.
 
 Hooks add early feedback and the one thing a CLI cannot do on its own: raise
 the user's own permission dialog. The harness plugin registers them (see
-[Registration in Claude Code](#registration-in-claude-code)); the handlers are
+[Registration in Claude Code](#registration-in-claude-code) and
+[Registration in Codex](#registration-in-codex)); the handlers are
 `sddx hook <name>`, which read the harness event as JSON on stdin, write a
 decision as JSON on stdout, and always exit 0, so a bug in sddx can never brick
 a session.
@@ -92,23 +93,68 @@ shell whether the handler needs to run at all:
   always exits 0, so exit status 2, which Claude Code treats as a blocking
   decision, never reaches the harness.
 
+## Registration in Codex
+
+`.codex-plugin/plugin.json` points Codex at `hooks/hooks-codex.json`, which runs
+the same launcher as `sh "${PLUGIN_ROOT}/hooks/run-hook" <handler> codex`:
+
+| Event | Matcher | Handlers, in order | Timeout |
+| --- | --- | --- | --- |
+| `SessionStart` | `startup`, `clear`, `compact` | `session-start` | 10 s |
+| `PreToolUse` | `Bash` | `approval-gate` | 30 s |
+| `PreToolUse` | `apply_patch` | `approval-gate` | 30 s |
+| `Stop` | (every stop) | `stop-gate` | 10 s |
+| `SubagentStop` | (every stop) | `stop-gate` | 10 s |
+
+Codex runs a plugin's hooks only after you trust them in `/hooks`, and again
+after every update of the plugin. Codex fills in `${PLUGIN_ROOT}` before your
+login shell sees the command, and `sh` runs the launcher whether or not it kept
+its execute permission, so the hooks work under any login shell.
+
+### How decisions map to Codex
+
+A Codex hook cannot raise a permission dialog, and Codex runs the call when a
+hook fails, times out, or prints a key it does not know. So in Codex:
+
+- Where the approval gate would ask, it denies, and the reason gives the command
+  for you to type with Codex's `!` prefix, with the plugin's `bin/sddx` by
+  absolute path. Codex runs a `!` command as your own, outside hooks and the
+  sandbox.
+- Without Bun, or when the handler fails or prints nothing, the approval gate
+  denies any event that mentions sddx.
+- `sddx plan approve` itself refuses with exit 3 when `CODEX_TOOL_CALL_ID` is
+  set, which Codex sets on every command its agent runs. This catches an agent
+  that runs the command as it is, even before the hooks are trusted. It is not a
+  barrier: an agent can clear the variable, or write a token with a patch, and
+  only the trusted hooks stop that.
+- A patch from the `apply_patch` tool is judged by the files it adds, updates,
+  deletes or moves to. So is an `apply_patch` heredoc in a shell command when
+  its first line is `apply_patch <<'EOF'`, after any plain `cd <dir> &&`, with a
+  quoted delimiter and nothing after it. Any other heredoc is judged as shell,
+  body included.
+- The strict profile's hooks are not registered: Codex reports no exit code
+  after a shell command, so the recorder cannot work. A strict repository
+  opened in Codex gets a note at session start.
+
 ## What session start injects
 
 A plugin installed for your user loads in every repository you open, so session
 start decides how much to say from the repository's state:
 
-| Repository state | Injected context |
-| --- | --- |
-| Not opted in (no `.sddx/`) | One line: sddx is installed, and `/sddx:brainstorm` plans a change with it. Nothing is read or written. |
-| Set up by sddx 5: a config with `schema_version` 1.x, an sddx 5 task file, or sddx 5 files or hooks under `.claude/` | A pointer to `sddx migrate`; when `.claude/` still holds sddx 5 files or hooks, a note that both sets of hooks would fire. No router. |
-| Opted in | The repository root, the command to run sddx, any orphan worktrees swept, one line per task that is not `DONE` or `ABANDONED`, then the `using-sddx` router and its Claude Code tool mapping. The board is refreshed. |
-| Bun missing, any repository | One notice from the launcher, with the install command. |
+| Repository state | Claude Code | Codex |
+| --- | --- | --- |
+| Not opted in (no `.sddx/`) | One line: sddx is installed, and `/sddx:brainstorm` plans a change with it. Nothing is read or written. | The same line, naming `$sddx:brainstorm`. |
+| Set up by sddx 5: a config with `schema_version` 1.x, an sddx 5 task file, or sddx 5 files or hooks under `.claude/` | A pointer to `sddx migrate`; when `.claude/` still holds sddx 5 files or hooks, a note that both sets of hooks would fire. No router. | The same. |
+| Opted in | The repository root, the command to run sddx, any orphan worktrees swept, one line per task that is not `DONE` or `ABANDONED`, then the `using-sddx` router and `references/claude-code.md`. The board is refreshed. | The same, with `references/codex.md`. On the strict profile, a note that its per-edit gates do not run in Codex and that test runs are recorded with `sddx task phase`. |
+| Bun missing, any repository | One notice from the launcher, with the install command. | The same. |
 
 The command to run sddx is plain `sddx`, unless another executable named `sddx`
 is on `PATH`, such as a global npm install of sddx 5. Claude Code puts the
 plugin's `bin/` after your own `PATH` entries in the agent's shell, so that
 other one would win. Session start then gives the plugin's `bin/sddx` by
-absolute path and names the other executable.
+absolute path and names the other executable. Codex puts no plugin directory on
+the agent's `PATH` at all, so in Codex the command is always the plugin's
+`bin/sddx` by absolute path.
 
 Session start always exits 0. An internal error becomes a one-line diagnostic in
 the injected context rather than a failed hook.

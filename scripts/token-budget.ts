@@ -1,9 +1,9 @@
 // The two context costs the plugin's skills impose, measured on every test run.
 // Always-on: what a harness loads before any skill runs, each skill's and
 // agent's frontmatter name and description. Router: what session start injects
-// into every opted-in session, the `using-sddx` body plus its Claude Code tool
-// mapping. ceil(chars/4) is a deliberate dependency-free proxy: the gate catches
-// growth, not exact counts.
+// into every opted-in session, the `using-sddx` body plus the tool mapping for
+// the session's harness, measured once per harness. ceil(chars/4) is a
+// deliberate dependency-free proxy: the gate catches growth, not exact counts.
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { frontmatterValue, withoutFrontmatter } from "../src/lib/frontmatter";
@@ -69,15 +69,19 @@ export function measureAlwaysOn(root: string): BudgetReport {
   );
 }
 
-export const ROUTER_FILES = [
+export const HARNESSES = ["claude-code", "codex"] as const;
+export type Harness = (typeof HARNESSES)[number];
+
+/** The router body and the harness's tool mapping. */
+export const routerFiles = (harness: Harness): string[] => [
   join("skills", "using-sddx", "SKILL.md"),
-  join("skills", "using-sddx", "references", "claude-code.md"),
+  join("skills", "using-sddx", "references", `${harness}.md`),
 ];
 
 /** Throws when a router file is missing: an absent router is not a cheap one. */
-export function measureRouter(root: string): BudgetReport {
+export function measureRouter(root: string, harness: Harness = "claude-code"): BudgetReport {
   return report(
-    ROUTER_FILES.map((file) =>
+    routerFiles(harness).map((file) =>
       item(file, withoutFrontmatter(readFileSync(join(root, file), "utf8"))),
     ),
     ROUTER_BUDGET,
@@ -96,8 +100,10 @@ export function renderReport(label: string, r: BudgetReport): string {
 if (import.meta.main) {
   const root = process.argv[2] ?? process.cwd();
   const reports: Array<[string, BudgetReport]> = [["always-on", measureAlwaysOn(root)]];
-  if (ROUTER_FILES.every((f) => existsSync(join(root, f)))) {
-    reports.push(["router", measureRouter(root)]);
+  for (const harness of HARNESSES) {
+    if (routerFiles(harness).every((f) => existsSync(join(root, f)))) {
+      reports.push([`router (${harness})`, measureRouter(root, harness)]);
+    }
   }
   console.log(reports.map(([label, r]) => renderReport(label, r)).join("\n\n"));
   process.exit(reports.some(([, r]) => overBudget(r)) ? 1 : 0);

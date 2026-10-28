@@ -189,7 +189,12 @@ describe("never required for correctness", () => {
   test("plan start still succeeds when the global root cannot be written", () => {
     const root = fixtureRepo();
     const spec = writeSpec(root, "2026-01-01-test-goal", goalSpec({ tasks: [{ id: "T1" }] }));
-    const env = { ...process.env, NO_COLOR: "1", SDDX_HOME: "/proc/nope/sddx" };
+    const env = {
+      ...process.env,
+      NO_COLOR: "1",
+      SDDX_HOME: "/proc/nope/sddx",
+      CODEX_TOOL_CALL_ID: "",
+    };
     for (const args of [
       ["plan", "approve", spec],
       ["plan", "start", spec],
@@ -208,7 +213,7 @@ describe("never required for correctness", () => {
       spawnSync("bun", [CLI, ...args], {
         cwd: root,
         encoding: "utf8",
-        env: { ...process.env, ...env },
+        env: { ...process.env, ...env, CODEX_TOOL_CALL_ID: "" },
       });
     expect(run("plan", "approve", spec).status).toBe(0);
     expect(existsSync(join(projectDir(root, env), "metadata.json"))).toBe(false);

@@ -16,7 +16,8 @@ curl -fsSL https://bun.sh/install | bash
 ```
 
 Until then the hooks pass everything through, except that the approval gate
-asks you about any command that mentions sddx.
+asks you about any command that mentions sddx. In Codex, which cannot ask from
+a hook, it refuses those commands instead.
 
 ## "Another sddx comes first on PATH"
 
@@ -39,8 +40,9 @@ or `bun remove -g @glapsfun/sddx` if Bun installed it.
 **Cause:** one of:
 
 - the repository has no `.sddx/`, so session start only says that sddx is
-  available. Start a goal with `/sddx:brainstorm`; from then on every session in
-  the repository gets the router;
+  available. Start a goal with `/sddx:brainstorm` (in Codex, `$sddx:brainstorm`);
+  from then on every session in the repository gets the router;
+- in Codex, the plugin's hooks are not trusted yet (see below);
 - the plugin is not installed or not enabled here: check the `/plugin` menu.
   A teammate's `.claude/settings.json` can enable it for the repository, but
   each person still installs it ([Share sddx with a team](share-sddx-with-a-team.md));
@@ -61,6 +63,42 @@ interactive session, or run the command yourself from a terminal:
 ```sh
 bunx @glapsfun/sddx plan approve .sddx/specs/<goal-id>.md
 ```
+
+In Codex the agent can never approve: a Codex hook cannot raise a permission
+dialog, so the approval gate refuses the command, and the CLI itself refuses
+with exit 3 when Codex runs it for the agent. Type it yourself with Codex's `!`
+prefix, using the full path session start gave, for example
+`!~/.codex/plugins/cache/sddx/sddx/<version>/bin/sddx plan approve .sddx/specs/<goal-id>.md`.
+Codex runs a `!` command as your own.
+
+## In Codex, session start says nothing about sddx
+
+**Cause:** Codex runs a plugin's hooks only after you trust them, and asks
+again after every update of the plugin. Until then there is no session context
+and no approval hook.
+
+**Fix:** open `/hooks` in Codex and trust the sddx hooks, then start a new
+session. Each update needs this again.
+
+## In Codex, sddx commands fail on a read-only file system
+
+**Cause:** Codex's default sandbox keeps `.git` read-only, and most sddx
+commands write to it: `plan start`, `task start`, `verify` and `review record`
+create worktrees, proof records and commits.
+
+**Fix:** approve the agent's request to run the command outside the sandbox.
+The agent asks for that escalation up front for the commands that need it.
+Allowing the sddx command once stops the repeated prompts; the approval gate
+still refuses `sddx plan approve` when the agent runs it.
+
+## `codex exec` cannot run sddx
+
+**Cause:** `codex exec` runs without approvals, so the agent cannot ask for
+escalation, and nobody is there to type a plan approval.
+
+**Fix:** approve the plan from a terminal before the run, and run `codex exec`
+with `--sandbox danger-full-access`, only in a disposable environment such as
+a container or a CI job.
 
 ## `sddx verify` fails its RED half
 

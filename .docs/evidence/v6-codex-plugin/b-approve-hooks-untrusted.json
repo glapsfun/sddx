@@ -1,0 +1,22 @@
+{
+  "fixture": "<fixture>/optin",
+  "sddx_hooks": "untrusted",
+  "command": "codex exec --json --ephemeral -s workspace-write",
+  "items": [
+    {
+      "type": "agent_message",
+      "text": "I\u2019ll run the command once and report its exit code and full output verbatim.\n"
+    },
+    {
+      "type": "command_execution",
+      "command": "/usr/bin/zsh -lc '~/.codex/plugins/cache/sddx/sddx/5.0.0/bin/sddx plan approve .sddx/specs/2026-10-27-hello.md'",
+      "exit_code": 3,
+      "status": "failed",
+      "aggregated_output": "plan approve: only a person can approve a plan, and this ran as a Codex agent's tool call\nask the user to review the plan and type: !~/.codex/plugins/cache/sddx/sddx/5.0.0/bin/sddx plan approve .sddx/specs/2026-10-27-hello.md\n"
+    },
+    {
+      "type": "agent_message",
+      "text": "Exit code: 3\n\n```text\nplan approve: only a person can approve a plan, and this ran as a Codex agent's tool call\nask the user to review the plan and type: !~/.codex/plugins/cache/sddx/sddx/5.0.0/bin/sddx plan approve .sddx/specs/2026-10-27-hello.md\n```"
+    }
+  ]
+}

@@ -120,6 +120,31 @@ describe("user documentation", () => {
     }
   });
 
+  scenario("user-docs", "Codex install commands present", () => {
+    for (const file of ["README.md", "docs/how-to/install-sddx.md"]) {
+      const text = read(file);
+      for (const command of [
+        "codex plugin marketplace add glapsfun/sddx",
+        "codex plugin add sddx@sddx",
+      ]) {
+        expect({ file, command, has: text.includes(command) }).toEqual({
+          file,
+          command,
+          has: true,
+        });
+      }
+    }
+    expect(read("docs/how-to/install-sddx.md")).toContain("`/hooks`");
+  });
+
+  scenario("user-docs", "Codex troubleshooting entries", () => {
+    const text = read(join("docs", "how-to", "troubleshoot-common-problems.md"));
+    expect(text).toContain("`/hooks`");
+    expect(text).toContain("escalation");
+    expect(text).toMatch(/`![^`]*sddx plan approve[^`]*`/);
+    expect(text).toContain("`codex exec`");
+  });
+
   scenario("user-docs", "Shipped docs pass", () => {
     expect(staleCommands(repoRoot)).toEqual([]);
   });

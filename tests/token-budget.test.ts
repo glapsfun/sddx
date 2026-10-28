@@ -6,8 +6,10 @@ import { join } from "node:path";
 import {
   ALWAYS_ON_BUDGET,
   measureAlwaysOn,
+  measureRouter,
   overBudget,
   ROUTER_BUDGET,
+  renderReport,
 } from "../scripts/token-budget";
 import { repoRoot } from "./helpers";
 import { scenario } from "./scenario";
@@ -76,5 +78,42 @@ describe("always-on budget", () => {
   test("the budgets are the ones the workflow-skills spec sets", () => {
     expect(ALWAYS_ON_BUDGET).toBe(600);
     expect(ROUTER_BUDGET).toBe(1500);
+  });
+});
+
+describe("router budget per harness", () => {
+  /** A router body of `bodyTokens` and a Codex mapping of `mappingTokens`, in estimated tokens. */
+  function routerPlugin(bodyTokens: number, mappingTokens: number): string {
+    const root = mkdtempSync(join(tmpdir(), "router-"));
+    const dir = join(root, "skills", "using-sddx");
+    mkdirSync(join(dir, "references"), { recursive: true });
+    writeFileSync(
+      join(dir, "SKILL.md"),
+      `---\nname: using-sddx\ndescription: d\n---\n${"x".repeat(bodyTokens * 4)}`,
+    );
+    writeFileSync(join(dir, "references", "claude-code.md"), "short");
+    writeFileSync(join(dir, "references", "codex.md"), "y".repeat(mappingTokens * 4));
+    return root;
+  }
+
+  scenario("workflow-skills", "A mapping over budget fails", () => {
+    const root = routerPlugin(1000, 501);
+    const codex = measureRouter(root, "codex");
+    expect(codex.total).toBe(1501);
+    expect(overBudget(codex)).toBe(true);
+    expect(renderReport("router (codex)", codex)).toContain(join("references", "codex.md"));
+    expect(overBudget(measureRouter(root, "claude-code"))).toBe(false);
+  });
+
+  test("the script fails when either router is over budget", () => {
+    const r = spawnSync(
+      "bun",
+      [join(repoRoot, "scripts", "token-budget.ts"), routerPlugin(1000, 501)],
+      {
+        encoding: "utf8",
+      },
+    );
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain("codex.md");
   });
 });

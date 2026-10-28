@@ -1,4 +1,4 @@
-// Runs hooks/run-hook the way Claude Code does, on a PATH the test controls:
+// Runs hooks/run-hook the way Claude Code or Codex does, on a PATH the test controls:
 // a fake bun that logs each call, the real bun, or no bun at all. HOME is a
 // fresh directory so the launcher's ~/.bun fallback cannot find the real one.
 import { spawnSync } from "node:child_process";
@@ -37,6 +37,8 @@ export interface LauncherOptions {
   /** Defaults to hooks/run-hook; the helper's own tests point it elsewhere. */
   script?: string;
   env?: Record<string, string>;
+  /** Run the launcher as hooks/hooks-codex.json does: through sh, with the harness argument. */
+  harness?: "codex";
 }
 
 const FAKE_BUN = `#!/bin/sh
@@ -85,7 +87,10 @@ export function runLauncher(
     if (opts.bun.stdout !== undefined) writeFileSync(join(fake, "stdout"), opts.bun.stdout);
     writeFileSync(join(fake, "exit"), String(opts.bun.exit ?? 0));
   }
-  const r = spawnSync(opts.script ?? LAUNCHER, [handler], {
+  const script = opts.script ?? LAUNCHER;
+  const [file, args] =
+    opts.harness === "codex" ? ["/bin/sh", [script, handler, "codex"]] : [script, [handler]];
+  const r = spawnSync(file, args, {
     cwd: opts.cwd,
     input: typeof payload === "string" ? payload : JSON.stringify(payload),
     encoding: "utf8",
@@ -94,6 +99,7 @@ export function runLauncher(
       HOME: home,
       FAKE_BUN_DIR: fake,
       CLAUDE_PLUGIN_ROOT: repoRoot,
+      ...(opts.harness === "codex" ? { PLUGIN_ROOT: repoRoot } : {}),
       ...opts.env,
     },
   });

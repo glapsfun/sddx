@@ -6,7 +6,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fixtureRepo } from "./fixtures";
-import { CLI, commitSpec, completeTask, createRun, repoRoot, sddx } from "./helpers";
+import { CLI, commitSpec, completeTask, createRun, repoRoot, sddx, userEnv } from "./helpers";
 import { scenario } from "./scenario";
 
 /** Every ````markdown block that follows a `<!-- spec-example -->` marker. */
@@ -65,7 +65,7 @@ describe("finish audits where the goal's receipts are", () => {
       const r = spawnSync("sh", ["-c", (block as string).replaceAll("<goal-id>", run.goalId)], {
         cwd,
         encoding: "utf8",
-        env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, NO_COLOR: "1" },
+        env: userEnv({ PATH: `${bin}:${process.env.PATH}`, NO_COLOR: "1" }),
       });
       if (r.status !== 0) throw new Error(r.stdout + r.stderr);
       expect(r.stdout).toContain("audit: 1 receipt(s) verified, chain intact");

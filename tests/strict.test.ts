@@ -241,6 +241,15 @@ describe("a leading cd into the worktree", () => {
     expect(d.hookSpecificOutput?.permissionDecision).toBe("deny");
   });
 
+  test("a cd target holding a redirect is not read as a directory", () => {
+    const { wt } = startedTask("strict");
+    const d = hook("bash-gate", wt, {
+      tool_name: "Bash",
+      tool_input: { command: "cd .>src/rl/bucket.ts; bun test" },
+    });
+    expect(d.hookSpecificOutput?.permissionDecision).toBe("deny");
+  });
+
   test("a quoted or expanded directory is not read as a cd target", () => {
     const { cwd } = startedTask("strict");
     const out = hook("record-test", cwd, {

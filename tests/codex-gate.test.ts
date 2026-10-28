@@ -23,13 +23,18 @@ interface HookOut {
   };
 }
 
-/** Runs the real dispatcher, as the launcher does, optionally as Codex with plugin root /p. */
-function gate(cwd: string, event: Record<string, unknown>, harness?: "codex"): HookOut {
+/** Runs the real dispatcher, as the launcher does, optionally as Codex, with plugin root /p. */
+function gate(
+  cwd: string,
+  event: Record<string, unknown>,
+  harness?: "codex",
+  plugin = "/p",
+): HookOut {
   const r = spawnSync("bun", [HOOKS_SRC, "approval-gate", ...(harness ? [harness] : [])], {
     cwd,
     input: JSON.stringify({ cwd, ...event }),
     encoding: "utf8",
-    env: { ...process.env, PLUGIN_ROOT: "/p", CLAUDE_PLUGIN_ROOT: "/p" },
+    env: { ...process.env, PLUGIN_ROOT: plugin, CLAUDE_PLUGIN_ROOT: plugin },
   });
   expect(r.status).toBe(0);
   return JSON.parse(r.stdout || "{}") as HookOut;
@@ -104,6 +109,59 @@ describe("patches are judged by the files they write", () => {
     const out = gate(cwd, bash("cat > .sddx/config.json <<'EOF'\n{}\nEOF"));
     expect(decision(out)).toBe("deny");
   });
+
+  test("a heredoc patch after a cd is judged by its files, with its text kept out of the shell", () => {
+    const text = patch("*** Update File: a.ts", "@@", " // see .sddx/config.json", "-a", "+b");
+    expect(gate(fixtureRepo(), bash(`cd src && ${heredoc(text)}`))).toEqual({});
+  });
+
+  scenario("plan-approval", "Heredoc with an unquoted delimiter", () => {
+    const text = patch("*** Add File: notes.md", "+$(printf '{}' > .sddx/config.json)");
+    expect(decision(gate(fixtureRepo(), bash(`apply_patch <<EOF\n${text}\nEOF`)))).toBe("deny");
+  });
+
+  scenario("plan-approval", "Heredoc patch on a later line", () => {
+    const cwd = fixtureRepo();
+    const text = patch("*** Add File: approvals/a.json", "+{}");
+    for (const before of ["pwd\ncd .sddx && ", "cd .sddx\n"]) {
+      expect(decision(gate(cwd, bash(`${before}${heredoc(text)}`)))).toBe("deny");
+    }
+  });
+
+  test("an opener continued onto the next line is judged as shell", () => {
+    const text = patch("*** Update File: notes.md", "@@", "-a", "+b");
+    const command = `apply_patch <<'EOF' \\\n> .sddx/config.json\n${text}\nEOF`;
+    expect(decision(gate(fixtureRepo(), bash(command)))).toBe("deny");
+  });
+
+  scenario("plan-approval", "Header-shaped context line", () => {
+    const text = patch(
+      "*** Update File: notes.md",
+      "@@",
+      " *** Add File: .sddx/config.json",
+      "-a",
+      "+b",
+    );
+    expect(gate(fixtureRepo(), applyPatch(text))).toEqual({});
+  });
+
+  test("after an Add File hunk an indented header is still a header, as Codex reads it", () => {
+    const text = patch("*** Add File: notes.md", "+a", " *** Add File: .sddx/config.json", "+{}");
+    expect(decision(gate(fixtureRepo(), applyPatch(text)))).toBe("deny");
+  });
+
+  test("with <<- a tab-indented line is read after the shell strips the tab", () => {
+    const text = patch(
+      "*** Update File: notes.md",
+      "@@",
+      "-a",
+      "+b",
+      "\t*** Add File: .sddx/approvals/x.json",
+      "+{}",
+    );
+    const command = `apply_patch <<-'EOF'\n${text}\n\tEOF`;
+    expect(decision(gate(fixtureRepo(), bash(command)))).toBe("deny");
+  });
 });
 
 describe("the approval gate in Codex", () => {
@@ -134,6 +192,28 @@ describe("the approval gate in Codex", () => {
     const spec = writeSpec(cwd, "2026-01-01-test-goal", twoTasks());
     expect(sddx(cwd, "plan", "approve", spec).status).toBe(0);
     expect(gate(cwd, bash(`sddx plan start ${spec}`), "codex")).toEqual({});
+  });
+
+  scenario("codex-hooks", "Ask about no particular plan", () => {
+    const out = gate(fixtureRepo(), bash("sddx plan start"), "codex");
+    expect(decision(out)).toBe("deny");
+    expect(reason(out)).toContain("type it themselves with the ! prefix");
+    expect(reason(out)).not.toContain("plan approve <spec>");
+  });
+
+  test("a plugin path or spec holding a space is quoted in the command to type", () => {
+    const out = gate(
+      fixtureRepo(),
+      bash("sddx plan approve '.sddx/specs/my plan.md'"),
+      "codex",
+      "/p q",
+    );
+    expect(reason(out)).toContain("!'/p q/bin/sddx' plan approve '.sddx/specs/my plan.md'");
+  });
+
+  test("clearing the tool-call marker does not get past the hook", () => {
+    const command = "env -u CODEX_TOOL_CALL_ID sddx plan approve .sddx/specs/x.md";
+    expect(decision(gate(fixtureRepo(), bash(command), "codex"))).toBe("deny");
   });
 
   test("a deny stays a deny, and Claude Code still gets ask", () => {

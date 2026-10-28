@@ -88,14 +88,21 @@ export function runExample(repoRoot: string, name: string, targetDir: string): E
   if (blocks.length === 0) {
     return { name, ok: false, message: "no executable ```sh blocks found in README.md" };
   }
+  // the examples are what a person types, so they never run as a Codex agent's tool call
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.CODEX_TOOL_CALL_ID;
   const setupPath = join(exampleDir, "setup.sh");
   if (existsSync(setupPath)) {
-    const s = spawnSync("bash", [setupPath, targetDir], { cwd: exampleDir, encoding: "utf8" });
+    const s = spawnSync("bash", [setupPath, targetDir], { cwd: exampleDir, encoding: "utf8", env });
     if (s.status !== 0) {
       return { name, ok: false, message: `setup.sh failed: ${s.stderr || s.stdout}` };
     }
   }
-  const r = spawnSync("bash", ["-c", buildScript(blocks)], { cwd: targetDir, encoding: "utf8" });
+  const r = spawnSync("bash", ["-c", buildScript(blocks)], {
+    cwd: targetDir,
+    encoding: "utf8",
+    env,
+  });
   if (r.status !== 0) {
     return { name, ok: false, message: r.stderr || r.stdout || `exit ${r.status}` };
   }

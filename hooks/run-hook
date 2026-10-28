@@ -50,11 +50,11 @@ parent() {
   printf '%s' "$p"
 }
 
-# Opted in: .sddx/ in the working directory or an ancestor up to the git
-# working-tree root. Outside a git working tree only the directory itself counts.
+# Opted in: .sddx/ in $base or an ancestor up to the git working-tree root.
+# Outside a git working tree only the directory itself counts.
 opted_in() {
   top=
-  d=$PWD
+  d=$base
   while :; do
     if [ -e "$d/.git" ]; then
       top=$d
@@ -64,15 +64,19 @@ opted_in() {
     d=$(parent "$d")
   done
   if [ -z "$top" ]; then
-    [ -d "$PWD/.sddx" ]
+    [ -d "$base/.sddx" ]
     return
   fi
-  d=$PWD
+  d=$base
   while :; do
     [ -d "$d/.sddx" ] && return 0
     [ "$d" = "$top" ] && return 1
     d=$(parent "$d")
   done
+}
+
+have_text_tools() {
+  command -v tr >/dev/null 2>&1 && command -v sed >/dev/null 2>&1
 }
 
 # The approval handler joins quoted and escaped pieces (s'ddx', s\ddx, SDDX)
@@ -83,15 +87,11 @@ opted_in() {
 # which runs the handler.
 probe_of() {
   p=
-  if command -v tr >/dev/null 2>&1 && command -v sed >/dev/null 2>&1; then
+  if have_text_tools; then
     p=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/\\[nrt]//g' | tr -d "\"'\\\\")
   fi
   [ -n "$p" ] || p=sddx
   printf '%s' "$p"
-}
-
-have_text_tools() {
-  command -v tr >/dev/null 2>&1 && command -v sed >/dev/null 2>&1
 }
 
 # The main checkout a directory belongs to: up to the working-tree root (a
@@ -150,10 +150,29 @@ cd_target_of() {
   printf '%s' "$t"
 }
 
+# The directory the handlers judge by: the event's cwd, or the hook's own
+# when the event names none. Fails when the event's cwd cannot be read
+# plainly, or is named more than once.
+event_dir() {
+  case $1 in
+    *'"cwd"'*'"cwd"'*) return 1 ;;
+    *'"cwd"'*) ;;
+    *)
+      printf '%s' "$PWD"
+      return 0
+      ;;
+  esac
+  d=$(field_of cwd "$1")
+  case $d in
+    /*) printf '%s' "$d" ;;
+    *) return 1 ;;
+  esac
+}
+
 absolute() {
   case $1 in
     /*) printf '%s' "$1" ;;
-    *) printf '%s/%s' "$PWD" "$1" ;;
+    *) printf '%s/%s' "$base" "$1" ;;
   esac
 }
 
@@ -162,6 +181,7 @@ absolute() {
 # working directory and a leading cd target for bash-gate and record-test.
 # When that directory cannot be worked out, the handler runs.
 strict_may_apply() {
+  base=$(event_dir "$2") || return 0
   dirs=
   if [ "$1" = tdd-gate ]; then
     t=$(field_of file_path "$2")
@@ -170,7 +190,7 @@ strict_may_apply() {
     t=$(absolute "$t")
     dirs=$(parent "$t")
   else
-    dirs=$PWD
+    dirs=$base
     c=$(cd_target_of "$2") || return 0
     [ -z "$c" ] || dirs="$dirs
 $(absolute "$c")"
@@ -186,7 +206,7 @@ $(absolute "$c")"
   return 1
 }
 
-payload=
+payload=$(cat)
 case $handler in
   session-start)
     if [ -z "$bun" ]; then
@@ -195,7 +215,6 @@ case $handler in
     fi
     ;;
   approval-gate)
-    payload=$(cat)
     probe=$(probe_of "$payload")
     if [ -z "$bun" ]; then
       case $probe in
@@ -212,12 +231,12 @@ case $handler in
     ;;
   tdd-gate | bash-gate | record-test)
     [ -n "$bun" ] || pass
-    payload=$(cat)
     strict_may_apply "$handler" "$payload" || pass
     ;;
   *)
-    if [ -z "$bun" ] || ! opted_in; then
-      pass
+    [ -n "$bun" ] || pass
+    if base=$(event_dir "$payload"); then
+      opted_in || pass
     fi
     ;;
 esac
@@ -225,14 +244,7 @@ esac
 hooks=$root/dist/hooks.mjs
 set -- "$hooks" "$handler"
 [ "$harness" = codex ] && set -- "$@" codex
-case $handler in
-  approval-gate | tdd-gate | bash-gate | record-test)
-    out=$(printf '%s' "$payload" | "$bun" "$@")
-    ;;
-  *)
-    out=$("$bun" "$@")
-    ;;
-esac
+out=$(printf '%s' "$payload" | "$bun" "$@")
 status=$?
 
 if [ "$status" -ne 0 ] || [ -z "$out" ]; then

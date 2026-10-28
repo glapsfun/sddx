@@ -110,9 +110,9 @@ const ROUTER_BODY = "ROUTER-BODY-MARKER: route behavior changes through sddx.";
 const MAPPING_BODY = "MAPPING-MARKER: dispatch a subagent with the Agent tool.";
 const CODEX_MAPPING_BODY = "CODEX-MAPPING-MARKER: dispatch a subagent with spawn_agent.";
 
-/** A plugin root holding only the two router files session start injects. */
-function fixturePlugin(): string {
-  const root = mkdtempSync(join(tmpdir(), "plugin-"));
+/** A plugin root holding only the router files session start injects. */
+function fixturePlugin(prefix = "plugin-"): string {
+  const root = mkdtempSync(join(tmpdir(), prefix));
   const dir = join(root, "skills", "using-sddx");
   mkdirSync(join(dir, "references"), { recursive: true });
   writeFileSync(
@@ -129,7 +129,12 @@ const BUN_DIR = dirname(Bun.which("bun") as string);
 /** Runs session start from source the way the launcher would, on a PATH with no sddx. */
 function sessionStart(
   cwd: string,
-  opts: { plugin?: string; pathPrefix?: string; harness?: "codex" } = {},
+  opts: {
+    plugin?: string;
+    pathPrefix?: string;
+    harness?: "codex";
+    env?: Record<string, string>;
+  } = {},
 ) {
   const plugin = opts.plugin ?? fixturePlugin();
   const args = [join(repoRoot, "src", "hooks.ts"), "session-start"];
@@ -143,6 +148,7 @@ function sessionStart(
       CLAUDE_PLUGIN_ROOT: plugin,
       ...(opts.harness === "codex" ? { PLUGIN_ROOT: plugin } : {}),
       NO_COLOR: "1",
+      ...opts.env,
     },
   });
   const out = JSON.parse(r.stdout || "{}") as Record<string, unknown>;
@@ -348,11 +354,33 @@ describe("session start in Codex", () => {
     const status = () =>
       spawnSync("git", ["status", "--porcelain", "--ignored"], { cwd, encoding: "utf8" }).stdout;
     const before = status();
-    const { context } = sessionStart(cwd, codex);
+    const plugin = fixturePlugin();
+    const { context } = sessionStart(cwd, { ...codex, plugin });
     expect(context.split("\n")).toHaveLength(1);
     expect(context).toContain("$sddx:brainstorm");
     expect(context).not.toContain("/sddx:brainstorm");
+    expect(context).toContain(`Run sddx as ${join(plugin, "bin", "sddx")},`);
+    expect(context).toContain(join(plugin, "skills", "using-sddx", "references", "codex.md"));
     expect(status()).toBe(before);
+  });
+
+  scenario("session-router", "Plugin path with a space", () => {
+    const plugin = fixturePlugin("plugin dir-");
+    const quoted = `'${join(plugin, "bin", "sddx")}'`;
+    expect(sessionStart(optedInRepo(), { ...codex, plugin }).context).toContain(
+      `Run sddx as: ${quoted}\n`,
+    );
+    expect(sessionStart(fixtureRepo(), { ...codex, plugin }).context).toContain(
+      `Run sddx as ${quoted},`,
+    );
+  });
+
+  test("in Claude Code an inherited PLUGIN_ROOT does not replace CLAUDE_PLUGIN_ROOT", () => {
+    const elsewhere = fixturePlugin();
+    writeFileSync(join(elsewhere, "skills", "using-sddx", "SKILL.md"), "OTHER-ROUTER\n");
+    const { context } = sessionStart(optedInRepo(), { env: { PLUGIN_ROOT: elsewhere } });
+    expect(context).toContain(ROUTER_BODY);
+    expect(context).not.toContain("OTHER-ROUTER");
   });
 
   scenario("session-router", "Codex session", () => {

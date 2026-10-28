@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CLI, repoRoot } from "./helpers";
+import { CLI, repoRoot, userEnv } from "./helpers";
 
 test("scripts/smoke.sh, which CI runs against the packed tarball, passes from source", () => {
   const bin = mkdtempSync(join(tmpdir(), "sddx-smoke-bin-"));
@@ -11,7 +11,7 @@ test("scripts/smoke.sh, which CI runs against the packed tarball, passes from so
   chmodSync(join(bin, "sddx"), 0o755);
   const r = spawnSync("sh", [join(repoRoot, "scripts", "smoke.sh")], {
     encoding: "utf8",
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, NO_COLOR: "1" },
+    env: userEnv({ PATH: `${bin}:${process.env.PATH}`, NO_COLOR: "1" }),
   });
   if (r.status !== 0) throw new Error(`${r.stdout}\n${r.stderr}`);
   expect(r.stdout).toContain("smoke: ok");

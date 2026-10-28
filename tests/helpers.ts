@@ -7,11 +7,21 @@ export const repoRoot = new URL("..", import.meta.url).pathname;
 
 export const CLI = join(repoRoot, "src/cli.ts");
 
-/** Runs the CLI from source, as the user would: never as a Codex agent's tool call. */
-export function sddx(cwd: string, ...args: string[]) {
-  const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: "1" };
+/** This process's environment as a person's own shell would pass it on: never
+ * marked as a Codex agent's tool call, even when the tests run inside Codex. */
+export function userEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
   delete env.CODEX_TOOL_CALL_ID;
-  return spawnSync("bun", [CLI, ...args], { cwd, encoding: "utf8", env });
+  return { ...env, ...extra };
+}
+
+/** Runs the CLI from source, as the user would. */
+export function sddx(cwd: string, ...args: string[]) {
+  return spawnSync("bun", [CLI, ...args], {
+    cwd,
+    encoding: "utf8",
+    env: userEnv({ NO_COLOR: "1" }),
+  });
 }
 
 export interface SpecTaskInput {

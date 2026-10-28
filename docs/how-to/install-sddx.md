@@ -54,8 +54,9 @@ Codex reads the same marketplace and loads the plugin's Codex manifest: the
 same skills and CLI, with hooks made for Codex. Then start Codex, open
 `/hooks`, and trust the sddx hooks. Codex runs a plugin's hooks only after you
 trust them, and asks again after every update of the plugin. Until then there
-is no session context and no approval hook, though the CLI itself still
-refuses a plan approval that the agent runs.
+is no session context and no approval hook. The CLI itself still refuses a plan
+approval that the agent runs as it is, but only the trusted hooks stop an agent
+that works around that, so trust them before you start a goal.
 
 How sddx in Codex differs from Claude Code:
 

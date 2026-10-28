@@ -9987,89 +9987,58 @@ function tddGate(input, env = process.env) {
 import { existsSync as existsSync13, readFileSync as readFileSync13 } from "node:fs";
 import { isAbsolute as isAbsolute3, join as join15, resolve as resolve4 } from "node:path";
 
+// src/lib/shellcwd.ts
+import { resolve as resolve3 } from "node:path";
+var LEADING_CD = /^\s*cd\s+([\w./][\w./@%+,:-]*)\s*(?:&&|;)\s*/;
+function withLeadingCd(command, cwd) {
+  let rest = command;
+  let dir = cwd;
+  const dirs = [cwd];
+  for (let m = LEADING_CD.exec(rest);m; m = LEADING_CD.exec(rest)) {
+    dir = resolve3(dir, m[1]);
+    dirs.push(dir);
+    rest = rest.slice(m[0].length);
+  }
+  return { command: rest, cwd: dir, dirs };
+}
+var shellWord = (word) => /^[\w./@%+,:-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`;
+
 // src/lib/patch.ts
-var TARGET = /^\s*\*\*\*\s*(?:Add File|Update File|Delete File|Move to):\s*(.+?)\s*$/;
+var HEADER = /^\*\*\*\s*(?:Add File|Update File|Delete File|Move to):\s*(.+?)\s*$/i;
+var OPENS_UPDATE = /^\*\*\*\s*(?:Update File|Move to):/i;
 function patchTargets(text) {
   const out = [];
+  let update = false;
   for (const line of text.split(/\r?\n/)) {
-    const m = TARGET.exec(line);
+    if (update && (!line.startsWith("***") || line.trim() === "*** End of File"))
+      continue;
+    const m = HEADER.exec(line.trim());
+    update = m !== null && OPENS_UPDATE.test(line.trim());
     if (m)
       out.push(m[1]);
   }
   return out;
 }
-var OPENER = /^<<(-?)\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\2/;
-var FEEDS_PATCH = /^\s*(?:cd\s+[^\s;&|]+\s*(?:&&|;)\s*)*apply_patch\s*$/;
-function openersIn(line, state) {
-  const out = [];
-  for (let i = 0;i < line.length; i++) {
-    const c = line[i];
-    if (state.quote !== null) {
-      if (c === "\\" && state.quote !== "'")
-        i += 1;
-      else if (c === state.quote)
-        state.quote = null;
-      continue;
-    }
-    if (c === "\\") {
-      i += 1;
-      continue;
-    }
-    if (c === "'" || c === '"' || c === "`") {
-      state.quote = c;
-      continue;
-    }
-    if (c === "#" && (i === 0 || /\s/.test(line[i - 1])))
-      break;
-    if (c === "<" && line[i + 1] === "<" && line[i + 2] !== "<") {
-      const m = OPENER.exec(line.slice(i));
-      if (!m)
-        continue;
-      out.push({
-        strip: m[1] === "-",
-        delimiter: m[3],
-        patch: FEEDS_PATCH.test(line.slice(0, i))
-      });
-      i += m[0].length - 1;
-    }
-  }
-  return out;
-}
-function applyPatchHeredocs(command) {
-  const shell = [];
-  const bodies = [];
-  const pending = [];
-  const state = { quote: null };
-  let body = [];
-  for (const line of command.split(`
-`)) {
-    const open = pending[0];
-    if (open) {
-      const ends = (open.strip ? line.replace(/^\t+/, "") : line) === open.delimiter;
-      if (open.patch) {
-        if (ends)
-          bodies.push(body.join(`
-`));
-        else
-          body.push(line);
-      } else {
-        shell.push(line);
-      }
-      if (ends) {
-        pending.shift();
-        body = [];
-      }
-      continue;
-    }
-    shell.push(line);
-    pending.push(...openersIn(line, state));
-  }
-  if (pending.length > 0) {
-    return { shell: command, bodies: pending[0]?.patch ? [...bodies, body.join(`
-`)] : bodies };
-  }
-  return { shell: shell.join(`
-`), bodies };
+var OPENER = /^\s*apply_patch\s*<<(-?)\s*(['"])([A-Za-z_][A-Za-z0-9_]*)\2\s*$/;
+function leadingPatchHeredoc(command, cwd) {
+  const lines = command.split(`
+`);
+  const first = lines[0];
+  const { command: rest, dirs } = withLeadingCd(first, cwd);
+  const m = OPENER.exec(rest);
+  if (!m)
+    return null;
+  const body = (line) => m[1] === "-" ? line.replace(/^\t+/, "") : line;
+  const end = lines.findIndex((line, i) => i > 0 && body(line) === m[3]);
+  if (end === -1)
+    return null;
+  return {
+    patch: lines.slice(1, end).map(body).join(`
+`),
+    dirs,
+    shell: [first, ...lines.slice(end + 1)].join(`
+`)
+  };
 }
 
 // src/lib/protectedpaths.ts
@@ -10178,28 +10147,17 @@ function protectedWriteBlock(path) {
   return null;
 }
 
-// src/lib/shellcwd.ts
-import { resolve as resolve3 } from "node:path";
-var LEADING_CD = /^\s*cd\s+([^\s"'`$\\;&|~]+)\s*(?:&&|;)\s*/;
-function withLeadingCd(command, cwd) {
-  let rest = command;
-  let dir = cwd;
-  for (let m = LEADING_CD.exec(rest);m; m = LEADING_CD.exec(rest)) {
-    dir = resolve3(dir, m[1]);
-    rest = rest.slice(m[0].length);
-  }
-  return { command: rest, cwd: dir };
-}
-
 // src/lib/approvalgate.ts
 var pass2 = { decision: "pass" };
 var ask = (reason, spec) => spec === undefined ? { decision: "ask", reason } : { decision: "ask", reason, spec };
 var deny = (reason) => ({ decision: "deny", reason });
-function patchBlock(patch, cwd) {
+function patchBlock(patch, dirs) {
   for (const target of patchTargets(patch)) {
-    const blocked = protectedWriteBlock(target) ?? protectedWriteBlock(resolve4(cwd, target));
-    if (blocked)
-      return blocked;
+    for (const path of [target, ...dirs.map((d) => resolve4(d, target))]) {
+      const blocked = protectedWriteBlock(path);
+      if (blocked)
+        return blocked;
+    }
   }
   return null;
 }
@@ -10393,19 +10351,18 @@ function approvalGate(event) {
     return blocked ? deny(blocked) : pass2;
   }
   if (event.patch !== undefined) {
-    const blocked = patchBlock(event.patch, cwd);
+    const blocked = patchBlock(event.patch, [cwd]);
     return blocked ? deny(blocked) : pass2;
   }
   if (!command)
     return pass2;
   try {
-    const heredocs = applyPatchHeredocs(command);
-    if (heredocs.bodies.length > 0) {
-      const blocked = patchBlock(heredocs.bodies.join(`
-`), withLeadingCd(command, cwd).cwd);
+    const heredoc = leadingPatchHeredoc(command, cwd);
+    if (heredoc) {
+      const blocked = patchBlock(heredoc.patch, heredoc.dirs);
       if (blocked)
         return deny(blocked);
-      command = heredocs.shell;
+      command = heredoc.shell;
     }
     const protectedPath = protectedPathRef(command);
     if (protectedPath && !isReadOnly(command))
@@ -10988,16 +10945,25 @@ function cmdTddGate(event) {
     }
   };
 }
-function pluginCommand() {
-  const plugin = pluginRoot();
-  return plugin ? join19(plugin, "bin", "sddx") : "sddx";
+function pluginCommand(harness) {
+  const plugin = pluginRoot(harness);
+  return plugin ? shellWord(join19(plugin, "bin", "sddx")) : "sddx";
 }
 function handOff(decision) {
+  const reason = decision.reason ?? "sddx: approval required";
+  if (decision.spec === undefined) {
+    return [
+      reason,
+      "",
+      "In Codex a hook cannot ask the user, so this was refused. If the user wants it run, they can type it themselves with the ! prefix."
+    ].join(`
+`);
+  }
   return [
-    decision.reason ?? "sddx: approval required",
+    reason,
     "",
     "In Codex only a person can approve a plan, so this was refused. Ask the user to review the plan and type:",
-    `  !${pluginCommand()} plan approve ${decision.spec ?? "<spec>"}`
+    `  !${pluginCommand("codex")} plan approve ${shellWord(decision.spec)}`
   ].join(`
 `);
 }
@@ -11068,14 +11034,15 @@ function activeTaskFiles(root) {
 }
 var NOT_OPTED_IN_LINE = "sddx is installed. To plan a change with it in this repository, run /sddx:brainstorm.";
 var CODEX_NOT_OPTED_IN_LINE = "sddx is installed. To plan a change with it in this repository, mention $sddx:brainstorm.";
+var codexNotOptedInLine = (plugin) => plugin ? `${CODEX_NOT_OPTED_IN_LINE} Run sddx as ${shellWord(join19(plugin, "bin", "sddx"))}, and read ${join19(plugin, ROUTER_MAPPING.codex)} before running it.` : CODEX_NOT_OPTED_IN_LINE;
 var CODEX_STRICT_NOTE = "This repository uses the strict profile, whose per-edit gates do not run in Codex. Each task still needs its boundary proof from sddx verify. Record each test run with sddx task phase <id> RED --test-exit <n>, then GREEN once it passes.";
 var ROUTER = join19("skills", "using-sddx", "SKILL.md");
 var ROUTER_MAPPING = {
   "claude-code": join19("skills", "using-sddx", "references", "claude-code.md"),
   codex: join19("skills", "using-sddx", "references", "codex.md")
 };
-function pluginRoot() {
-  const fromEnv = process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT;
+function pluginRoot(harness) {
+  const fromEnv = harness === "codex" ? process.env.PLUGIN_ROOT : process.env.CLAUDE_PLUGIN_ROOT;
   if (fromEnv)
     return fromEnv;
   let d = dirname8(fileURLToPath(import.meta.url));
@@ -11113,13 +11080,14 @@ var realOrNull = (path) => {
 };
 function runCommandLines(plugin, harness) {
   const pluginBin = plugin ? join19(plugin, "bin") : null;
+  const absolute = pluginBin ? shellWord(join19(pluginBin, "sddx")) : "sddx";
   if (harness === "codex")
-    return [`Run sddx as: ${pluginBin ? join19(pluginBin, "sddx") : "sddx"}`];
+    return [`Run sddx as: ${absolute}`];
   const shadow = shadowingSddx(pluginBin);
   if (!shadow || !pluginBin)
     return ["Run sddx as: sddx"];
   return [
-    `Run sddx as: ${join19(pluginBin, "sddx")}`,
+    `Run sddx as: ${absolute}`,
     `Warning: another sddx at ${shadow} comes first on PATH and would shadow the plugin's, so use the command above wherever a skill says sddx. Removing the other one lets plain sddx work; the sddx troubleshooting guide shows how.`
   ];
 }
@@ -11206,9 +11174,9 @@ function optedInLines(root, plugin, notes, harness) {
 }
 function sessionStartContext(cwd, harness = "claude-code") {
   const root = optedInRoot(cwd);
+  const plugin = pluginRoot(harness);
   if (root === null)
-    return harness === "codex" ? CODEX_NOT_OPTED_IN_LINE : NOT_OPTED_IN_LINE;
-  const plugin = pluginRoot();
+    return harness === "codex" ? codexNotOptedInLine(plugin) : NOT_OPTED_IN_LINE;
   const v5 = v5Check(root);
   if (v5.pending)
     return [...v5.lines, ...runCommandLines(plugin, harness)].join(`
@@ -13197,7 +13165,7 @@ function cmdPlanApprove(cwd, args, format, noColor) {
     const own = join27(dirname9(fileURLToPath2(import.meta.url)), "..", "bin", "sddx");
     failWith([
       "plan approve: only a person can approve a plan, and this ran as a Codex agent's tool call",
-      `ask the user to review the plan and type: !${own} plan approve ${specArg}`
+      `ask the user to review the plan and type: !${shellWord(own)} plan approve ${shellWord(specArg)}`
     ], 3);
   }
   const plan = resolvePlan(cwd, specArg);

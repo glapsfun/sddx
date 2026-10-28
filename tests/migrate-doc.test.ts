@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CLI, repoRoot } from "./helpers";
+import { CLI, repoRoot, userEnv } from "./helpers";
 import { extractV5Fixture } from "./v5-fixture";
 
 const doc = readFileSync(join(repoRoot, "docs", "how-to", "migrate-to-v6.md"), "utf8");
@@ -27,7 +27,7 @@ test("docs/how-to/migrate-to-v6.md replays against a real sddx 5 repository", ()
   const bin = mkdtempSync(join(tmpdir(), "sddx-shim-"));
   writeFileSync(join(bin, "sddx"), `#!/bin/sh\nexec bun "${CLI}" "$@"\n`);
   chmodSync(join(bin, "sddx"), 0o755);
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, NO_COLOR: "1" };
+  const env = userEnv({ PATH: `${bin}:${process.env.PATH}`, NO_COLOR: "1" });
 
   expect(blocks.length).toBeGreaterThanOrEqual(4);
   for (const block of blocks) {

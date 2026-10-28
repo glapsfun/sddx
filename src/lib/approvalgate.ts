@@ -29,14 +29,13 @@ import { decideGate, type GateNode, planHash } from "./approval";
 import { autoMaxTasks, gateInteractionMode } from "./config";
 import { scopesOverlap } from "./glob-overlap";
 import { parseGoalSpec } from "./goalspec";
-import { applyPatchHeredocs, patchTargets } from "./patch";
+import { leadingPatchHeredoc, patchTargets } from "./patch";
 import {
   isReadOnly,
   protectedPathBlock,
   protectedPathRef,
   protectedWriteBlock,
 } from "./protectedpaths";
-import { withLeadingCd } from "./shellcwd";
 
 export interface ApprovalGateDecision {
   /** `ask` raises the user's permission dialog; `deny` refuses; `pass` emits no decision. */
@@ -52,11 +51,13 @@ const ask = (reason: string, spec?: string): ApprovalGateDecision =>
   spec === undefined ? { decision: "ask", reason } : { decision: "ask", reason, spec };
 const deny = (reason: string): ApprovalGateDecision => ({ decision: "deny", reason });
 
-/** The first protected path a patch writes, as a file-tool write would be judged. */
-function patchBlock(patch: string, cwd: string): string | null {
+/** The first protected path a patch writes from any of `dirs`, as a file-tool write would be judged. */
+function patchBlock(patch: string, dirs: string[]): string | null {
   for (const target of patchTargets(patch)) {
-    const blocked = protectedWriteBlock(target) ?? protectedWriteBlock(resolve(cwd, target));
-    if (blocked) return blocked;
+    for (const path of [target, ...dirs.map((d) => resolve(d, target))]) {
+      const blocked = protectedWriteBlock(path);
+      if (blocked) return blocked;
+    }
   }
   return null;
 }
@@ -316,18 +317,18 @@ export function approvalGate(event: {
     return blocked ? deny(blocked) : pass;
   }
   if (event.patch !== undefined) {
-    const blocked = patchBlock(event.patch, cwd);
+    const blocked = patchBlock(event.patch, [cwd]);
     return blocked ? deny(blocked) : pass;
   }
   if (!command) return pass;
   try {
     // A patch fed to apply_patch through the shell is judged by the files it
     // writes; only the shell text around it is read as commands.
-    const heredocs = applyPatchHeredocs(command);
-    if (heredocs.bodies.length > 0) {
-      const blocked = patchBlock(heredocs.bodies.join("\n"), withLeadingCd(command, cwd).cwd);
+    const heredoc = leadingPatchHeredoc(command, cwd);
+    if (heredoc) {
+      const blocked = patchBlock(heredoc.patch, heredoc.dirs);
       if (blocked) return deny(blocked);
-      command = heredocs.shell;
+      command = heredoc.shell;
     }
     const protectedPath = protectedPathRef(command);
     if (protectedPath && !isReadOnly(command)) return deny(protectedPathBlock(protectedPath));

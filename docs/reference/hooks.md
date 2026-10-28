@@ -123,10 +123,15 @@ hook fails, times out, or prints a key it does not know. So in Codex:
 - Without Bun, or when the handler fails or prints nothing, the approval gate
   denies any event that mentions sddx.
 - `sddx plan approve` itself refuses with exit 3 when `CODEX_TOOL_CALL_ID` is
-  set, which Codex sets on every command its agent runs. That holds before the
-  hooks are trusted.
-- A patch, from the `apply_patch` tool or an `apply_patch` heredoc in a shell
-  command, is judged by the files it adds, updates, deletes or moves to.
+  set, which Codex sets on every command its agent runs. This catches an agent
+  that runs the command as it is, even before the hooks are trusted. It is not a
+  barrier: an agent can clear the variable, or write a token with a patch, and
+  only the trusted hooks stop that.
+- A patch from the `apply_patch` tool is judged by the files it adds, updates,
+  deletes or moves to. So is an `apply_patch` heredoc in a shell command when
+  its first line is `apply_patch <<'EOF'`, after any plain `cd <dir> &&`, with a
+  quoted delimiter and nothing after it. Any other heredoc is judged as shell,
+  body included.
 - The strict profile's hooks are not registered: Codex reports no exit code
   after a shell command, so the recorder cannot work. A strict repository
   opened in Codex gets a note at session start.

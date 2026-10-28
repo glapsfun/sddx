@@ -13,6 +13,7 @@ import {
   goalSpec,
   readGoalAnywhere,
   sddx,
+  userEnv,
   writeSpec,
 } from "./helpers";
 import { scenario } from "./scenario";
@@ -220,11 +221,20 @@ describe("plan approval", () => {
   scenario("plan-approval", "Approval typed by the user", () => {
     const cwd = fixtureRepo();
     const spec = writeSpec(cwd, SPEC, twoTasks());
-    const env: NodeJS.ProcessEnv = { ...process.env, NO_COLOR: "1" };
-    delete env.CODEX_TOOL_CALL_ID;
+    const env = userEnv({ NO_COLOR: "1" });
     const r = spawnSync("bun", [CLI, "plan", "approve", spec], { cwd, encoding: "utf8", env });
     expect(r.status).toBe(0);
     expect(existsSync(join(cwd, ".sddx", "approvals"))).toBe(true);
+  });
+
+  test("the command to type quotes a spec path holding a space", () => {
+    const r = spawnSync("bun", [CLI, "plan", "approve", ".sddx/specs/my plan.md"], {
+      cwd: fixtureRepo(),
+      encoding: "utf8",
+      env: { ...process.env, NO_COLOR: "1", CODEX_TOOL_CALL_ID: "call_1" },
+    });
+    expect(r.status).toBe(3);
+    expect(`${r.stdout}${r.stderr}`).toContain("plan approve '.sddx/specs/my plan.md'");
   });
 
   test("an empty CODEX_TOOL_CALL_ID does not count as a tool call", () => {

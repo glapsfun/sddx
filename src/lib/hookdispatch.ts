@@ -30,6 +30,7 @@ import { withoutFrontmatter } from "./frontmatter";
 import { detectV5Signals, type V5Signals, v5Blockers } from "./migrate";
 import { optedInRoot } from "./optin";
 import { recordTestRun } from "./recorder";
+import { shellWord } from "./shellcwd";
 import { stopGate } from "./stopgate";
 import { isTerminal, type TaskState } from "./task";
 import { sweep } from "./worktree";
@@ -86,19 +87,27 @@ function cmdTddGate(event: HookEvent): Output {
   };
 }
 
-/** The plugin's `bin/sddx` by absolute path, for a command the user types. */
-function pluginCommand(): string {
-  const plugin = pluginRoot();
-  return plugin ? join(plugin, "bin", "sddx") : "sddx";
+/** The plugin's `bin/sddx` by absolute path, as a shell word, for a command someone types. */
+function pluginCommand(harness: Harness): string {
+  const plugin = pluginRoot(harness);
+  return plugin ? shellWord(join(plugin, "bin", "sddx")) : "sddx";
 }
 
-/** Codex has no dialog: an ask becomes a deny that hands the command to the user. */
+/** Codex has no dialog: an ask becomes a deny. One about a plan hands the approve command to the user. */
 function handOff(decision: ApprovalGateDecision): string {
+  const reason = decision.reason ?? "sddx: approval required";
+  if (decision.spec === undefined) {
+    return [
+      reason,
+      "",
+      "In Codex a hook cannot ask the user, so this was refused. If the user wants it run, they can type it themselves with the ! prefix.",
+    ].join("\n");
+  }
   return [
-    decision.reason ?? "sddx: approval required",
+    reason,
     "",
     "In Codex only a person can approve a plan, so this was refused. Ask the user to review the plan and type:",
-    `  !${pluginCommand()} plan approve ${decision.spec ?? "<spec>"}`,
+    `  !${pluginCommand("codex")} plan approve ${shellWord(decision.spec)}`,
   ].join("\n");
 }
 
@@ -195,6 +204,12 @@ export const NOT_OPTED_IN_LINE =
 export const CODEX_NOT_OPTED_IN_LINE =
   "sddx is installed. To plan a change with it in this repository, mention $sddx:brainstorm.";
 
+/** Codex puts no plugin directory on PATH, so the line also gives the command and the tool mapping. */
+const codexNotOptedInLine = (plugin: string | null): string =>
+  plugin
+    ? `${CODEX_NOT_OPTED_IN_LINE} Run sddx as ${shellWord(join(plugin, "bin", "sddx"))}, and read ${join(plugin, ROUTER_MAPPING.codex)} before running it.`
+    : CODEX_NOT_OPTED_IN_LINE;
+
 const CODEX_STRICT_NOTE =
   "This repository uses the strict profile, whose per-edit gates do not run in Codex. Each task still needs its boundary proof from sddx verify. Record each test run with sddx task phase <id> RED --test-exit <n>, then GREEN once it passes.";
 
@@ -204,10 +219,11 @@ const ROUTER_MAPPING: Record<Harness, string> = {
   codex: join("skills", "using-sddx", "references", "codex.md"),
 };
 
-/** PLUGIN_ROOT (Codex) or CLAUDE_PLUGIN_ROOT, else the nearest ancestor of
- * this bundle that ships the router. */
-function pluginRoot(): string | null {
-  const fromEnv = process.env.PLUGIN_ROOT || process.env.CLAUDE_PLUGIN_ROOT;
+/** The harness's own plugin root variable, PLUGIN_ROOT in Codex and
+ * CLAUDE_PLUGIN_ROOT in Claude Code, else the nearest ancestor of this bundle
+ * that ships the router. */
+function pluginRoot(harness: Harness): string | null {
+  const fromEnv = harness === "codex" ? process.env.PLUGIN_ROOT : process.env.CLAUDE_PLUGIN_ROOT;
   if (fromEnv) return fromEnv;
   let d = dirname(fileURLToPath(import.meta.url));
   for (let i = 0; i < 4; i++, d = dirname(d)) {
@@ -247,12 +263,13 @@ const realOrNull = (path: string): string | null => {
 
 function runCommandLines(plugin: string | null, harness: Harness): string[] {
   const pluginBin = plugin ? join(plugin, "bin") : null;
+  const absolute = pluginBin ? shellWord(join(pluginBin, "sddx")) : "sddx";
   // Codex puts no plugin directory on the agent's PATH: only the absolute path reaches it
-  if (harness === "codex") return [`Run sddx as: ${pluginBin ? join(pluginBin, "sddx") : "sddx"}`];
+  if (harness === "codex") return [`Run sddx as: ${absolute}`];
   const shadow = shadowingSddx(pluginBin);
   if (!shadow || !pluginBin) return ["Run sddx as: sddx"];
   return [
-    `Run sddx as: ${join(pluginBin, "sddx")}`,
+    `Run sddx as: ${absolute}`,
     `Warning: another sddx at ${shadow} comes first on PATH and would shadow the plugin's, so use the command above wherever a skill says sddx. Removing the other one lets plain sddx work; the sddx troubleshooting guide shows how.`,
   ];
 }
@@ -353,8 +370,8 @@ function optedInLines(
 /** What session start tells the agent, by repository state and harness (see the session-router spec). */
 export function sessionStartContext(cwd: string, harness: Harness = "claude-code"): string {
   const root = optedInRoot(cwd);
-  if (root === null) return harness === "codex" ? CODEX_NOT_OPTED_IN_LINE : NOT_OPTED_IN_LINE;
-  const plugin = pluginRoot();
+  const plugin = pluginRoot(harness);
+  if (root === null) return harness === "codex" ? codexNotOptedInLine(plugin) : NOT_OPTED_IN_LINE;
   const v5 = v5Check(root);
   if (v5.pending) return [...v5.lines, ...runCommandLines(plugin, harness)].join("\n");
   return optedInLines(root, plugin, v5.lines, harness).join("\n");

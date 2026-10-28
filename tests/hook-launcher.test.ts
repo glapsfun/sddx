@@ -220,6 +220,33 @@ describe("hooks/run-hook decides before starting Bun", () => {
     expect(r.out).toEqual({});
     expect(r.bunCalls).toEqual([]);
   });
+
+  test("the launcher judges by the event's cwd, as the handlers do", () => {
+    const optedIn = gitRepo(true);
+    const strict = gitRepo(true, "strict");
+    const elsewhere = bareDir();
+    const fake = { bun: { stdout: "{}" } };
+    const stop = (eventCwd: string, cwd: string) =>
+      runLauncher("stop-gate", { hook_event_name: "Stop", cwd: eventCwd }, { cwd, ...fake });
+    expect(stop(optedIn, elsewhere).bunCalls).toHaveLength(1);
+    expect(stop(elsewhere, optedIn).bunCalls).toHaveLength(0);
+    const rm = runLauncher("bash-gate", bash("rm -rf src", strict), { cwd: elsewhere, ...fake });
+    expect(rm.bunCalls).toHaveLength(1);
+    const edit = runLauncher("tdd-gate", write("src/a.ts", strict), { cwd: elsewhere, ...fake });
+    expect(edit.bunCalls).toHaveLength(1);
+  });
+
+  test("an event cwd the launcher cannot read plainly runs the handler", () => {
+    const elsewhere = bareDir();
+    for (const payload of [
+      `{"hook_event_name":"Stop","cwd":"/tmp/a\\"b"}`,
+      `{"hook_event_name":"Stop","cwd":"relative"}`,
+      `{"cwd":"${elsewhere}","tool_input":{"cwd":"/elsewhere"}}`,
+    ]) {
+      const r = runLauncher("stop-gate", payload, { cwd: elsewhere, bun: { stdout: "{}" } });
+      expect({ payload, calls: r.bunCalls.length }).toEqual({ payload, calls: 1 });
+    }
+  });
 });
 
 describe("hooks/run-hook without Bun, and when the handler fails", () => {

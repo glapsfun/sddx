@@ -135,7 +135,9 @@ here too, so approving never produces a token the start would reject.
 
 Only a person may approve. When `CODEX_TOOL_CALL_ID` is set, which Codex sets on
 every command its agent runs and not on a command you type with `!`, it refuses
-with exit 3, writes nothing, and prints the command for you to type.
+with exit 3, writes nothing, and prints the command for you to type. An agent
+that clears the variable gets past this check; the plugin's approval hook, once
+trusted in `/hooks`, is what stops it.
 
 ## sddx plan start
 

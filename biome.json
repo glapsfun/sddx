@@ -36,6 +36,14 @@
           }
         }
       }
+    },
+    {
+      "includes": [".claude-plugin/plugin.json", ".codex-plugin/plugin.json"],
+      "json": {
+        "formatter": {
+          "expand": "always"
+        }
+      }
     }
   ],
   "assist": {

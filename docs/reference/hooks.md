@@ -144,7 +144,7 @@ start decides how much to say from the repository's state:
 | Repository state | Claude Code | Codex |
 | --- | --- | --- |
 | Not opted in (no `.sddx/`) | One line: sddx is installed, and `/sddx:brainstorm` plans a change with it. Nothing is read or written. | The same line, naming `$sddx:brainstorm`. |
-| Set up by sddx 5: a config with `schema_version` 1.x, an sddx 5 task file, or sddx 5 files or hooks under `.claude/` | A pointer to `sddx migrate`; when `.claude/` still holds sddx 5 files or hooks, a note that both sets of hooks would fire. No router. | The same. |
+| Set up by sddx 5: a config with `schema_version` 1.x, an sddx 5 task file, or sddx 5 files or hooks under `.claude/` | A pointer to `sddx migrate`, applied with `--yes` only once the user agrees; when `.claude/` still holds sddx 5 files or hooks, a note that both sets of hooks would fire. No router. | The same. |
 | Opted in | The repository root, the command to run sddx, any orphan worktrees swept, one line per task that is not `DONE` or `ABANDONED`, then the `using-sddx` router and `references/claude-code.md`. The board is refreshed. | The same, with `references/codex.md`. On the strict profile, a note that its per-edit gates do not run in Codex and that test runs are recorded with `sddx task phase`. |
 | Bun missing, any repository | One notice from the launcher, with the install command. | The same. |
 

@@ -8,7 +8,15 @@
   "homepage": "https://github.com/glapsfun/sddx",
   "repository": "https://github.com/glapsfun/sddx",
   "license": "MIT",
-  "keywords": ["sdd", "tdd", "spec-driven", "worktree", "receipts", "oracle", "review"],
+  "keywords": [
+    "sdd",
+    "tdd",
+    "spec-driven",
+    "worktree",
+    "receipts",
+    "oracle",
+    "review"
+  ],
   "skills": "./skills/",
   "hooks": "./hooks/hooks-codex.json",
   "interface": {

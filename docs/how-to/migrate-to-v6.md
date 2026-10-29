@@ -24,7 +24,8 @@ Receipts, approval tokens and goal records are history and stay where they are.
 
 Install Bun and the plugin as in [Install sddx](install-sddx.md). Open the
 repository in Claude Code: session start recognizes the sddx 5 setup and points
-to `sddx migrate` instead of loading the workflow.
+to `sddx migrate` instead of loading the workflow. The agent may preview the
+move, but applies it only once you agree.
 
 Run the steps below by asking the agent, whose shell has the plugin's `sddx`.
 From your own terminal, use `bunx @glapsfun/sddx@6` in place of `sddx`.

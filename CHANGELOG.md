@@ -4,6 +4,27 @@ All notable changes to sddx are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sddx adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.0](https://github.com/glapsfun/sddx/compare/v5.0.0...v6.0.0) (2026-10-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* init, sync, uninstall, graph, intake check and red-check are removed, along with the harness files v5 generated into the repository; harness plugins replace them. A v5 config (schema 1.x) is refused until `sddx migrate` runs. New receipts are version 5.
+
+### Added
+
+* package sddx as an installable plugin with skills and hooks ([0c04dcd](https://github.com/glapsfun/sddx/commit/0c04dcd5164a267b912c6d87b7a6bbdcf39ccd92))
+* rebuild the core around goal specs, boundary proof and review ([c5e554d](https://github.com/glapsfun/sddx/commit/c5e554d4b12bdcb346125bf6f404f7d615112616))
+* ship sddx as a Claude Code plugin ([05a9d9b](https://github.com/glapsfun/sddx/commit/05a9d9be1fce33c593530ea95b62bb2fe8489ee1))
+* ship sddx as a Codex plugin ([0d35778](https://github.com/glapsfun/sddx/commit/0d357780e8272d3b31d237bad31deb1fb7d0ebc5))
+* support a second plugin harness whose hooks cannot raise a dialog ([4ef1f7b](https://github.com/glapsfun/sddx/commit/4ef1f7bc0c2cdff17f46ac54930332ad3bd2ec72))
+
+
+### Fixed
+
+* tighten the patch heredoc, leading cd and hook cwd checks ([7be9379](https://github.com/glapsfun/sddx/commit/7be937988a74e58f3e63481db2ef4d8a56de01ad))
+* word the token-forgery refusal so it holds in every harness ([89afd49](https://github.com/glapsfun/sddx/commit/89afd4993b6b59deae8480b1381122444b7876ff))
+
 ## [5.0.0](https://github.com/glapsfun/sddx/compare/v4.0.0...v5.0.0) (2026-08-02)
 
 

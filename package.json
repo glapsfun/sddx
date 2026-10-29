@@ -41,7 +41,8 @@
     "build": "bun scripts/build.ts",
     "check": "bun run lint && bun run typecheck && bun test && bun run spec-coverage && bun run build",
     "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('sddx: refusing an accidental local npm publish. This only guards against running it by mistake, not who has publish rights on the glapsfun org; set CI=true deliberately to override (e.g. the one-time bootstrap publish): CI=true npm publish'); process.exit(1); }\"",
-    "spec-coverage": "bun scripts/spec-coverage.ts --if-present"
+    "spec-coverage": "bun scripts/spec-coverage.ts --if-present",
+    "evals": "bun scripts/evals.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.4",

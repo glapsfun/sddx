@@ -67,6 +67,51 @@ codex plugin marketplace add glapsfun/sddx --ref v6
 codex plugin add sddx@sddx
 ```
 
+## Behavior evals
+
+The tests prove what the CLI and the hooks do. The evals measure what a real
+model does with the plugin: whether it brainstorms before coding, stops for
+approval, works in the task's worktree, has the critic review, and finishes a
+small goal. Each scenario runs a headless session (`claude -p` or
+`codex exec`) in a fresh fixture repository and is graded by what the session
+leaves behind: specs, approval tokens, task states, goal refs and the audit.
+
+```sh
+bun run evals                                  # list the scenarios; starts nothing
+bun run evals --scenario all --harness all \
+  --claude-auth ~/.claude/.credentials.json \
+  --codex-auth ~/.codex/auth.json --codex-full-access
+```
+
+- **Selection.** `--scenario` takes a scenario name, a group (`safety`,
+  `workflow`, `routing`, `lifecycle`) or `all`, and can be repeated.
+  `--harness` takes `claude-code`, `codex` or `all`. `--runs <n>` repeats each
+  session; `--model <harness>=<model>` names a model; `--timeout <minutes>`
+  overrides every scenario's time limit.
+- **Credentials.** `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` for Claude
+  Code, `OPENAI_API_KEY` for Codex, or a credentials file named with
+  `--claude-auth` / `--codex-auth`. Each session gets a throwaway home with a
+  copy of it, so your own settings, memories, plugins and hook trust are never
+  read or changed. From a Claude Code credentials file only the Claude login
+  is copied, without its refresh token: MCP logins in the same file stay out of
+  reach, and no session can rotate your token. Sessions then stop working when
+  that access token expires, so for a long run prefer a token from
+  `claude setup-token` in `CLAUDE_CODE_OAUTH_TOKEN`.
+- **Codex needs full access.** `codex exec` cannot ask for sandbox escalation
+  and sddx writes `.git`, so Codex sessions run with
+  `--sandbox danger-full-access`, and the runner refuses them without
+  `--codex-full-access`. Run them on a disposable machine or in a container.
+- **Cost.** Every session spends tokens; the whole catalog is about twenty
+  sessions per run. The runner prints the count before it starts, refuses to
+  run when `CI` is set, and no workflow calls it.
+- **Results.** A report goes to `.docs/evidence/v6-evidence/` as Markdown and
+  JSON: passes, failures and errors per scenario and harness, the harness
+  versions, the model, the plugin commit and token use. A session that times
+  out or breaks is an error, apart from the pass rate. Raw transcripts stay in
+  the run's directory under `~/.cache/sddx-evals/`; the report keeps only sddx commands and the
+  final reply, with paths shortened to `~` and `<fixture>`. Nothing fails on a
+  low pass rate: read the failures and decide.
+
 ## The maintainer's job
 
 1. **Write conventional commits.** Version bumps and changelog sections are
@@ -78,18 +123,21 @@ codex plugin add sddx@sddx
    `CHANGELOG.md` section and edit it for clarity/voice if the auto-generated
    wording undersells what shipped — the PR stays open for editing until you
    merge it.
-3. **Wait for the required checks**, including the install smoke test. It
+3. **Run the behavior evals** on the release PR's head (see above), and commit
+   the report under `.docs/evidence/v6-evidence/` if you keep it. Compare its
+   pass rates with the last report before merging.
+4. **Wait for the required checks**, including the install smoke test. It
    can't be skipped or bypassed by memory — merge is blocked until it's green.
    These checks run automatically on the release PR: `release-please-action`
    authenticates as the `sddx-release-please` GitHub App (see below), not the
    default `GITHUB_TOKEN`, specifically so its pushes to the release PR
    branch trigger CI normally.
-4. **Merge when ready.** That's it: merging tags `v<version>`, publishes
+5. **Merge when ready.** That's it: merging tags `v<version>`, publishes
    the GitHub Release, and publishes the same version to npm as
    `@glapsfun/sddx` — all automatic, no separate manual step after the
    merge. Treat merging the release PR as publishing, not proposing to
    publish.
-5. **Submit for indexing** (still manual): skills.sh and directory
+6. **Submit for indexing** (still manual): skills.sh and directory
    aggregators, per-site submission, linking the tagged release.
 
 ## Release PR checks (one-time setup)

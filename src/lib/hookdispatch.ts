@@ -307,7 +307,7 @@ function v5Check(root: string): { pending: boolean; lines: string[] } {
   const registered = s.claudeOwned.length > 0 || s.settingsHooks > 0;
   if (v5Blockers(s).length > 0 || registered || s.declaration) {
     const lines = [
-      "This repository was set up by sddx 5, which sddx 6 does not run. Run `sddx migrate` to preview the move, then `sddx migrate --yes` to apply it.",
+      "This repository was set up by sddx 5, which sddx 6 does not run. Run `sddx migrate` to preview the move and show the user what it would change. Apply it with `sddx migrate --yes` only once the user agrees.",
     ];
     if (registered) {
       lines.push(

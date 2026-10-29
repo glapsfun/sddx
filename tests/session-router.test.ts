@@ -207,6 +207,14 @@ describe("session start by repository state", () => {
     expect(context).not.toContain(ROUTER_BODY);
   });
 
+  scenario("session-router", "Migration left to the user", () => {
+    const cwd = optedInRepo();
+    writeFileSync(join(cwd, ".sddx", "config.json"), '{ "schema_version": "1.0" }\n');
+    const { context } = sessionStart(cwd);
+    expect(context).toContain("Run `sddx migrate` to preview the move");
+    expect(context).toContain("Apply it with `sddx migrate --yes` only once the user agrees.");
+  });
+
   scenario("session-router", "Edited v5 file kept after migration", () => {
     const cwd = optedInRepo();
     const kept = Object.keys(V5_OWNED)[0] as string;

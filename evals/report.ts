@@ -109,7 +109,7 @@ export function renderMarkdown(meta: RunMeta, results: SessionResult[]): string 
       );
     }
   }
-  return `${lines.join("\n")}\n`;
+  return `${lines.map((l) => l.trimEnd()).join("\n")}\n`;
 }
 
 export function renderJson(meta: RunMeta, results: SessionResult[]): string {

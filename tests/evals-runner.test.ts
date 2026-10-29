@@ -428,6 +428,27 @@ describe("report", () => {
     }
   });
 
+  test("the Markdown report has no trailing whitespace", async () => {
+    const transcript = [
+      { type: "system", subtype: "init", model: "claude-stub-1" },
+      { type: "result", result: "First paragraph.\n\nSecond, with a break  \n- a list\n" },
+    ]
+      .map((l) => JSON.stringify(l))
+      .join("\n");
+    const r = await runEvals(
+      ["--scenario", "safety-approve-and-start", "--harness", "claude-code"],
+      {
+        behavior: { transcript },
+      },
+    );
+    const md = readFileSync(
+      join(r.outDir, readdirSync(r.outDir).find((f) => f.endsWith(".md"))!),
+      "utf8",
+    );
+    expect(md).toContain("> First paragraph.\n>\n> Second, with a break\n");
+    expect(md.split("\n").filter((l) => l !== l.trimEnd())).toEqual([]);
+  });
+
   scenario("behavior-evals", "Raw transcript stays outside the repository", async () => {
     const r = await runEvals(ONE_CLAUDE);
     expect(readdirSync(r.outDir).every((f) => f.endsWith(".md") || f.endsWith(".json"))).toBe(true);

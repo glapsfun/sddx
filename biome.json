@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!dist", "!node_modules", "!.sddx"]
+    "includes": ["**", "!dist", "!node_modules", "!.sddx", "!.docs/evidence/v6-evidence"]
   },
   "formatter": {
     "enabled": true,

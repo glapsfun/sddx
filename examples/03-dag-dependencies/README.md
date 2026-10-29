@@ -1,11 +1,9 @@
-# Example: modeling DAG dependencies
+# Example: dependencies, fan-out and fan-in
 
-A four-task graph: `a` and `b` are independent roots; `c` depends on `a`
-alone; `d` fans in from both `a` and `b`. Demonstrates the overlap ⟹ ordered
-scope gate refusing an illegal schedule, then a legal one materializing
-correctly — a single-parent dependent forking from its parent's DONE commit,
-and a two-parent fan-in child forking from the first parent and merging the
-second in.
+Tasks that touch the same files cannot run at the same time; a dependency
+orders them. This example shows the plan gate refusing an unordered overlap,
+then a fan-out and fan-in graph running in order. See
+[model-dag-dependencies](../../docs/how-to/model-dag-dependencies.md).
 
 ## Setup
 
@@ -13,207 +11,167 @@ second in.
 bash examples/03-dag-dependencies/setup.sh
 ```
 
-`cd` into the printed directory before running anything below.
-
-## First, watch the gate refuse an illegal graph
-
-Two independent tasks (no `depends_on` between them) whose scopes overlap
-are illegal — nothing orders their concurrent writes:
-
 ```sh
+SDDX="$PWD/sddx"
 ROOT="$PWD"
-mkdir -p bad-specs
-cat > bad-specs/x.yaml <<'EOF'
-task: illegal x task
-success_criteria:
-  - "true"
-oracle:
-  type: command
-  run: "true"
-  expect: exit 0
-scope:
-  - "src/shared/**"
+SPEC=.sddx/specs/2026-01-01-pipeline.md
+GOAL=2026-01-01-pipeline
+mkdir -p .sddx/specs
+```
+
+## Overlap without order is refused
+
+Two tasks may both write `src/shared.ts`, and nothing orders them:
+
+```sh
+cat > "$SPEC" <<'EOF'
+# Pipeline
+
+## Design
+
+### Goal
+A three-stage pipeline.
+
+### Acceptance
+- every stage writes its marker file
+
+### Non-goals
+
+### Assumptions
+
+### Open decisions
+
+## Tasks
+
+### p-a First
+
+~~~sddx
+oracle: {type: command, run: test -f a.done, expect: exit 0}
+scope: [a.done, src/shared.ts]
+~~~
+
+### p-b Second
+
+~~~sddx
+oracle: {type: command, run: test -f b.done, expect: exit 0}
+scope: [b.done, src/shared.ts]
+~~~
 EOF
-cat > bad-specs/y.yaml <<'EOF'
-task: illegal y task
-success_criteria:
-  - "true"
-oracle:
-  type: command
-  run: "true"
-  expect: exit 0
-scope:
-  - "src/shared/**"
+git add "$SPEC"
+git commit -q -m "plan: pipeline (draft)"
+```
+
+```sh expect=1
+"$SDDX" plan check "$SPEC"
+```
+
+```sh
+"$SDDX" plan check "$SPEC" 2>&1 | grep 'scope overlap between concurrent tasks "p-a" and "p-b"'
+```
+
+## Order them, and add a fan-in
+
+`p-b` and `p-c` both follow `p-a` (fan-out), and `p-d` follows both (fan-in).
+`p-b` and `p-c` can run at the same time, so their scopes are disjoint.
+
+```sh
+cat > "$SPEC" <<'EOF'
+# Pipeline
+
+## Design
+
+### Goal
+A three-stage pipeline.
+
+### Acceptance
+- every stage writes its marker file
+
+### Non-goals
+
+### Assumptions
+
+### Open decisions
+
+## Tasks
+
+### p-a Base
+
+~~~sddx
+oracle: {type: command, run: test -f a.done, expect: exit 0}
+scope: [a.done]
+~~~
+
+### p-b Left
+
+~~~sddx
+oracle: {type: command, run: test -f a.done && test -f b.done, expect: exit 0}
+scope: [b.done]
+depends_on: p-a
+~~~
+
+### p-c Right
+
+~~~sddx
+oracle: {type: command, run: test -f a.done && test -f c.done, expect: exit 0}
+scope: [c.done]
+depends_on: p-a
+~~~
+
+### p-d Join
+
+~~~sddx
+oracle: {type: command, run: test -f b.done && test -f c.done && test -f d.done, expect: exit 0}
+scope: [d.done]
+depends_on: [p-b, p-c]
+~~~
 EOF
-cat > bad-graph.yaml <<'EOF'
-schema_version: "1.0"
-interaction_mode: human
-goal: illegal concurrent overlap
-tasks:
-  - alias: x
-    spec: bad-specs/x.yaml
-  - alias: y
-    spec: bad-specs/y.yaml
-EOF
+git add "$SPEC"
+git commit -q -m "plan: pipeline"
+"$SDDX" plan check "$SPEC"
+"$SDDX" plan approve "$SPEC"
+"$SDDX" plan start "$SPEC"
+```
+
+A small helper finishes one task: start it, write its marker, verify, review.
+
+```sh
+finish() {
+  "$SDDX" task start "$1" > /dev/null
+  echo done > "$ROOT/.sddx-worktrees/$1/$2.done"
+  "$SDDX" verify "$1" > /dev/null
+  "$SDDX" review record "$1" --verdict pass --reviewer you > /dev/null
+}
+```
+
+## Only the root can start
+
+```sh
+"$SDDX" task ready --goal "$GOAL"
+```
+
+```sh expect=1
+"$SDDX" task start p-d
 ```
 
 ```sh
-./sddx graph create --graph bad-graph.yaml 2>&1 | grep -q "scope overlap between concurrent tasks"
-```
-
-`graph create` validates every spec and the whole schedule **before writing
-anything** — this refusal leaves no tasks or worktrees behind, so the sandbox
-is still clean for the real graph below.
-
-## Register the real graph
-
-```sh
-mkdir -p specs
-cat > specs/a.yaml <<'EOF'
-task: dag example root a
-success_criteria:
-  - "a.done exists"
-oracle:
-  type: command
-  run: "test -f a.done"
-  expect: exit 0
-scope:
-  - "src/a/**"
-EOF
-cat > specs/b.yaml <<'EOF'
-task: dag example root b
-success_criteria:
-  - "b.done exists"
-oracle:
-  type: command
-  run: "test -f b.done"
-  expect: exit 0
-scope:
-  - "src/b/**"
-EOF
-cat > specs/c.yaml <<'EOF'
-task: dag example single-parent child c
-success_criteria:
-  - "true"
-oracle:
-  type: command
-  run: "true"
-  expect: exit 0
-scope:
-  - "src/a/child.ts"
-EOF
-cat > specs/d.yaml <<'EOF'
-task: dag example fan-in child d
-success_criteria:
-  - "true"
-oracle:
-  type: command
-  run: "true"
-  expect: exit 0
-scope:
-  - "src/d/**"
-EOF
-cat > graph.yaml <<'EOF'
-schema_version: "1.0"
-interaction_mode: human
-goal: ship the dashboard
-tasks:
-  - alias: a
-    spec: specs/a.yaml
-  - alias: b
-    spec: specs/b.yaml
-  - alias: c
-    spec: specs/c.yaml
-    depends_on: a
-  - alias: d
-    spec: specs/d.yaml
-    depends_on: [a, b]
-EOF
-```
-
-`c`'s scope (`src/a/child.ts`) overlaps `a`'s (`src/a/**`) — legal only
-because `c depends_on: a` orders them.
-
-```sh
-./sddx graph approve --graph graph.yaml
-OUT=$(./sddx graph create --graph graph.yaml)
-echo "$OUT"
-A_ID=$(echo "$OUT" | grep -E '^ *a →' | awk '{print $3}')
-B_ID=$(echo "$OUT" | grep -E '^ *b →' | awk '{print $3}')
-C_ID=$(echo "$OUT" | grep -E '^ *c →' | awk '{print $3}')
-D_ID=$(echo "$OUT" | grep -E '^ *d →' | awk '{print $3}')
-```
-
-`a` and `b` get real worktrees immediately; `c` and `d` are deferred — no
-worktree yet, both **Blocked** on the board:
-
-```sh
-test -d "$ROOT/.sddx-worktrees/$A_ID" && test -d "$ROOT/.sddx-worktrees/$B_ID"
-test ! -d "$ROOT/.sddx-worktrees/$C_ID" && test ! -d "$ROOT/.sddx-worktrees/$D_ID"
-./sddx board >/dev/null && grep -q "$C_ID | Blocked" .sddx/BOARD.md
-./sddx board >/dev/null && grep -q "$D_ID | Blocked" .sddx/BOARD.md
-```
-
-## Complete a — c becomes ready, d stays blocked on b
-
-```sh
-cd "$ROOT/.sddx-worktrees/$A_ID"
-"$ROOT/sddx" task phase "$A_ID" RED --test-exit 1
-"$ROOT/sddx" red-check "$A_ID"
-touch a.done
-"$ROOT/sddx" task phase "$A_ID" GREEN --test-exit 0
-"$ROOT/sddx" task phase "$A_ID" VERIFY
-"$ROOT/sddx" verify "$A_ID"
-cd "$ROOT"
+"$SDDX" task start p-d 2>&1 | grep "dependency p-b is PLANNED, not DONE"
 ```
 
 ```sh
-./sddx board >/dev/null && grep -q "$C_ID | Ready" .sddx/BOARD.md
-./sddx board >/dev/null && grep -q "$D_ID | Blocked" .sddx/BOARD.md
+finish p-a a
+"$SDDX" task ready --goal "$GOAL"
+finish p-b b
+finish p-c c
 ```
 
-## Materialize c — its worktree forks from a's DONE commit
+`p-d` forks from `p-b`'s commit with `p-c`'s merged in, so its worktree already
+has every parent's work:
 
 ```sh
-./sddx task materialize "$C_ID"
+"$SDDX" task start p-d
+ls "$ROOT/.sddx-worktrees/p-d/"*.done
+echo done > "$ROOT/.sddx-worktrees/p-d/d.done"
+"$SDDX" verify p-d
+"$SDDX" review record p-d --verdict pass --reviewer you
+"$SDDX" run report --goal "$GOAL"
 ```
-
-```sh
-[ "$(git -C ".sddx-worktrees/$C_ID" rev-parse HEAD)" = "$(git rev-parse "sddx/$A_ID")" ]
-```
-
-## Complete b, then materialize d — a two-parent merge
-
-```sh
-cd "$ROOT/.sddx-worktrees/$B_ID"
-"$ROOT/sddx" task phase "$B_ID" RED --test-exit 1
-"$ROOT/sddx" red-check "$B_ID"
-touch b.done
-"$ROOT/sddx" task phase "$B_ID" GREEN --test-exit 0
-"$ROOT/sddx" task phase "$B_ID" VERIFY
-"$ROOT/sddx" verify "$B_ID"
-cd "$ROOT"
-```
-
-```sh
-./sddx task materialize "$D_ID"
-```
-
-`d`'s worktree HEAD is a merge commit with both `a`'s and `b`'s DONE commits
-as parents — never a rebase:
-
-```sh
-PARENTS=$(git -C ".sddx-worktrees/$D_ID" log -1 --format=%P HEAD)
-echo "$PARENTS" | grep -q "$(git rev-parse "sddx/$A_ID")"
-echo "$PARENTS" | grep -q "$(git rev-parse "sddx/$B_ID")"
-```
-
-## Final board
-
-```sh
-./sddx board
-```
-
-`a` and `b` read `Completed`; `c` and `d` read `Ready` — materialized, phase
-`PLAN`, ready for their own RED→GREEN→VERIFY loop exactly like
-[examples/01-single-task](../01-single-task/).

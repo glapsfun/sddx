@@ -1,0 +1,6 @@
+  >_ OpenAI Codex (v0.164.0)
+     <fixture>/optin
+• You ran ~/.codex/plugins/cache/sddx/sddx/5.0.0/bin/sddx plan approve .sddx/specs/2026-10-27-hello.md
+  └ approved plan 88a7205d89a54c79983cb0e9488c2fd1d9126a1cac19fe4c7d419f73b0c0e3cf
+    token: .sddx/approvals/88a7205d89a54c79983cb0e9488c2fd1d9126a1cac19fe4c7d419f73b0c0e3cf.json
+  Worked for <1s • 10:36 PM

@@ -6,36 +6,25 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path";
 import { stuckThreshold } from "./lib/config";
 import type { Receipt } from "./lib/receipt";
-import { blockedOn, dependsOnList, skippedOn, type TaskState } from "./lib/task";
+import { blockedOn, dependsOnList, isV6Task, type TaskState } from "./lib/task";
 import { worktreesDir } from "./lib/worktree";
 
 interface BoardRow {
   id: string;
-  rawPhase: string;
+  goal: string;
+  /** The task's v6 state, or UNREADABLE. */
+  state: string;
   stuck: boolean;
   dependsOn?: string[];
-  onDependencyFailure?: "skip" | "block";
-  sentence: string;
-  workspace: string;
-  branch: string | null;
+  title: string;
+  attempt: string;
   iterations: string;
   receipt: string;
-  allow: string;
+  /** Abandon reason, else the strict-profile allow list. */
+  note: string;
 }
 
-/** The five board buckets, plus the task's own terminal-failure marker
- * (distinct from Skipped, which describes a *dependent's* reaction to
- * someone else's failure) and the unreadable-file case. */
-type Status =
-  | "Ready"
-  | "Running"
-  | "Blocked"
-  | "Skipped"
-  | "Completed"
-  | "Abandoned"
-  | "UNREADABLE";
-
-const DASH = "—";
+const DASH = "-";
 
 const cell = (s: string): string => s.replace(/\|/g, "\\|").replace(/\n/g, " ");
 
@@ -58,25 +47,19 @@ function taskRow(
   let t: TaskState;
   try {
     t = JSON.parse(readFileSync(taskPath, "utf8")) as TaskState;
-    // Parsing is not the same as being well-shaped. Task files are untrusted
-    // input here — written by an older sddx, hand-edited, or truncated — and
-    // `board` is one of the two commands whose entire job is to keep working
-    // on history the write path has since narrowed. Reading a missing
-    // `workspace` unguarded turned an inspection command into a crash.
-    if (typeof t !== "object" || t === null || typeof t.workspace !== "object" || !t.workspace) {
-      throw new Error("task state has no workspace block");
-    }
+    // task files are untrusted here, and the board must keep working on them
+    if (!isV6Task(t)) throw new Error("not a v6 task file");
   } catch {
     return {
       id,
-      rawPhase: "UNREADABLE",
+      goal: DASH,
+      state: "UNREADABLE",
       stuck: false,
-      sentence: "task file failed to parse",
-      workspace: DASH,
-      branch: null,
+      title: "task file failed to parse, or was written by sddx 5",
+      attempt: DASH,
       iterations: DASH,
       receipt: DASH,
-      allow: DASH,
+      note: DASH,
     };
   }
   let receipt = DASH;
@@ -85,18 +68,23 @@ function taskRow(
     if (receipt !== DASH) break;
   }
   const deps = dependsOnList(t);
+  const note =
+    t.phase === "ABANDONED" && t.abandon_reason
+      ? t.abandon_reason
+      : t.allow.length > 0
+        ? `allow: ${t.allow.join(", ")}`
+        : DASH;
   return {
     id: t.id,
-    rawPhase: t.phase,
+    goal: t.goal_id,
+    state: t.phase,
     stuck: Boolean(t.stuck && t.stuck.count >= threshold),
     ...(deps.length > 0 ? { dependsOn: deps } : {}),
-    ...(t.on_dependency_failure ? { onDependencyFailure: t.on_dependency_failure } : {}),
-    sentence: t.task,
-    workspace: t.workspace.mode ?? DASH,
-    branch: t.workspace.branch ?? null,
+    title: t.task,
+    attempt: String(t.attempt_count),
     iterations: String(t.iterations),
     receipt,
-    allow: t.allow.length > 0 ? t.allow.join(", ") : DASH,
+    note,
   };
 }
 
@@ -128,7 +116,7 @@ function flagLines(state: FlagState): string[] {
     return [
       "## Flagged worktrees",
       "",
-      "- sweep state unreadable — `.sddx/sweep.json` failed to parse",
+      "- sweep state unreadable: `.sddx/sweep.json` failed to parse",
       "",
     ];
   }
@@ -136,7 +124,7 @@ function flagLines(state: FlagState): string[] {
   return [
     "## Flagged worktrees",
     "",
-    ...state.entries.map((e) => `- \`${cell(String(e.path))}\` — ${cell(String(e.reason))}`),
+    ...state.entries.map((e) => `- \`${cell(String(e.path))}\`: ${cell(String(e.reason))}`),
     "",
   ];
 }
@@ -163,16 +151,10 @@ function collectRows(cwd: string): Map<string, BoardRow> {
     for (const id of readdirSync(wtDir).sort()) {
       const taskPath = join(wtDir, id, ".sddx", "tasks", `${id}.json`);
       if (!existsSync(taskPath)) continue;
-      // worktrees carry their own .sddx/config.json — judge stuck by the same
-      // threshold the gates inside that worktree use
+      // stuck is judged by the main checkout's config, the one verify reads
       rows.set(
         id,
-        taskRow(
-          taskPath,
-          id,
-          [join(wtDir, id, ".sddx", "receipts"), mainReceipts],
-          stuckThreshold(join(wtDir, id)),
-        ),
+        taskRow(taskPath, id, [join(wtDir, id, ".sddx", "receipts"), mainReceipts], threshold),
       );
     }
   }
@@ -180,9 +162,8 @@ function collectRows(cwd: string): Map<string, BoardRow> {
 }
 
 export interface BoardTaskData extends BoardRow {
-  status: Status;
+  label: string;
   blockedOnId: string | null;
-  skippedOnId: string | null;
 }
 
 export interface BoardData {
@@ -191,81 +172,41 @@ export interface BoardData {
   flaggedWorktreesUnreadable: boolean;
 }
 
-/**
- * The board's status derivation, in precedence order: a task's own terminal
- * outcome (Completed/Abandoned) always wins; otherwise a `skip`-policy task
- * whose named parent failed is Skipped; otherwise any unmet named parent makes
- * it Blocked (this covers a `block`-policy task whose parent went ABANDONED,
- * per `blockedOn`); otherwise its own TDD phase distinguishes Ready (still in
- * PLAN, nothing dispatched yet) from Running (RED..VERIFY).
- */
-function computeStatus(
-  cwd: string,
-  r: BoardRow,
-  id: string,
-): { status: Status; blockedOnId: string | null; skippedOnId: string | null } {
-  if (r.rawPhase === "UNREADABLE") {
-    return { status: "UNREADABLE", blockedOnId: null, skippedOnId: null };
+/** The state plus derived flags: stuck, and for a PLANNED task the dependency it waits on. */
+function labelFor(cwd: string, r: BoardRow): { label: string; blockedOnId: string | null } {
+  let label = r.state;
+  if (r.stuck) label += " stuck";
+  let blockedOnId: string | null = null;
+  if (r.state === "PLANNED" && r.dependsOn) {
+    blockedOnId = blockedOn(cwd, { id: r.id, depends_on: r.dependsOn });
+    if (blockedOnId) label += ` blocked-on-${blockedOnId}`;
   }
-  if (r.rawPhase === "DONE") return { status: "Completed", blockedOnId: null, skippedOnId: null };
-  if (r.rawPhase === "ABANDONED") {
-    return { status: "Abandoned", blockedOnId: null, skippedOnId: null };
-  }
-  const taskLike = { id, depends_on: r.dependsOn, on_dependency_failure: r.onDependencyFailure };
-  const skipper = skippedOn(cwd, taskLike);
-  if (skipper) return { status: "Skipped", blockedOnId: null, skippedOnId: skipper };
-  const blocker = blockedOn(cwd, taskLike);
-  if (blocker) return { status: "Blocked", blockedOnId: blocker, skippedOnId: null };
-  return {
-    status: r.rawPhase === "PLAN" ? "Ready" : "Running",
-    blockedOnId: null,
-    skippedOnId: null,
-  };
-}
-
-/** The status word plus stuck/blocked/skipped suffixes, shared by the Markdown
- * table and the structured JSON/Markdown data so both stay in sync. */
-function statusLabel(
-  status: Status,
-  stuck: boolean,
-  blockedOnId: string | null,
-  skippedOnId: string | null,
-): string {
-  let label = String(status);
-  if (stuck) label += " ⚠stuck";
-  if (blockedOnId) label += ` ⏸blocked-on-${blockedOnId}`;
-  if (skippedOnId) label += ` skipped-on-${skippedOnId}`;
-  return label;
+  return { label, blockedOnId };
 }
 
 function boardDataFromRows(cwd: string, rows: Map<string, BoardRow>, flags: FlagState): BoardData {
   const tasks = [...rows.keys()].sort().map((id) => {
     const r = rows.get(id) as BoardRow;
-    const { status, blockedOnId, skippedOnId } = computeStatus(cwd, r, id);
-    return { ...r, status, blockedOnId, skippedOnId };
+    return { ...r, ...labelFor(cwd, r) };
   });
   return { tasks, flaggedWorktrees: flags.entries, flaggedWorktreesUnreadable: flags.unreadable };
 }
 
 function renderBoardFromRows(cwd: string, rows: Map<string, BoardRow>, flags: FlagState): string {
-  const lines = ["<!-- generated by sddx — do not edit -->", "", "# sddx board", ""];
+  const lines = ["<!-- generated by sddx, do not edit -->", "", "# sddx board", ""];
   if (rows.size === 0) {
     lines.push("_No tasks registered._", "");
   } else {
     lines.push(
-      "| Task | Status | Depends | Sentence | Workspace | Iter | Receipt | Allow |",
-      "| --- | --- | --- | --- | --- | --- | --- | --- |",
+      "| Task | Goal | State | Depends | Title | Attempt | Iter | Receipt | Note |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     );
     for (const id of [...rows.keys()].sort()) {
       const r = rows.get(id) as BoardRow;
-      // Share the CLI's blocked/skipped derivation so the board agrees with
-      // `blockedOn`/`skippedOn` even when an ancestor's worktree was swept
-      // (resolveTaskState reads its branch tip).
-      const { status, blockedOnId, skippedOnId } = computeStatus(cwd, r, id);
-      const label = statusLabel(status, r.stuck, blockedOnId, skippedOnId);
+      const { label } = labelFor(cwd, r);
       const depends = r.dependsOn && r.dependsOn.length > 0 ? cell(r.dependsOn.join(", ")) : DASH;
       lines.push(
-        `| ${cell(r.id)} | ${label} | ${depends} | ${cell(r.sentence)} | ${r.workspace} | ${r.iterations} | ${r.receipt} | ${cell(r.allow)} |`,
+        `| ${cell(r.id)} | ${cell(r.goal)} | ${label} | ${depends} | ${cell(r.title)} | ${r.attempt} | ${r.iterations} | ${r.receipt} | ${cell(r.note)} |`,
       );
     }
     lines.push("");

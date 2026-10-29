@@ -2,9 +2,9 @@
 // governing task lacks verified completion. Zero trust in "done".
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { stuckThreshold } from "./config";
+import { maxIterations, stuckThreshold } from "./config";
 import { resolveTask } from "./resolve";
-import { isTerminal, type Phase } from "./task";
+import { isTerminal, mainRootOf, type Phase } from "./task";
 
 export interface StopDecision {
   block: boolean;
@@ -14,11 +14,9 @@ export interface StopDecision {
 }
 
 const NEXT_STEP: Record<Phase, string> = {
-  PLAN: "write a failing test and run it to enter RED",
-  RED: "run sddx red-check <id>, then make the failing test pass (run the test runner to enter GREEN)",
-  GREEN: "refactor if needed, then: sddx task phase <id> VERIFY && sddx verify <id>",
-  REFACTOR: "re-run tests to return to GREEN, then verify",
-  VERIFY: "run: sddx verify <id>",
+  PLANNED: "start it with: sddx task start <id>",
+  IN_PROGRESS: "make the change, then prove it with: sddx verify <id>",
+  IN_REVIEW: "",
   DONE: "",
   ABANDONED: "",
 };
@@ -52,10 +50,21 @@ export function stopGate(event: { cwd?: string; stop_hook_active?: boolean }): S
     }
     return { block: false };
   }
-  if (task.stuck && task.stuck.count >= stuckThreshold(res.root)) {
+  // Proven and waiting for a review: the implementer's part is done.
+  if (task.phase === "IN_REVIEW") {
+    return { block: false, note: `sddx: task ${task.id} is verified and awaiting review.` };
+  }
+  const root = mainRootOf(res.root);
+  if (task.stuck && task.stuck.count >= stuckThreshold(root)) {
     return {
       block: false,
-      note: `sddx: task ${task.id} is stuck — ${task.stuck.count} identical failures; escalating to the human is the correct next step.`,
+      note: `sddx: task ${task.id} is stuck after ${task.stuck.count} identical verify failures; escalate to a person instead of iterating.`,
+    };
+  }
+  if (task.iterations >= maxIterations(root)) {
+    return {
+      block: false,
+      note: `sddx: task ${task.id} reached its iteration limit (${task.iterations}); escalate to a person, or abandon it.`,
     };
   }
   const step = NEXT_STEP[task.phase].replaceAll("<id>", task.id);

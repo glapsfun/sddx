@@ -1,67 +1,68 @@
 # Choose an oracle type
 
-Four `oracle.type` values exist in the spec schema, but they aren't four
-different execution paths — three are the same mechanism with different
-intent, and the fourth doesn't work yet. A full runnable proof of both facts
+Every task's `sddx` block needs an `oracle`: the command whose exit code proves
+the task is done. Four `oracle.type` values exist, but three run the same way
+and the fourth cannot be verified by a machine. A runnable proof of both facts
 is [examples/06-oracle-types](../../examples/06-oracle-types/).
 
-## `command`, `test-suite`, `browser` are mechanically identical
+## Pick a command that fails today
 
-`src/lib/oracle.ts` runs `oracle.run` through `sh -c` and checks the exit
-code against `oracle.expect` — every automated type goes through this exact
-same function. The `type` field changes nothing about execution; it exists
-so a reader of the spec (human or model) understands *what kind* of proof
-`run` is, not to select different verifier behavior:
+`sddx verify` runs the oracle twice. On the task's base commit with only the
+task's changed test files applied it must **fail**, and on the finished tree it
+must **pass**. So the best oracle runs the task's own tests: they fail before
+the implementation exists and pass once it does. An oracle that already passes
+on the base, such as a suite that does not include the new test, is refused.
+See [Verification](../reference/verification.md).
 
-```yaml
-oracle: # command — any shell command; the default choice
+## `command`, `test-suite`, `browser` run identically
+
+All three run `oracle.run` through `sh -c` and compare the exit code with
+`oracle.expect`. The type tells a reader what kind of proof `run` is; it does
+not change how sddx runs it:
+
+```sddx
+oracle:
   type: command
-  run: "curl -sf localhost:3000/health"
+  run: bun test tests/health.test.ts
   expect: exit 0
 ```
 
-```yaml
-oracle: # test-suite — the project's test runner as the proof
+```sddx
+oracle:
   type: test-suite
-  run: "bun test"
+  run: bun test tests/api/
   expect: exit 0
 ```
 
-```yaml
-oracle: # browser — a scripted browser check (e.g. Playwright)
+```sddx
+oracle:
   type: browser
-  run: "bunx playwright test e2e/login.spec.ts"
+  run: bunx playwright test e2e/login.spec.ts
   expect: exit 0
 ```
 
-Prefer `command`/`test-suite` for anything a shell command can decide — the
-proof is mechanical either way. Reach for `browser` only when the thing
-being proven genuinely requires a rendered page (a scripted Playwright/
-Puppeteer run, still just a shell command from sddx's point of view).
+Prefer `command` or `test-suite` for anything a shell command can decide. Use
+`browser` only when the behavior needs a rendered page; to sddx it is still a
+shell command.
 
-## `manual` is accepted but not yet verifiable
+## `manual` cannot be verified
 
-```yaml
-oracle: # manual — a human signs off; run may be empty
+```sddx
+oracle:
   type: manual
-  run: ""
-  expect: "human approves the rendered page"
 ```
 
-The spec parser accepts this shape — `run` isn't required when `type` is
-`manual` — but `sddx verify` currently throws `"manual oracles need a human
-decision; M1 verify supports command oracles"` for any manual-oracle task,
-unconditionally. A manual-oracle task can be created and driven through
-`RED`/`GREEN`, but cannot currently reach `DONE` through `sddx verify`.
+A manual oracle needs a person to observe the result, so `sddx verify` refuses
+it, and `auto` mode refuses any plan that contains one. To prove an outcome no
+command can check directly, model a proxy a command can observe, such as a
+file a person creates after reviewing, and keep `type: command`.
 
-Until manual verification ships, model a genuinely non-automatable outcome
-as a proxy check instead — a file a human creates after reviewing, an
-approval flag a human flips, anything a `command` oracle can observe — and
-keep `type: command`.
+## `runs` and `setup`
 
-## `oracle.runs`
+- `runs: <n>` runs the GREEN half `n` times, and every run must pass: a check
+  for flaky tests. It defaults to the `oracle_runs_default` config key, else 1.
+- `setup: <command>` runs in the proof worktree before each half, for example
+  `bun install --frozen-lockfile`. A fresh worktree has no ignored dependency
+  directories, so most projects need it.
 
-Independent of `type`: `runs` (integer ≥ 1, default from userConfig
-`oracle_runs_default`) makes `sddx verify` execute the oracle that many times
-sequentially, and **every** run must pass — a flakiness check, not a type.
-See [spec-reference.md](../reference/spec-reference.md#oracle).
+Field by field: [Spec reference](../reference/spec-reference.md#oracle).

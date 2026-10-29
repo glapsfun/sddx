@@ -1,201 +1,193 @@
 # Spec reference
 
-A task spec is one YAML file. The parser (`src/lib/spec.ts`) rejects a spec
-that is missing a task sentence, success criteria, or an oracle — registration
-fails with the exact errors listed per field below.
+A goal is described by one markdown file, `.sddx/specs/<YYYY-MM-DD>-<slug>.md`.
+People read all of it. sddx interprets only two things: the skeleton of the
+`## Design` section, and the fenced `sddx` block under each task in
+`## Tasks`. Everything else is prose and is never parsed, so you can write
+whatever explanation helps a reviewer without changing what is checked.
 
-A complete example:
+Check a spec at any time; it writes nothing:
 
-```yaml
-task: health endpoint returns ok
-context: []
-success_criteria:
-  - "bun test tests/health.test.ts exits 0"
+```sh skip
+sddx spec check .sddx/specs/2026-10-26-rate-limit.md
+```
+
+It exits 0 for a valid spec and reports its status (`draft` or `ready`), or
+exits 1 listing every error with its line number. `--output json` returns the
+same errors as `{message, path, line}` objects under `data.errors`.
+
+## A complete example
+
+<!-- spec-example: valid -->
+````markdown
+# Rate limiting
+
+## Design
+
+### Goal
+Limit each API client to 100 requests per minute.
+
+### Acceptance
+- the 101st request inside a minute returns 429
+- the limit resets after the minute ends
+
+### Non-goals
+- limits shared across several server instances
+
+### Assumptions
+- in-memory counters are enough for one instance
+
+### Open decisions
+
+### Approaches considered
+Token bucket over fixed windows: it smooths bursts at the window edge.
+
+## Tasks
+
+### rl-1 Token bucket
+
+```sddx
 oracle:
   type: command
-  run: "bun test tests/health.test.ts"
+  run: bun test tests/bucket.test.ts
   expect: exit 0
-stop_rules:
-  - max_iterations: 5
-out_of_scope: []
-scope:
-  - "src/health/**"
+scope: [src/rl/**, tests/bucket.test.ts]
 ```
 
-(`on_dependency_failure` and `retry` are omitted from this example since both
-default sensibly when absent — each gets its own worked example below.)
+### rl-2 Middleware
 
-## task
-
-One sentence stating the goal. Required and non-empty
-(`task: one-sentence description required` otherwise). It is also the source
-of the task id: `YYYYMMDD-<slug>`, where the slug is derived from this
-sentence.
-
-## context
-
-A list of pointers — file paths, relative links into `.sddx/context/` — not
-prose. Optional (defaults to empty). Links keep the spec dense; anything the
-executor must read belongs here, anything it must *know* belongs in the
-linked file.
-
-## success_criteria
-
-A non-empty list of strings, each one binary and observable
-(`success_criteria: non-empty list of binary criteria required` otherwise).
-
-| Criterion                                        | Verdict | Why                                             |
-| ------------------------------------------------ | ------- | ----------------------------------------------- |
-| `"GET /health returns 200 with {status: ok}"`    | good    | One observable check, true or false             |
-| `"bun test tests/health.test.ts exits 0"`        | good    | An exit code — the most binary signal there is  |
-| `"improve error handling"`                       | bad     | Not binary — when is "improved" true?           |
-| `"code is cleaner"`                              | bad     | Not observable — no command can decide it       |
-| `"faster than before"`                           | bad     | Unmeasured comparative — no baseline, no number |
-
-**What is enforced vs. convention:** the parser enforces the *shape*
-(non-empty strings); "binary and observable" is the authoring rule. At
-verification the criteria get a prose cross-check that is explicitly
-non-binding — the receipt's verdict comes from the oracle's exit code alone.
-Criteria that restate the oracle's observable outcome (like the good examples
-above) make that cross-check meaningful; vague ones make it noise.
-
-## oracle
-
-The mandatory proof. **A spec without an oracle is rejected at registration —
-no oracle, no goal** (`oracle: required — no oracle, no goal`).
-
-Fields: `type`, `run`, `expect`, `runs`. `expect` defaults to `exit 0` when
-omitted. `run` is required for every type except `manual`
-(`oracle.run: command required for non-manual oracles`).
-
-- `runs` (optional, integer ≥ 1, default 1, `oracle.runs: must be an integer
-  >= 1` otherwise): verify executes the oracle this
-  many times sequentially; **every** run must exit as expected. Repo default:
-  userConfig `oracle_runs_default`. Receipt v3 records each run.
-
-Four types (`oracle.type: must be one of command | test-suite | browser |
-manual` otherwise):
-
-```yaml
-oracle: # command — any shell command; the default choice
-  type: command
-  run: "curl -sf localhost:3000/health"
-  expect: exit 0
-```
-
-```yaml
-oracle: # test-suite — the project's test runner as the proof
+```sddx
+oracle:
   type: test-suite
-  run: "bun test"
+  run: bun test tests/middleware.test.ts
   expect: exit 0
+  runs: 3
+scope: [src/middleware/**, tests/middleware.test.ts]
+depends_on: rl-1
 ```
+````
 
-```yaml
-oracle: # browser — a scripted browser check (e.g. playwright)
-  type: browser
-  run: "bunx playwright test e2e/login.spec.ts"
-  expect: exit 0
+## The file
+
+- It must start with a level-1 heading naming the goal.
+- It must contain `## Design`. It may contain `## Tasks`, which must come
+  after `## Design`. Other level-2 sections are allowed and ignored.
+- The goal id is the file name without `.md`, for example
+  `2026-10-26-rate-limit`. It names the run branch
+  (`sddx/run-<goal-id>`) and the goal record (`refs/sddx/goals/<goal-id>`).
+
+## Design
+
+`## Design` must contain these level-3 subsections, in any order:
+
+| Subsection | Rule |
+| --- | --- |
+| `### Goal` | Non-empty text. |
+| `### Acceptance` | At least one list item. Each item should be observable, because every task's oracle exists to prove some of them. |
+| `### Non-goals` | List items, may be empty. |
+| `### Assumptions` | List items, may be empty: what was decided without asking, and why. |
+| `### Open decisions` | List items, may be empty. |
+
+Any other subsection (approaches considered, architecture, trade-offs) is
+prose and is ignored.
+
+### Draft and ready
+
+A spec whose `### Open decisions` list has items has status `draft`. It is
+still a valid spec, but `sddx plan check`, `plan approve` and `plan start`
+refuse it: a plan cannot rest on a decision nobody has made. Resolve each
+open decision, move the outcome into the design, and empty the list to reach
+status `ready`.
+
+## Tasks
+
+Each task is a level-3 heading `### <task-id> <title>` followed by exactly one
+fenced code block whose info string is `sddx`. The block is YAML. Prose,
+other code blocks and level-4 headings under the task are allowed and ignored.
+
+### Task ids
+
+A task id matches `[A-Za-z][A-Za-z0-9-]*` and must be unique in the file.
+Task ids also name branches (`sddx/<task-id>`), worktrees
+(`.sddx-worktrees/<task-id>`) and receipts (`.sddx/receipts/<task-id>.json`),
+so `sddx plan check` refuses an id that any existing task or receipt in the
+repository already uses. Prefix ids with a short goal slug (`rl-1`, `rl-2`)
+to keep them unique across goals.
+
+### Block keys
+
+The key set is closed: an unknown key, including a misspelling, is an error.
+
+| Key | Required | Meaning |
+| --- | --- | --- |
+| `oracle` | yes | The observable proof the task is done. No oracle, no goal. |
+| `scope` | no | Non-empty list of write globs this task may touch. Tasks that can run at the same time must have disjoint scopes. |
+| `depends_on` | no | A task id, or a list of task ids, that must be `DONE` before this task can start. |
+| `on_dependency_failure` | no | `skip` (default): if a dependency is abandoned, this task is skipped and the rest of the goal continues. `block`: the goal halts. |
+| `retry` | no | `{max_attempts: <n>, workspace: fresh \| reuse}`. Defaults to one attempt. |
+| `assumptions` | no | Non-empty list of decisions specific to this task. |
+
+### oracle
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `type` | yes | `command`, `test-suite`, `browser` or `manual`. |
+| `run` | yes, except `manual` | The command `sddx verify` runs. |
+| `expect` | yes, except `manual` | `exit <code>`, for example `exit 0`. |
+| `runs` | no | How many times the GREEN half runs; every run must match. Defaults to the `oracle_runs_default` config key, else 1. |
+| `setup` | no | A command run in the proof worktree before each half of the boundary proof, for example `bun install --frozen-lockfile`. |
+
+`sddx verify` proves the oracle twice: it must **fail** on the task's base
+commit with only the task's changed test files applied, and **pass** on the
+verified tree. See [verification.md](verification.md).
+
+A `manual` oracle needs a person to observe the result. `sddx verify` refuses
+it, and `auto` mode refuses any plan that contains one.
+
+## Errors
+
+`sddx spec check` reports every error in one run, each as `path:line: message`.
+These are invalid:
+
+<!-- spec-example: invalid -->
+````markdown
+# Missing acceptance
+
+## Design
+
+### Goal
+Something.
+
+### Non-goals
+
+### Assumptions
+
+### Open decisions
+````
+
+<!-- spec-example: invalid -->
+````markdown
+# Task without an oracle
+
+## Design
+
+### Goal
+Something.
+
+### Acceptance
+- it works
+
+### Non-goals
+
+### Assumptions
+
+### Open decisions
+
+## Tasks
+
+### T1 Do it
+
+```sddx
+scpoe: [src/**]
 ```
-
-```yaml
-oracle: # manual — a human signs off; run may be empty
-  type: manual
-  run: ""
-  expect: "human approves the rendered page"
-```
-
-Prefer `command`/`test-suite`: the verifier executes `run` and compares the
-exit code against `expect`, so the proof is mechanical. `manual` exists for
-genuinely non-automatable outcomes and puts a human in the verify step.
-
-## stop_rules
-
-Loop bounds — what stops an executor from iterating forever. Optional list;
-entries are either a mapping like `max_iterations: 5` (default from the
-plugin's `max_iterations_default` setting) or a free-form escalation string:
-
-```yaml
-stop_rules:
-  - max_iterations: 5
-  - "oracle unreachable after 2 attempts → escalate to human"
-```
-
-When a rule trips, the task stops and is reported as stuck — escalated to the
-human, never silently retried past the bound. The current iteration count
-lives in `.sddx/tasks/<id>.json`.
-
-## out_of_scope
-
-Explicit exclusions so the loop doesn't wander. Optional list. Anything named
-here is off-limits to the executor even if it seems adjacent to the goal:
-
-```yaml
-out_of_scope:
-  - "auth, rate limiting"
-  - "refactoring unrelated modules"
-```
-
-## scope
-
-Optional list of write globs — the task's lane. When two tasks in the same
-`graph.yaml` run aren't ordered by `depends_on`, their `scope` lists must be
-disjoint; `graph create`/`goal create` refuse a schedule that violates this
-("overlap ⟹ ordered" — see
-[model-dag-dependencies.md](../how-to/model-dag-dependencies.md)). When
-present, must be a non-empty list of non-empty globs — a bare string or an
-empty list is rejected (`scope: when present, must be a non-empty list of
-non-empty globs`), not silently coerced into one.
-
-```yaml
-scope:
-  - "src/health/**"
-```
-
-Omitting `scope` entirely means the task carries no scope-conflict
-information — safe for a single unscoped task, but it can never safely run
-concurrently (unordered) with another task in the same graph.
-
-## on_dependency_failure
-
-Optional. One of `skip` (default) or `block` — what this task does if a
-named parent (`depends_on` in `graph.yaml`) never reaches `DONE` (goes
-`ABANDONED` instead). Carries no cross-task reference, unlike `depends_on`
-itself, which stays out of the spec entirely and is authored in
-`graph.yaml` (`on_dependency_failure: must be one of skip | block`
-otherwise).
-
-```yaml
-on_dependency_failure: block # default is skip
-```
-
-- `skip` — this task (and, transitively, anything that depends on it) is
-  reported as **Skipped** on the board once its parent is abandoned; the rest
-  of the goal keeps running.
-- `block` — this task stays **Blocked** and escalates instead.
-
-See [configure-retry-and-skip.md](../how-to/configure-retry-and-skip.md) for
-a full walkthrough.
-
-## retry
-
-Optional mapping (`retry: must be a mapping with optional
-max_attempts/workspace` otherwise) — bounds automatic re-attempts before a
-task that would otherwise go `ABANDONED` is retried instead.
-
-```yaml
-retry:
-  max_attempts: 2 # integer >= 1; default 1 (today's single-attempt behavior)
-  workspace: fresh # fresh (default) | reuse
-```
-
-- `max_attempts` (`retry.max_attempts: must be an integer >= 1` otherwise) —
-  total attempts including the first; when a task is abandoned with attempts
-  remaining it resets to `PLAN` instead (`attempt_count` increments) rather
-  than terminating.
-- `workspace` (`retry.workspace: must be one of fresh | reuse` otherwise) —
-  `fresh` discards and re-forks the worktree/branch from the same base SHA
-  before the next attempt; `reuse` leaves the existing workspace as-is.
-
-Retry never reopens an already-`DONE` task — a receipt is immutable once
-written. See
-[configure-retry-and-skip.md](../how-to/configure-retry-and-skip.md).
+````

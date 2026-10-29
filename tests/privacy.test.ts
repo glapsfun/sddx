@@ -36,13 +36,11 @@ describe("privacy guarantee", () => {
 });
 
 describe("the package-manager exception is bounded", () => {
-  test("only the bootstrap plans a package-manager command", () => {
-    // The README names one exception to the zero-network promise: an
-    // explicitly approved package-manager install during `sddx init`. It has
-    // to stay confined to the bootstrap, or "one exception" stops being true.
+  test("no shipped source plans a package-manager command", () => {
+    // `sddx init` and its approved dependency install were removed in sddx 6,
+    // so installing the package itself is the only network exception left.
     const offenders: string[] = [];
     for (const file of walk(join(repoRoot, "src"))) {
-      if (file.endsWith("init.ts")) continue;
       const src = readFileSync(file, "utf8");
       if (/npm install|bun add|yarn add|pnpm add/.test(src)) offenders.push(file);
     }

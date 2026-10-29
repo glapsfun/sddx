@@ -1,53 +1,39 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fixtureClone } from "./fixtures";
-import { GRAPH_HEADER, goalIds, repoRoot } from "./helpers";
-
-const CLI_SRC = join(repoRoot, "src/cli.ts");
-const cli = (cwd: string, ...args: string[]) =>
-  spawnSync("bun", [CLI_SRC, ...args], { cwd, encoding: "utf8", env: process.env });
-
-const SPEC = (task: string, scope?: string, oracleType = "command") => `task: ${task}
-success_criteria:
-  - "it works"
-${scope === undefined ? "" : `scope:\n  - "${scope}"\n`}oracle:
-  type: ${oracleType}
-  run: "true"
-`;
+import { decideGate, planHash, writeApproval } from "../src/lib/approval";
+import { scopesOverlap } from "../src/lib/glob-overlap";
+import { fixtureClone, writeConfig } from "./fixtures";
+import { doneFile, goalIds, goalSpec, sddx, writeSpec } from "./helpers";
 
 function auto(cwd: string, maxTasks = 9): void {
-  mkdirSync(join(cwd, ".sddx"), { recursive: true });
-  writeFileSync(
-    join(cwd, ".sddx", "config.json"),
-    JSON.stringify({ interaction_mode: "auto", auto_max_tasks: maxTasks }),
-  );
+  writeConfig(cwd, { interaction_mode: "auto", auto_max_tasks: maxTasks });
 }
 
 /**
- * A plan in auto mode. `header` extends the Goal Brief; `scopes` gives each
- * node its lane (undefined = no `scope` key at all, i.e. unconfined).
+ * A plan in auto mode. `scopes` gives each task its lane (null = no `scope`
+ * key at all, i.e. unconfined); `openDecisions` fills the spec's Open decisions.
  */
 function planRepo(
   cwd: string,
-  scopes: (string | undefined)[],
-  header = "",
+  scopes: (string | null)[],
+  openDecisions: string[] = [],
   oracleTypes: string[] = [],
 ): string {
-  const drafts = join(cwd, ".sddx", "drafts");
-  mkdirSync(drafts, { recursive: true });
-  const lines = [`${GRAPH_HEADER}goal: ship the widget`, header, "tasks:"].filter((s) => s !== "");
-  scopes.forEach((scope, i) => {
-    writeFileSync(
-      join(drafts, `n${i}.yaml`),
-      SPEC(`build part ${i}`, scope, oracleTypes[i] ?? "command"),
-    );
-    lines.push(`  - alias: n${i}`, `    spec: n${i}.yaml`);
-  });
-  const rel = join(".sddx", "drafts", "graph.yaml");
-  writeFileSync(join(cwd, rel), `${lines.join("\n")}\n`);
-  return rel;
+  return writeSpec(
+    cwd,
+    "2026-01-01-ship-the-widget",
+    goalSpec({
+      title: "ship the widget",
+      openDecisions,
+      tasks: scopes.map((scope, i) => ({
+        id: `n${i}`,
+        scope: scope === null ? null : [scope],
+        ...(oracleTypes[i] ? { type: oracleTypes[i] } : {}),
+      })),
+    }),
+  );
 }
 
 /** Everything a blocker must leave untouched. */
@@ -70,7 +56,7 @@ describe("the structured blocker summary", () => {
     const { clone: cwd } = fixtureClone();
     auto(cwd);
     const rel = planRepo(cwd, ["src/n0/**", "src/auth/**"]);
-    const r = cli(cwd, "graph", "create", "--graph", rel, "--output", "json");
+    const r = sddx(cwd, "plan", "start", rel, "--output", "json");
     expect(r.status).not.toBe(0);
     const out = JSON.parse(r.stdout);
     expect(out.status).toBe("error");
@@ -82,37 +68,48 @@ describe("the structured blocker summary", () => {
     expect(b.next_step).toContain("interaction_mode");
   });
 
-  test("an unresolved decision is reported as the decision itself", () => {
+  test("an open decision is reported as the decision itself", () => {
+    // Open decisions block planning in every mode, so the CLI refuses before
+    // the gate runs and names the decision in its errors. The gate keeps the
+    // structured `unresolved` bound for callers that consult it directly (the hook).
     const { clone: cwd } = fixtureClone();
     auto(cwd);
-    const rel = planRepo(
+    const rel = planRepo(cwd, ["src/n0/**"], ["should signup collect date of birth?"]);
+    const r = sddx(cwd, "plan", "start", rel, "--output", "json");
+    expect(r.status).toBe(1);
+    const out = JSON.parse(r.stdout);
+    expect(out.status).toBe("error");
+    expect(out.errors.join("\n")).toContain("should signup collect date of birth?");
+
+    const d = decideGate(
       cwd,
-      ["src/n0/**"],
-      'unresolved:\n  - "should signup collect date of birth?"',
+      join(cwd, rel),
+      [{ alias: "n0", scope: ["src/n0/**"], oracleType: "command" }],
+      "auto",
+      9,
+      scopesOverlap,
+      ["should signup collect date of birth?"],
     );
-    const r = cli(cwd, "graph", "create", "--graph", rel, "--output", "json");
-    expect(r.status).not.toBe(0);
-    const b = JSON.parse(r.stdout).data.blocker;
-    expect(b.bound).toBe("unresolved");
-    expect(b.decision).toContain("date of birth");
+    expect(d.blocker?.bound).toBe("unresolved");
+    expect(d.blocker?.decision).toContain("date of birth");
   });
 
   test("the task-count ceiling reports as a policy bound, not a missing decision", () => {
     const { clone: cwd } = fixtureClone();
     auto(cwd, 2);
     const rel = planRepo(cwd, ["src/n0/**", "src/n1/**", "src/n2/**"]);
-    const r = cli(cwd, "graph", "create", "--graph", rel, "--output", "json");
+    const r = sddx(cwd, "plan", "start", rel, "--output", "json");
     expect(r.status).not.toBe(0);
     const b = JSON.parse(r.stdout).data.blocker;
     expect(b.bound).toBe("task-ceiling");
     expect(b.decision).toContain("auto_max_tasks");
   });
 
-  test("a manual oracle reports as unobservable, naming the node", () => {
+  test("a manual oracle reports as unobservable, naming the task", () => {
     const { clone: cwd } = fixtureClone();
     auto(cwd);
-    const rel = planRepo(cwd, ["src/n0/**"], "", ["manual"]);
-    const r = cli(cwd, "graph", "create", "--graph", rel, "--output", "json");
+    const rel = planRepo(cwd, ["src/n0/**"], [], ["manual"]);
+    const r = sddx(cwd, "plan", "start", rel, "--output", "json");
     const b = JSON.parse(r.stdout).data.blocker;
     expect(b.bound).toBe("manual-oracle");
     expect(b.node).toBe("n0");
@@ -122,7 +119,7 @@ describe("the structured blocker summary", () => {
     const { clone: cwd } = fixtureClone();
     auto(cwd);
     const rel = planRepo(cwd, ["src/n0/**", "src/auth/**"]);
-    const r = cli(cwd, "graph", "create", "--graph", rel);
+    const r = sddx(cwd, "plan", "start", rel);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("auth");
     expect(r.stderr).toContain("interaction_mode");
@@ -131,12 +128,9 @@ describe("the structured blocker summary", () => {
 
 describe("a blocker is terminal", () => {
   const cases: [string, (cwd: string) => string][] = [
-    [
-      "a critical unresolved decision",
-      (cwd) => planRepo(cwd, ["src/n0/**"], 'unresolved:\n  - "which auth provider?"'),
-    ],
+    ["a critical open decision", (cwd) => planRepo(cwd, ["src/n0/**"], ["which auth provider?"])],
     ["a protected-path policy", (cwd) => planRepo(cwd, ["src/n0/**", "src/migrations/**"])],
-    ["an unconfined node", (cwd) => planRepo(cwd, [undefined])],
+    ["an unconfined task", (cwd) => planRepo(cwd, [null])],
   ];
 
   for (const [label, build] of cases) {
@@ -145,9 +139,9 @@ describe("a blocker is terminal", () => {
       auto(cwd);
       const rel = build(cwd);
       const before = runState(cwd);
-      const r = cli(cwd, "graph", "create", "--graph", rel);
+      const r = sddx(cwd, "plan", "start", rel);
       expect(r.status).not.toBe(0);
-      // not merely "no token" — nothing at all
+      // not merely "no token": nothing at all
       expect(runState(cwd)).toEqual(before);
       expect(runState(cwd).goals).toEqual([]);
     });
@@ -158,27 +152,27 @@ describe("a blocker is terminal", () => {
     auto(cwd, 1);
     const rel = planRepo(cwd, ["src/n0/**", "src/n1/**"]);
     const before = runState(cwd);
-    expect(cli(cwd, "graph", "create", "--graph", rel).status).not.toBe(0);
+    expect(sddx(cwd, "plan", "start", rel).status).not.toBe(0);
     expect(runState(cwd)).toEqual(before);
   });
 
-  test("drafts survive a blocker, so the plan can be inspected and refined", () => {
+  test("the spec survives a blocker unchanged, so the plan can be inspected and refined", () => {
     const { clone: cwd } = fixtureClone();
     auto(cwd);
     const rel = planRepo(cwd, ["src/n0/**", "src/secrets/**"]);
-    expect(cli(cwd, "graph", "create", "--graph", rel).status).not.toBe(0);
+    const before = readFileSync(join(cwd, rel), "utf8");
+    expect(sddx(cwd, "plan", "start", rel).status).not.toBe(0);
     expect(existsSync(join(cwd, rel))).toBe(true);
-    expect(readFileSync(join(cwd, rel), "utf8")).toContain("goal: ship the widget");
-    expect(existsSync(join(cwd, ".sddx", "drafts", "n0.yaml"))).toBe(true);
+    expect(readFileSync(join(cwd, rel), "utf8")).toBe(before);
   });
 
   test("a blocker never offers an approval as a way to continue", () => {
     const { clone: cwd } = fixtureClone();
     auto(cwd);
     const rel = planRepo(cwd, ["src/n0/**", "src/billing/**"]);
-    const r = cli(cwd, "graph", "create", "--graph", rel);
+    const r = sddx(cwd, "plan", "start", rel);
     const all = `${r.stdout}${r.stderr}`;
-    expect(all).not.toContain("graph approve");
+    expect(all).not.toContain("plan approve");
     expect(all).not.toContain("Approve");
     // and the remedy it DOES name is a reviewed-configuration edit, never a
     // flag or an environment variable the agent could compose for itself
@@ -191,56 +185,58 @@ describe("a blocker is terminal", () => {
     const { clone: cwd } = fixtureClone();
     auto(cwd);
     const rel = planRepo(cwd, ["src/n0/**", "src/credentials/**"]);
-    const approve = cli(cwd, "graph", "approve", "--graph", rel);
+    const approve = sddx(cwd, "plan", "approve", rel);
     expect(approve.status).not.toBe(0);
     expect(runState(cwd).approvals).toEqual([]);
-    // even with a token forced into place, creation still refuses
-    expect(cli(cwd, "graph", "create", "--graph", rel).status).not.toBe(0);
+    // even with a token forced into place, starting still refuses: the bounds
+    // are evaluated before the token is looked up
+    writeApproval(cwd, { plan_sha256: planHash(join(cwd, rel)).hash, mode: "human" });
+    const start = sddx(cwd, "plan", "start", rel);
+    expect(start.status).not.toBe(0);
+    expect(start.stderr).toContain("credentials");
+    expect(runState(cwd).goals).toEqual([]);
   });
 });
 
-describe("the deterministic bound does not consult the intake self-report", () => {
-  test("a protected-path plan blocks when intake reports nothing unresolved", () => {
+describe("the deterministic bound does not consult the self-report", () => {
+  test("a protected-path plan blocks when the spec lists no open decisions", () => {
     const { clone: cwd } = fixtureClone();
     auto(cwd);
     const rel = planRepo(cwd, ["src/n0/**", "src/auth/**"]);
-    expect(readFileSync(join(cwd, rel), "utf8")).not.toContain("unresolved");
-    const r = cli(cwd, "graph", "create", "--graph", rel);
+    expect(readFileSync(join(cwd, rel), "utf8")).toContain("### Open decisions\n\n## Tasks");
+    const r = sddx(cwd, "plan", "start", rel);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("auth");
-  });
-
-  test("`unresolved: []` cannot even be written — an empty list is malformed", () => {
-    // so "report an empty list to look clean" is not available as a bypass;
-    // the only way to report nothing unresolved is to omit the key, which the
-    // test above shows changes nothing
-    const { clone: cwd } = fixtureClone();
-    auto(cwd);
-    const rel = planRepo(cwd, ["src/n0/**"], "unresolved: []");
-    const r = cli(cwd, "graph", "create", "--graph", rel, "--dry-run");
-    expect(r.status).not.toBe(0);
-    expect(`${r.stdout}${r.stderr}`).toContain("unresolved");
   });
 });
 
 describe("auto mode is non-interactive end to end", () => {
-  test("no command in the goal→completion path prompts, offers, or waits", () => {
+  test("no command in the goal to completion path prompts, offers, or waits", () => {
     const { clone: cwd } = fixtureClone();
     auto(cwd);
-    const rel = planRepo(cwd, ["src/n0/**", "src/n1/**"]);
+    const rel = planRepo(cwd, ["n0.done", "n1.done"]);
     const outputs: string[] = [];
-    const record = (...args: string[]) => {
-      const r = cli(cwd, ...args);
+    const record = (from: string, ...args: string[]) => {
+      const r = sddx(from, ...args);
       outputs.push(r.stdout, r.stderr);
       return r;
     };
 
-    expect(record("graph", "create", "--graph", rel, "--dry-run").status).toBe(0);
-    const created = record("graph", "create", "--graph", rel, "--output", "json");
-    expect(created.status).toBe(0);
-    const goalId = JSON.parse(created.stdout).data.goalId as string;
-    record("board");
-    record("run", "report", "--goal", goalId);
+    expect(record(cwd, "plan", "check", rel).status).toBe(0);
+    const started = record(cwd, "plan", "start", rel, "--output", "json");
+    expect(started.status).toBe(0);
+    const goalId = JSON.parse(started.stdout).data.goalId as string;
+    for (const id of ["n0", "n1"]) {
+      const s = record(cwd, "task", "start", id, "--output", "json");
+      expect(s.status).toBe(0);
+      writeFileSync(join(JSON.parse(s.stdout).data.path as string, doneFile(id)), "done\n");
+      expect(record(cwd, "verify", id).status).toBe(0);
+      expect(
+        record(cwd, "review", "record", id, "--verdict", "pass", "--reviewer", "test").status,
+      ).toBe(0);
+    }
+    record(cwd, "board");
+    expect(record(cwd, "run", "report", "--goal", goalId).stdout).toContain("Run completed");
 
     const all = outputs.join("\n");
     for (const prompt of ["Approve", "Regenerate", "[y/N]", "(y/n)", "Select ", "press "]) {

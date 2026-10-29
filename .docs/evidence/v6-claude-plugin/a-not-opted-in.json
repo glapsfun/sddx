@@ -1,0 +1,36 @@
+{
+  "run": "A. Repository without .sddx/",
+  "plugin": {
+    "name": "sddx",
+    "path": "<checkout>",
+    "source": "sddx@inline",
+    "version": "5.0.0"
+  },
+  "sddx_skills": [
+    "sddx:brainstorm",
+    "sddx:debug",
+    "sddx:execute",
+    "sddx:finish",
+    "sddx:plan",
+    "sddx:review",
+    "sddx:using-sddx"
+  ],
+  "sddx_agents": ["sddx:critic", "sddx:worker"],
+  "sddx_hook_outputs": [
+    {
+      "hook": "SessionStart:startup",
+      "exit_code": 0,
+      "output": {
+        "hookSpecificOutput": {
+          "hookEventName": "SessionStart",
+          "additionalContext": "sddx is installed. To plan a change with it in this repository, run /sddx:brainstorm."
+        }
+      }
+    }
+  ],
+  "tool_calls": [],
+  "tool_results": [],
+  "final_reply": "sddx is installed. To plan a change with it in this repository, run /sddx:brainstorm.\n- sddx:critic: Reviews one verified sddx task in a clean context against its spec, acceptance lines and code quality, and returns a pass or fail verdict with findings. Has no file-editing tools. (Tools: Read, Grep, Glob, Bash)\n- sddx:worker: Implements one sddx task inside its own worktree, failing test first, and proves it with sddx verify. Dispatched by the sddx execute skill. (Tools: Read, Grep, Glob, Edit, Write, MultiEdit, Bash)\n- sddx:brainstorm: Use when the user wants a new feature or behavior change in an sddx repository and no spec covers it yet. Turns the idea into a spec's Design through conversation, checked by sddx spec check.\n- sddx:debug: Use when sddx verify fails and the cause is not obvious, or sddx board flags a task as stuck. Reproduces with the oracle, tests one hypothesis at a time, and pins the bug with a failing test.\n- sddx:execute: Use when an sddx goal has tasks ready to implement. Starts each ready task, dispatches one worker per task in its own worktree, and ends every task at sddx verify.\n- sddx:finish: Use when every task of an sddx goal is DONE. Checks the run report and the receipt chain, then opens a pull request from the goal's run branch for a person to merge.\n- sddx:plan: Use when a spec's Design is ready and it has no Tasks yet, or its tasks need revising. Splits the design into tasks with executable oracles and disjoint scopes, then takes the plan through check, approval and start.\n- sddx:review: Use when an sddx task is IN_REVIEW. Dispatches the critic on the verified diff in a clean context and records its verdict with sddx review record.\n- sddx:using-sddx: Use at the start of work in a repository with .sddx/, or when the user asks to build or change something with sddx. Routes the work through brainstorm, plan, execute, review and finish, each ending at an sddx CLI gate.",
+  "claude_code_version": "2.1.311",
+  "model": "claude-haiku-5-5"
+}

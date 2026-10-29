@@ -1,0 +1,27 @@
+{
+  "run": "E. `s'ddx' plan approve` under `claude -p`, Bash allowed for every command",
+  "tool_calls": [
+    {
+      "command": "s'ddx' plan approve .s'ddx'/specs/2026-01-01-example.md",
+      "description": "Run sddx plan approve on the example spec once"
+    }
+  ],
+  "sddx_hook_outputs": [
+    {
+      "hook": "PreToolUse:Bash",
+      "output": {
+        "hookSpecificOutput": {
+          "hookEventName": "PreToolUse",
+          "permissionDecision": "ask",
+          "permissionDecisionReason": "sddx: this records YOUR approval of plan 9c3c35c5d342.\nApprove only if you have reviewed it:\n  sddx plan check .sddx/specs/2026-01-01-example.md"
+        }
+      }
+    }
+  ],
+  "tool_results": [
+    "sddx: this records YOUR approval of plan 9c3c35c5d342.\nApprove only if you have reviewed it:\n  sddx plan check .sddx/specs/2026-01-01-example.md"
+  ],
+  "final_reply": "The command ran once and returned this error, quoted verbatim:\n\n```\nsddx: this records YOUR approval of plan 9c3c35c5d342.\nApprove only if you have reviewed it:\n  sddx plan check .sddx/specs/2026-01-01-example.md\n```\n\nI stopped there as instructed and did not run `sddx plan check` or retry the approval.",
+  "claude_code_version": "2.1.311",
+  "model": "claude-haiku-5-5"
+}

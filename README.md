@@ -6,90 +6,107 @@
 [![bun](https://img.shields.io/badge/runtime-bun-black?logo=bun)](https://bun.sh)
 [![typescript](https://img.shields.io/badge/lang-TypeScript-3178c6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 
-Loop-based Spec-Driven Development for Claude Code: dense specs with mandatory
-oracles, hook-enforced TDD, parallel git worktrees, and hash-chained receipts.
-Process over intelligence, proof over promises.
+Spec-driven development with proof, for coding agents. Your agent writes the
+code its usual way; sddx is the gate and the manager around it:
 
-Hooks hard-block implementation writes before a failing test exists, every
-goal requires an executable oracle, and every finished task leaves a
-hash-chained receipt in the repo. See
-[why sddx exists](docs/explanation/why-sddx.md) for the full problem/mechanism
-breakdown.
+- **One spec per goal.** A design you agree with in conversation, then tasks,
+  each with an executable oracle. Nothing starts until you approve the plan.
+- **A boundary proof per task.** `sddx verify` runs the task's oracle on the
+  base with only the task's tests applied, where it must fail, and on the
+  finished tree, where it must pass. Tests that do not catch the change do not
+  count.
+- **A review bound to the proven diff.** A critic in a clean context reviews
+  exactly what was proven, and only a passing review finishes the task.
+- **A receipt for every task.** Hash-chained, optionally signed, and
+  re-checkable by anyone with `sddx audit`.
+
+Every guarantee is enforced by the sddx CLI and git, so it holds in any harness
+and in CI. The plugin adds the workflow on top: skills that steer the agent
+from idea to pull request, and hooks that raise your own permission dialog
+when a plan is approved.
 
 ## Install
 
-**[Bun](https://bun.sh) is required** — it is the only supported runtime, and
-no installer installs it for you:
+sddx runs on **[Bun](https://bun.sh)**, the one prerequisite:
 
 ```sh
 curl -fsSL https://bun.sh/install | bash
 ```
 
-Then install sddx from npm and set up a repository:
+Then, in Claude Code:
 
-```sh
-npm install -g @glapsfun/sddx     # or: bun add -g @glapsfun/sddx
-cd your-repo
-sddx init
+```
+/plugin marketplace add glapsfun/sddx
+/plugin install sddx@sddx
 ```
 
-No install needed to try it: `npx @glapsfun/sddx init` or
-`bunx @glapsfun/sddx init`. The package is scoped as `@glapsfun/sddx`; the
-command it installs is plain `sddx`.
+On Claude Code 2.1.275 or later, `/plugin install sddx --marketplace glapsfun/sddx`
+does both in one step.
 
-`sddx init` asks four short questions, previews every file it would touch, and
-does nothing until you approve:
+Or, in Codex, from a terminal:
 
-- **Runtime scope** — `global` (an `sddx` on your `PATH`) or `project` (a
-  lockfile-backed dev dependency, so the whole team runs the same version).
-- **Adapters** — `claude` installs Claude Code skills, agents, and the
-  TDD-gate hooks into `.claude/`, project-locally. No plugin, no global config.
-- **Interaction mode** — whether a human approves the plan before anything runs.
-
-For CI and scripts, the same choices are flags:
-
-```sh
-sddx init --yes --runtime global --adapter claude
+```
+codex plugin marketplace add glapsfun/sddx
+codex plugin add sddx@sddx
 ```
 
-Check everything landed with `sddx doctor`. Migrating from the old marketplace
-plugin? See [docs/how-to/migrate-from-plugin.md](docs/how-to/migrate-from-plugin.md).
+Then open `/hooks` in Codex and trust the sddx hooks: Codex runs a plugin's
+hooks only once you trust them, and again after every update.
+
+Nothing is written into your repository until you plan your first goal.
+Details, how Codex differs, pre-release builds and removal:
+[Install sddx](docs/how-to/install-sddx.md). To have teammates prompted to
+install it when they open the repository, see
+[Share sddx with a team](docs/how-to/share-sddx-with-a-team.md).
+
+For CI and scripts, the same CLI is on npm. Re-check a repository's receipt
+chain in CI with:
+
+```sh
+npx @glapsfun/sddx audit --ci
+```
+
+Coming from sddx 5? See [Migrate to sddx 6](docs/how-to/migrate-to-v6.md).
+
+## What a session looks like
+
+In a repository that uses sddx, ask for a change, or start one with
+`/sddx:brainstorm` (in Codex, mention `$sddx:brainstorm`):
+
+1. **Brainstorm.** The agent asks about purpose and constraints, one question
+   at a time, and writes the design into `.sddx/specs/<date>-<slug>.md`.
+2. **Plan.** It splits the design into tasks with oracles and scopes. You
+   review the plan, and approving it raises your permission dialog. In Codex,
+   you type the approve command yourself.
+3. **Execute.** Each task gets its own git worktree and a worker subagent,
+   in parallel where scopes allow. Each ends at `sddx verify`.
+4. **Review.** A critic subagent reviews the proven diff. A pass commits the
+   task with its receipt and merges it into the goal's run branch.
+5. **Finish.** `sddx pr create` opens a pull request from the run branch. You
+   merge it.
+
+[Getting started](docs/tutorials/01-getting-started.md) walks through one goal
+end to end.
 
 ### Privacy
 
-The sddx runtime makes **zero network calls**. All state is local files
-(`.sddx/` under version control) and local git.
-
-There is exactly one exception, and it is never silent: installing the package
-itself, and — if you choose the project-pinned runtime scope — the single
-dependency install `sddx init` runs *after you confirm it*. Nothing on a hot
-path (session start, hooks, gates) ever reaches the network.
-
-## Quickstart
-
-```sh
-mkdir demo && cd demo && git init
-git commit --allow-empty -m init
-```
-
-Then follow [Getting started](docs/tutorials/01-getting-started.md) — a
-**one-node run**, one command at a time, ending in a verified receipt. A single
-task is not a special mode: it is a run with one node, and it gets the same
-goal, run branch, worktree, oracle, and receipt as any other. That is the loop
-`/sddx:run` drives for you inside Claude Code. Every command there (and in
-every guide below) is also a copy-paste-able scaffold under
-[examples/](examples/README.md).
+sddx makes no network calls of its own. Its state is files under `.sddx/` and
+git. The only commands that reach the network are ones you ask for: installing
+the plugin, and `sddx pr create`, which pushes the run branch and opens a pull
+request through `gh` or `glab`. Nothing on a hot path (session start, hooks,
+gates) ever reaches the network.
 
 ## Documentation
 
 **New to sddx?**
 
-- [Getting started](docs/tutorials/01-getting-started.md) — your first verified task, by hand from the CLI
-- [Your first parallel run](docs/tutorials/02-your-first-parallel-run.md) — two tasks, two worktrees
+- [Getting started](docs/tutorials/01-getting-started.md): your first goal, from install to merged
+- [Your first parallel run](docs/tutorials/02-your-first-parallel-run.md): two tasks, two worktrees, one run branch
 
 **How-to guides**
 
 - [Install sddx](docs/how-to/install-sddx.md)
+- [Share sddx with a team](docs/how-to/share-sddx-with-a-team.md)
 - [Model DAG dependencies](docs/how-to/model-dag-dependencies.md)
 - [Configure retry and skip/block](docs/how-to/configure-retry-and-skip.md)
 - [Choose an oracle type](docs/how-to/choose-an-oracle-type.md)
@@ -97,13 +114,14 @@ every guide below) is also a copy-paste-able scaffold under
 - [Ship a goal as a PR](docs/how-to/ship-a-goal-as-a-pr.md)
 - [Tune config](docs/how-to/tune-config.md)
 - [Troubleshooting](docs/how-to/troubleshoot-common-problems.md)
-- [Migrate to sddx 4.0](docs/how-to/migrate-to-v4.md) — old-to-new command mappings
+- [Migrate to sddx 6](docs/how-to/migrate-to-v6.md)
 
 **Reference**
 
 - [Spec reference](docs/reference/spec-reference.md)
 - [CLI reference](docs/reference/cli.md)
-- [Hooks & the TDD gate](docs/reference/hooks.md)
+- [Verification](docs/reference/verification.md)
+- [Hooks and the plugin](docs/reference/hooks.md)
 - [Receipts schema](docs/reference/receipts-schema.md)
 - [Config reference](docs/reference/config.md)
 
@@ -117,7 +135,7 @@ every guide below) is also a copy-paste-able scaffold under
 
 **Runnable examples**
 
-- [examples/](examples/README.md) — one scaffold per feature above, replayed in CI
+- [examples/](examples/README.md): one scaffold per feature, driving the CLI by hand, replayed in CI
 
 **Project**
 
@@ -128,6 +146,6 @@ every guide below) is also a copy-paste-able scaffold under
 
 ## Development
 
-Dev setup, everyday commands, and the quality gates live in
+Dev setup, everyday commands and the quality gates live in
 [CONTRIBUTING.md](CONTRIBUTING.md); the release process is in
 [docs/RELEASING.md](docs/RELEASING.md).

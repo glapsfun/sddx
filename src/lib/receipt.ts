@@ -48,12 +48,41 @@ export interface ReceiptApproval {
   assumptions: string[];
   /** Reserved for per-node spec revisions approved mid-run; always empty here. */
   amendments: never[];
+  /** v5: `signed` only when the approval token's signature verifies under
+   * `sddx-approval`. The only binding that can prove a person approved. */
+  binding?: "signed" | "unsigned";
+  /** v5: the harness the approver reported. A claim, never verified. */
+  harness_reported?: string;
+  /** v5: the approval token's signature and signer, present exactly when
+   * `binding` is `signed`, so a clone without the token can still check it. */
+  signature?: string;
+  signer?: string;
+}
+
+/** v5: what `sddx verify` proved, both halves. */
+export interface ReceiptBoundary {
+  base_sha: string;
+  /** The verified tree, outside `.sddx/`. */
+  tree_sha: string;
+  test_files: string[];
+  red: { exit_code: number; stdout_sha256: string; stderr_sha256: string };
+}
+
+/** v5: the passing review recorded against the verified diff. */
+export interface ReceiptReview {
+  verdict: "pass";
+  diff_sha256: string;
+  /** As reported by whoever recorded the review. */
+  reviewer: string | null;
+  findings_sha256?: string;
+  at: string;
 }
 
 export interface Receipt {
   /** 1 = M1 schema; 2 adds `allow`; 3 replaces the single run with `runs[]` +
-   * `env`; 4 adds `approval` (present only for a task belonging to a goal). */
-  version: 1 | 2 | 3 | 4;
+   * `env`; 4 adds `approval` (present only for a task belonging to a goal);
+   * 5 (sddx 6) adds `spec`, `boundary`, `review`, `profile` and approval binding. */
+  version: 1 | 2 | 3 | 4 | 5;
   task_id: string;
   seq: number;
   prev: string;
@@ -83,8 +112,15 @@ export interface Receipt {
   /** v3 optional, both-or-neither: SSH signature over the unsigned receipt's sha256. */
   signature?: string;
   signer?: string;
-  /** v4 only, and only for a task belonging to a goal. */
+  /** v4 only, and only for a task belonging to a goal. Always present from v5. */
   approval?: ReceiptApproval;
+  /** v5: the goal spec the task came from. */
+  spec?: { path: string; goal_id: string };
+  boundary?: ReceiptBoundary;
+  review?: ReceiptReview;
+  profile?: "default" | "strict";
+  /** v5, strict profile only: the per-edit test runs the hooks recorded. */
+  strict_runs?: Array<{ test_exit: number; source: "hook" | "manual"; at: string }>;
 }
 
 export const sha256 = (data: string | Uint8Array): string =>
@@ -139,7 +175,7 @@ export function validateReceipt(raw: unknown): string[] {
   const need = (field: string, ok: boolean) => {
     if (!ok) errors.push(`${field}: missing or invalid`);
   };
-  need("version", r.version === 1 || r.version === 2 || r.version === 3 || r.version === 4);
+  need("version", [1, 2, 3, 4, 5].includes(r.version as number));
   const version = typeof r.version === "number" ? r.version : 0;
   if (version >= 2) {
     need(
@@ -170,11 +206,25 @@ export function validateReceipt(raw: unknown): string[] {
           Array.isArray(a.assumptions) &&
           (a.assumptions as unknown[]).every((x) => typeof x === "string") &&
           Array.isArray(a.amendments) &&
-          (a.amendments as unknown[]).length === 0,
+          (a.amendments as unknown[]).length === 0 &&
+          (version >= 5
+            ? (a.binding === "signed"
+                ? typeof a.signature === "string" && typeof a.signer === "string"
+                : a.binding === "unsigned" &&
+                  a.signature === undefined &&
+                  a.signer === undefined) &&
+              (a.harness_reported === undefined || typeof a.harness_reported === "string")
+            : a.binding === undefined && a.harness_reported === undefined),
       );
     }
   } else {
     need("approval", r.approval === undefined);
+  }
+  if (version >= 5) validateV5(r, need);
+  else {
+    for (const k of ["spec", "boundary", "review", "profile", "strict_runs"]) {
+      need(k, r[k] === undefined);
+    }
   }
   if (version <= 2) {
     need("exit_code", typeof r.exit_code === "number");
@@ -260,6 +310,66 @@ export function validateReceipt(raw: unknown): string[] {
     typeof r.verified_at === "string" && !Number.isNaN(Date.parse(r.verified_at as string)),
   );
   return errors;
+}
+
+const isSha = (v: unknown, re: RegExp): boolean => typeof v === "string" && re.test(v);
+
+/** The fields only a version 5 receipt carries. Every one is required: a v5
+ * receipt without its proof or review would claim a completion it cannot show. */
+function validateV5(r: Record<string, unknown>, need: (field: string, ok: boolean) => void): void {
+  need("approval", typeof r.approval === "object" && r.approval !== null);
+  const spec = r.spec as Record<string, unknown> | undefined;
+  need(
+    "spec",
+    !!spec &&
+      typeof spec === "object" &&
+      typeof spec.path === "string" &&
+      spec.path !== "" &&
+      typeof spec.goal_id === "string" &&
+      spec.goal_id !== "",
+  );
+  const b = r.boundary as Record<string, unknown> | undefined;
+  const red = b?.red as Record<string, unknown> | undefined;
+  need(
+    "boundary",
+    !!b &&
+      typeof b === "object" &&
+      isSha(b.base_sha, HEX40) &&
+      isSha(b.tree_sha, HEX40) &&
+      Array.isArray(b.test_files) &&
+      (b.test_files as unknown[]).every((f) => typeof f === "string") &&
+      !!red &&
+      typeof red.exit_code === "number" &&
+      isSha(red.stdout_sha256, HEX64) &&
+      isSha(red.stderr_sha256, HEX64),
+  );
+  const rv = r.review as Record<string, unknown> | undefined;
+  need(
+    "review",
+    !!rv &&
+      typeof rv === "object" &&
+      rv.verdict === "pass" &&
+      isSha(rv.diff_sha256, HEX64) &&
+      (rv.reviewer === null || typeof rv.reviewer === "string") &&
+      (rv.findings_sha256 === undefined || isSha(rv.findings_sha256, HEX64)) &&
+      typeof rv.at === "string" &&
+      !Number.isNaN(Date.parse(rv.at)),
+  );
+  need("profile", r.profile === "default" || r.profile === "strict");
+  need(
+    "strict_runs",
+    r.profile === "strict"
+      ? Array.isArray(r.strict_runs) &&
+          (r.strict_runs as Array<Record<string, unknown>>).every(
+            (x) =>
+              typeof x === "object" &&
+              x !== null &&
+              typeof x.test_exit === "number" &&
+              (x.source === "hook" || x.source === "manual") &&
+              typeof x.at === "string",
+          )
+      : r.strict_runs === undefined,
+  );
 }
 
 function readReceiptRawFrom(dir: string, id: string): Buffer | null {

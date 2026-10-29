@@ -50,6 +50,17 @@ describe("buildScript", () => {
     expect(new TextDecoder().decode(r.stderr)).toContain("expected exit 1, got 0");
   });
 
+  test("a failing command in the middle of a block fails the example, naming the block", () => {
+    const script = buildScript([
+      { code: "true\n", expectExit: 0 },
+      { code: "false\necho still-running\n", expectExit: 0 },
+    ]);
+    const r = Bun.spawnSync(["bash", "-c", script]);
+    expect(r.exitCode).not.toBe(0);
+    expect(new TextDecoder().decode(r.stdout)).not.toContain("still-running");
+    expect(new TextDecoder().decode(r.stderr)).toContain("block 2: a command failed");
+  });
+
   test("later blocks see state (cwd, variables) set by earlier ones", () => {
     const script = buildScript([
       { code: "mkdir sub && cd sub && export X=hi\n", expectExit: 0 },
@@ -108,7 +119,7 @@ describe("runExample", () => {
     const target = mkdtempSync(join(tmpdir(), "sddx-target-"));
     const result = runExample(root, "02-bad", target);
     expect(result.ok).toBe(false);
-    expect(result.message).toContain("expected exit 0");
+    expect(result.message).toContain("block 1: a command failed (exit 1)");
   });
 
   test("runs setup.sh with the target directory before replaying blocks", () => {

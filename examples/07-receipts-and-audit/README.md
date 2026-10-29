@@ -1,9 +1,11 @@
 # Example: receipts and audit
 
-Completes one task, inspects its receipt, runs `sddx audit` clean, then
-deliberately tampers with the receipt file and watches audit catch it —
-loudly, not silently — before restoring it and confirming the chain is
-intact again.
+Every finished task leaves a receipt: the evidence of its boundary proof, the
+review it passed, and the plan it came from, hash-chained to the receipts before
+it. This example finishes a task, reads its receipt, audits the chain, then
+tampers with it. See
+[verify-and-audit-receipts](../../docs/how-to/verify-and-audit-receipts.md) and
+[receipts-schema](../../docs/reference/receipts-schema.md).
 
 ## Setup
 
@@ -11,91 +13,90 @@ intact again.
 bash examples/07-receipts-and-audit/setup.sh
 ```
 
-`cd` into the printed directory before running anything below.
-
-## Complete one task
-
 ```sh
-cat > spec.yaml <<'EOF'
-task: receipts example task
-context: []
-success_criteria:
-  - "ok.txt exists"
-oracle:
-  type: command
-  run: "test -f ok.txt"
-  expect: exit 0
-out_of_scope: []
-EOF
 SDDX="$PWD/sddx"
 ROOT="$PWD"
-cat > graph.yaml <<'EOF'
-schema_version: "1.0"
-interaction_mode: human
-goal: produce a receipt to inspect
-tasks:
-  - alias: receipts
-    spec: spec.yaml
+SPEC=.sddx/specs/2026-01-01-receipt.md
+mkdir -p .sddx/specs
+cat > "$SPEC" <<'EOF'
+# Receipt demo
+
+## Design
+
+### Goal
+Produce one receipt.
+
+### Acceptance
+- r-1 writes its marker
+
+### Non-goals
+
+### Assumptions
+- markers are enough for a demo
+
+### Open decisions
+
+## Tasks
+
+### r-1 Marker
+
+~~~sddx
+oracle: {type: command, run: test -f r.done, expect: exit 0}
+scope: [r.done]
+~~~
 EOF
-"$SDDX" graph approve --graph graph.yaml
-OUT=$("$SDDX" graph create --graph graph.yaml)
-echo "$OUT"
-ID=$(echo "$OUT" | grep -o 'created [0-9]\{8\}-[a-z0-9-]*' | head -1 | awk '{print $2}')
-cd "$ROOT/.sddx-worktrees/$ID"
-"$SDDX" task phase "$ID" RED --test-exit 1
-"$SDDX" red-check "$ID"
-touch ok.txt
-"$SDDX" task phase "$ID" GREEN --test-exit 0
-"$SDDX" task phase "$ID" VERIFY
-"$SDDX" verify "$ID"
+git add "$SPEC"
+git commit -q -m "plan: receipt"
+"$SDDX" plan approve "$SPEC" --harness example
+"$SDDX" plan start "$SPEC"
+"$SDDX" task start r-1
+echo done > "$ROOT/.sddx-worktrees/r-1/r.done"
+"$SDDX" verify r-1
+"$SDDX" review record r-1 --verdict pass --reviewer you
+git merge -q --no-ff -m "merge receipt demo" sddx/run-2026-01-01-receipt
 ```
 
-The task ran in its own worktree, so the receipt below lives there too — the
-rest of this example runs from inside it.
-
-## Inspect the receipt
+## Read the receipt
 
 ```sh
-cat ".sddx/receipts/$ID.json"
+R=.sddx/receipts/r-1.json
+grep '"version": 5' "$R"
+grep '"prev": "genesis"' "$R"
+grep -A2 '"boundary"' "$R"
+grep '"reviewer": "you"' "$R"
+grep '"binding": "unsigned"' "$R"
+grep '"markers are enough for a demo"' "$R"
 ```
 
+`binding` is `unsigned` because no SSH signing key is configured: the approval
+token proves which plan ran, not who approved it.
+
+## Audit the chain
+
 ```sh
-grep -o '"verdict": "pass"' ".sddx/receipts/$ID.json"
-grep -o '"task_id": "'"$ID"'"' ".sddx/receipts/$ID.json"
+"$SDDX" audit
+"$SDDX" audit | grep "human approval not provable"
+"$SDDX" audit | grep "harness example (reported, not verified)"
+"$SDDX" audit | grep "a recorded review, not a verified one"
 ```
 
-(Receipts are written with `JSON.stringify(receipt, null, 2)` — a space
-always follows each `:` in that output. If a future receipt format changes
-this, adjust the grep pattern to match, not the other way round.)
+## Tamper with it
 
-## A clean audit
+Receipts are written read-only. Editing one anyway changes its bytes, which
+audit catches against the commit that introduced it:
 
 ```sh
-"$SDDX" audit 2>&1 | grep -q "chain intact"
+chmod u+w "$R"
+sed -i.bak 's/"reviewer": "you"/"reviewer": "someone else"/' "$R"
+rm "$R.bak"
 ```
 
-## Tamper with it, and watch audit catch it
-
-```sh
-sed -i.bak 's/"exit_code": 0/"exit_code": 1/' ".sddx/receipts/$ID.json"
-rm -f ".sddx/receipts/$ID.json.bak"
-```
-
-```sh
-"$SDDX" audit 2>&1 | grep -q "tampered"
-```
-
-## Restore it, and confirm the chain is intact again
-
-```sh
-git checkout -- ".sddx/receipts/$ID.json"
+```sh expect=1
+"$SDDX" audit
 ```
 
 ```sh
-"$SDDX" audit 2>&1 | grep -q "chain intact"
+"$SDDX" audit 2>&1 | grep "receipt bytes tampered"
+git checkout -- "$R"
+"$SDDX" audit
 ```
-
-The receipt was never re-written to fix the tamper — it was restored to its
-committed bytes. Receipts are immutable; the only legitimate way to change
-one is to never have written the wrong one, which is exactly what the hash
-chain exists to prove after the fact.

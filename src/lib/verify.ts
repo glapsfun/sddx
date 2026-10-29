@@ -1,155 +1,197 @@
-import { oracleRuns } from "./config";
-import { captureEnv } from "./envinfo";
-import { commit, stageAll, writeTree } from "./git";
-import { findGoalForTask } from "./goal";
-import { runOracle } from "./oracle";
-import { chainHead, type OracleRun, type Receipt, sha256, writeReceipt } from "./receipt";
-import { type IntegrationOutcome, integrateTaskIntoRunBranch } from "./runbranch";
-import { signPayload } from "./sign";
-import { assertAdvanceable, readTask, transition, writeTask } from "./task";
+// `sddx verify`: the boundary proof for one IN_PROGRESS task. A pass moves the
+// task to IN_REVIEW and records what was proven; nothing is committed and no
+// receipt is written here, because a task is not finished until a review of
+// exactly this diff passes (see review.ts and finalize.ts).
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+import { classify, normalizeRelPath } from "./classify";
+import { classifyConfig, maxIterations, oracleRuns, profile, stuckThreshold } from "./config";
+import { globMatch } from "./glob";
+import { readGoal } from "./goal";
+import { parseGoalSpec } from "./goalspec";
+import {
+  changedFiles,
+  clearProofRecord,
+  runBoundaryProof,
+  sddxChanges,
+  worktreeTree,
+  writeProofRecord,
+} from "./proof";
+import { sha256 } from "./receipt";
+import { assertV6, readTask, type TaskState, taskHome, transition, writeTask } from "./task";
 import { resolveMainRepoRoot } from "./worktree";
 
-function expectedExit(expect: string): number {
-  const m = /^exit\s+(\d+)$/.exec(expect.trim());
-  if (!m) {
-    throw new Error(`unsupported oracle.expect: "${expect}" (M1 supports "exit <code>")`);
-  }
-  return Number(m[1]);
-}
-
-export interface VerifyResult {
+export interface VerifyOutcome {
   verdict: "pass" | "fail";
-  exitCode: number;
-  durationMs: number;
-  receiptPath?: string;
-  commitSha?: string;
-  /** Set only on a pass — the outcome of merging this task's commit into its
-   * goal's run branch (see `run-branch-integration`), or `{result: "none"}`
-   * for a task with no goal. */
-  integration?: IntegrationOutcome;
+  task: TaskState;
+  treeSha: string;
+  message: string;
+  stuck: boolean;
+  limitReached: boolean;
 }
 
-export function verifyTask(
+/** Implementation files the diff changes outside the task's scope. */
+export function outOfScope(task: TaskState, paths: string[], root: string): string[] {
+  if (task.scope.length === 0) return [];
+  const cfg = classifyConfig(root);
+  return paths.filter((p) => {
+    if (classify(p, task.allow, cfg).rule !== "implementation") return false;
+    const path = normalizeRelPath(p);
+    return !task.scope.some((g) => globMatch(normalizeRelPath(g), path));
+  });
+}
+
+/**
+ * Refuses a task file whose oracle or scope differs from the approved spec. The
+ * task file lives in the worktree an agent edits, so the spec bytes whose hash
+ * the goal's approval recorded are what decide what verify runs and allows.
+ */
+export function assertMatchesApprovedSpec(root: string, task: TaskState): void {
+  const goal = readGoal(root, task.goal_id);
+  const approved = goal.approval?.plan_sha256;
+  if (!approved) throw new Error(`goal ${goal.id} has no approval record`);
+  const shown = spawnSync("git", ["show", `${goal.run_branch}:${goal.spec_path}`], {
+    cwd: root,
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (shown.status !== 0) {
+    throw new Error(
+      `cannot read the approved spec ${goal.spec_path} from run branch ${goal.run_branch}: ${shown.stderr.toString().trim()}`,
+    );
+  }
+  if (sha256(shown.stdout) !== approved) {
+    throw new Error(
+      `the spec on ${goal.run_branch} (${goal.spec_path}) no longer matches the approved plan ${approved.slice(0, 12)}`,
+    );
+  }
+  const spec = parseGoalSpec(shown.stdout.toString("utf8")).spec;
+  const planned = spec?.tasks.find((t) => t.id === task.id);
+  if (!planned) throw new Error(`task ${task.id} is not in the approved spec ${goal.spec_path}`);
+  for (const key of ["oracle", "scope"] as const) {
+    if (JSON.stringify(planned[key]) !== JSON.stringify(task[key])) {
+      throw new Error(
+        `task ${task.id}'s ${key} in its state file differs from the approved spec ${goal.spec_path}; the approved plan decides what verify runs`,
+      );
+    }
+  }
+}
+
+/** Locates a task and checks it may be verified, throwing a user-facing message otherwise. */
+export function loadForVerify(
   cwd: string,
   id: string,
-  opts: { model?: string | null; harness?: string; pluginVersion: string },
-): VerifyResult {
-  const task = readTask(cwd, id);
-  // Before the oracle runs, not after: a legacy task must not even execute its
-  // command, let alone produce a receipt this version would chain.
-  assertAdvanceable(task);
-  if (task.phase !== "VERIFY") {
-    throw new Error(`task ${id} is in ${task.phase}; verify requires phase VERIFY`);
+): { root: string; home: string; task: TaskState } {
+  const root = resolveMainRepoRoot(cwd);
+  const home = taskHome(root, id);
+  if (!home) throw new Error(`no such task: ${id}`);
+  const task = readTask(home, id);
+  assertV6(task);
+  if (task.phase !== "IN_PROGRESS") {
+    throw new Error(`task ${id} is ${task.phase}; verify requires IN_PROGRESS`);
   }
   if (task.oracle.type === "manual") {
-    throw new Error("manual oracles need a human decision; M1 verify supports command oracles");
-  }
-  const redEvidence = task.evidence.oracle_red;
-  if (!redEvidence || redEvidence.exit_code === undefined || redEvidence.exit_code === 0) {
     throw new Error(
-      `task ${id} has no failing-oracle evidence — an oracle that never failed proves nothing. ` +
-        `In RED, run \`sddx red-check ${id}\`. A task already past RED (e.g. created before sddx 0.2) ` +
-        `cannot be red-checked retroactively: abandon it (sddx task phase ${id} ABANDONED) and recreate`,
+      `task ${id} has a manual oracle, which needs a human to observe the result; sddx verify only runs executable oracles`,
     );
   }
-  const firstGreen = task.history.find((h) => h.phase === "GREEN");
-  if (firstGreen && Date.parse(redEvidence.at) > Date.parse(firstGreen.at)) {
+  if (!task.workspace) throw new Error(`task ${id} has no worktree; run sddx task start ${id}`);
+  const current = profile(root);
+  if (task.profile !== undefined && task.profile !== current) {
     throw new Error(
-      `oracle_red (${redEvidence.at}) was recorded after the first GREEN (${firstGreen.at}) — the red-check must precede implementation; abandon and restart the task`,
+      `task ${id} was started under the ${task.profile} profile but the config now says ${current}; a task is gated by one profile from start to finish. Restore the profile, or abandon the task and start it again`,
     );
   }
-  const want = expectedExit(task.oracle.expect);
+  assertMatchesApprovedSpec(root, task);
+  return { root, home, task };
+}
 
-  const wanted = oracleRuns(cwd, task.oracle.runs);
-  const runs: OracleRun[] = [];
-  const started = Date.now();
-  let exitCode = 0;
-  for (let i = 0; i < wanted; i += 1) {
-    const run = runOracle(cwd, task.oracle.run);
-    exitCode = run.exitCode;
-    runs.push({
-      exit_code: run.exitCode,
-      duration_ms: run.durationMs,
-      stdout_sha256: sha256(run.stdout),
-      stderr_sha256: sha256(run.stderr),
-    });
-    if (exitCode !== want) break; // fail fast — one bad run fails the whole verification
-  }
-  const durationMs = Date.now() - started;
-
+export function verifyTask(cwd: string, id: string): VerifyOutcome {
+  const { root, home, task } = loadForVerify(cwd, id);
+  clearProofRecord(root, id);
+  const workspace = task.workspace as NonNullable<TaskState["workspace"]>;
+  const worktree = join(root, workspace.path);
+  const treeSha = worktreeTree(worktree);
+  const base = workspace.base_sha;
+  const now = new Date().toISOString();
   task.iterations += 1;
-  if (exitCode !== want) {
-    task.evidence.last_verify = { exit_code: exitCode, at: new Date().toISOString() };
-    writeTask(cwd, task);
-    return { verdict: "fail", exitCode, durationMs };
-  }
+  const limitReached = task.iterations >= maxIterations(root);
 
-  const env = captureEnv(cwd); // before staging — reflects the tree the oracle saw
-
-  transition(task, "DONE", { internal: true });
-  task.evidence.verify = { exit_code: exitCode, at: new Date().toISOString() };
-  writeTask(cwd, task);
-
-  stageAll(cwd);
-  const treeSha = writeTree(cwd);
-
-  // The goal file lives in the MAIN checkout, never committed (so it survives
-  // branch switches), while verify runs inside the task's own worktree — resolve
-  // through the git common dir, exactly as the run-branch merge below does.
-  const goalApproval = findGoalForTask(resolveMainRepoRoot(cwd), id)?.approval;
-  const head = chainHead(cwd);
-  const receipt: Receipt = {
-    version: 4,
-    task_id: id,
-    seq: head.seq + 1,
-    prev: head.prevHash,
-    harness: opts.harness ?? "claude-code",
-    model: opts.model ?? null,
-    plugin_version: opts.pluginVersion,
-    oracle: { run: task.oracle.run, expect: task.oracle.expect },
-    runs,
-    env,
-    base_sha: task.workspace.base_sha,
-    tree_sha: treeSha,
-    verdict: "pass",
-    verified_at: new Date().toISOString(),
-    allow: [...task.allow],
-    // Approval provenance is denormalized here, not resolved through the goal
-    // at read time: a receipt that needs another file to be interpreted stops
-    // being a receipt. Absent for a task created outside any goal.
-    ...(goalApproval
-      ? {
-          approval: {
-            mode: goalApproval.mode,
-            ...(goalApproval.authorization ? { authorization: goalApproval.authorization } : {}),
-            ...(goalApproval.requested_mode ? { requested_mode: goalApproval.requested_mode } : {}),
-            ...(goalApproval.degraded_reason
-              ? { degraded_reason: goalApproval.degraded_reason }
-              : {}),
-            plan_sha256: goalApproval.plan_sha256,
-            ...(goalApproval.at ? { at: goalApproval.at } : {}),
-            assumptions: [...(task.assumptions ?? [])],
-            amendments: [] as never[],
-          },
-        }
-      : {}),
+  const finishFail = (
+    half: "red" | "green" | "setup" | "scope",
+    exitCode: number,
+    message: string,
+    fingerprint: string,
+  ): VerifyOutcome => {
+    task.last_failure = { half, exit_code: exitCode, message, at: now };
+    task.stuck =
+      task.stuck?.fingerprint === fingerprint
+        ? { ...task.stuck, count: task.stuck.count + 1 }
+        : { fingerprint, count: 1, since: now };
+    const stuck = task.stuck.count >= stuckThreshold(root);
+    writeTask(home, task);
+    return { verdict: "fail", task, treeSha, message, stuck, limitReached };
   };
-  // sign the unsigned bytes, then append the two fields LAST — audit
-  // reconstructs the payload by deleting exactly these keys
-  const sig = signPayload(cwd, sha256(`${JSON.stringify(receipt, null, 2)}\n`));
-  if (sig) {
-    receipt.signature = sig.signature;
-    receipt.signer = sig.signer;
+
+  const stateChanges = sddxChanges(root, base, treeSha);
+  if (stateChanges.length > 0) {
+    return finishFail(
+      "scope",
+      1,
+      `changes under .sddx/ are sddx's own state and never part of a task: ${stateChanges.join(", ")}`,
+      `sddx\0${stateChanges.join("\0")}`,
+    );
   }
-  const receiptPath = writeReceipt(cwd, receipt);
 
-  stageAll(cwd);
-  const commitSha = commit(cwd, `sddx(${id}): ${task.task}`);
+  const offScope = outOfScope(
+    task,
+    changedFiles(root, base, treeSha).map((f) => f.path),
+    root,
+  );
+  if (offScope.length > 0) {
+    return finishFail(
+      "scope",
+      1,
+      `changes outside task ${id}'s scope (${task.scope.join(", ")}): ${offScope.join(", ")}`,
+      `scope\0${offScope.join("\0")}`,
+    );
+  }
 
-  // Automatic — never asked for, per `run-branch-integration`: merging into
-  // the *original target branch* remains a user decision (unchanged), but
-  // merging a verified task into its own goal's disposable run branch is not.
-  const integration = integrateTaskIntoRunBranch(cwd, id);
+  const result = runBoundaryProof({
+    root,
+    id,
+    base,
+    tree: treeSha,
+    oracle: task.oracle,
+    runs: oracleRuns(root, task.oracle.runs),
+    classify: classifyConfig(root),
+  });
+  if (!result.ok)
+    return finishFail(result.half, result.exitCode, result.message, result.fingerprint);
 
-  return { verdict: "pass", exitCode, durationMs, receiptPath, commitSha, integration };
+  task.verified = {
+    base_sha: base,
+    tree_sha: treeSha,
+    test_files: result.testFiles,
+    red: result.red,
+    green: result.green,
+    at: now,
+  };
+  writeProofRecord(root, {
+    task_id: id,
+    attempt: task.attempt_count,
+    oracle: task.oracle,
+    ...task.verified,
+  });
+  task.last_failure = undefined;
+  task.stuck = undefined;
+  transition(task, "IN_REVIEW");
+  writeTask(home, task);
+  return {
+    verdict: "pass",
+    task,
+    treeSha,
+    message: `boundary proof passed: RED exit ${result.red.exit_code} on the base plus ${result.testFiles.length} test file(s), GREEN ${result.green.length} run(s) on tree ${treeSha}`,
+    stuck: false,
+    limitReached,
+  };
 }

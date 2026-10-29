@@ -1,7 +1,7 @@
 {
   "name": "@glapsfun/sddx",
   "version": "5.0.0",
-  "description": "Loop-based Spec-Driven Development: dense specs with mandatory oracles, hook-enforced TDD, parallel worktrees, hash-chained receipts.",
+  "description": "Spec-driven development with proof: one approved spec per goal, a RED/GREEN boundary proof per task, a review bound to the verified diff, and hash-chained receipts.",
   "type": "module",
   "license": "MIT",
   "author": "glapsfun",
@@ -30,7 +30,6 @@
     "dist/cli.mjs",
     "bin/sddx",
     "bin/sddx-run",
-    "templates/",
     "README.md",
     "LICENSE"
   ],
@@ -40,12 +39,12 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "build": "bun scripts/build.ts",
-    "check": "bun run lint && bun run typecheck && bun test && bun run build",
-    "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('sddx: refusing an accidental local npm publish. This only guards against running it by mistake, not who has publish rights on the glapsfun org — set CI=true deliberately to override (e.g. the one-time bootstrap publish): CI=true npm publish'); process.exit(1); }\""
+    "check": "bun run lint && bun run typecheck && bun test && bun run spec-coverage && bun run build",
+    "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('sddx: refusing an accidental local npm publish. This only guards against running it by mistake, not who has publish rights on the glapsfun org; set CI=true deliberately to override (e.g. the one-time bootstrap publish): CI=true npm publish'); process.exit(1); }\"",
+    "spec-coverage": "bun scripts/spec-coverage.ts --if-present"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.4",
-    "@clack/prompts": "^1.7.0",
     "@types/bun": "^1.3.12",
     "typescript": "^5.9.2",
     "yaml": "^2.9.0"

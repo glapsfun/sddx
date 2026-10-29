@@ -3,86 +3,37 @@
 // The report used to carry three coarse counts (merged / failed / outstanding)
 // and no per-task detail beyond an oracle verdict, so a reader could not tell a
 // task that conflicted on integration from one still in flight, nor find the
-// receipt backing a "pass". A partial run — the common case — was exactly where
+// receipt backing a "pass". A partial run, the common case, was exactly where
 // it said least.
 //
 // The generic current-branch action catalog is gone with it: a menu keyed to
 // "is this branch pushed" answered a question about the checkout, not about the
 // run, and it could offer per-task handoffs before the run reached its single
 // user handoff.
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setDefaultTimeout, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { generateRunReport, renderRunReport } from "../src/lib/runreport";
 import { fixtureClone } from "./fixtures";
-import { fakeRedCheck, GRAPH_HEADER, GRAPH_HEADER_LINES, repoRoot } from "./helpers";
+import { completeTask, createRun, doneFile, repoRoot, sddx, startTask } from "./helpers";
 
-const CLI = join(repoRoot, "src/cli.ts");
-const cli = (cwd: string, ...args: string[]) =>
-  spawnSync("bun", [CLI, ...args], { cwd, encoding: "utf8" });
-
-const spec = (task: string, part: string, extra = "") =>
-  `task: ${task}\nsuccess_criteria:\n  - a\nscope:\n  - ${part}/**\noracle:\n  type: command\n  run: "test -f ${part}/out.txt"\n${extra}`;
+// each test drives whole tasks through the CLI, which can exceed the 5s default under load
+setDefaultTimeout(60_000);
 
 /**
- * A goal with three shapes at once: one task that will merge, one that will be
- * abandoned, and one dependent that is therefore skipped.
+ * A goal with three shapes at once: T1 merges, T2 is abandoned, and T3, which
+ * depends on T2, is therefore skipped.
  */
-function partialPlan(cwd: string): string {
-  mkdirSync(join(cwd, "specs"), { recursive: true });
-  writeFileSync(join(cwd, "specs", "ok.yaml"), spec("build the good part", "good"));
-  writeFileSync(join(cwd, "specs", "bad.yaml"), spec("build the doomed part", "doomed"));
-  writeFileSync(join(cwd, "specs", "dep.yaml"), spec("build the dependent part", "dependent"));
-  writeFileSync(
-    join(cwd, "graph.yaml"),
-    [
-      ...GRAPH_HEADER_LINES,
-      "goal: ship the widget",
-      "tasks:",
-      "  - alias: ok",
-      "    spec: specs/ok.yaml",
-      "  - alias: bad",
-      "    spec: specs/bad.yaml",
-      "  - alias: dep",
-      "    spec: specs/dep.yaml",
-      "    depends_on: bad",
-    ].join("\n"),
-  );
-  return "graph.yaml";
-}
-
-function create(cwd: string, rel: string) {
-  expect(cli(cwd, "graph", "approve", "--graph", rel).status).toBe(0);
-  const r = cli(cwd, "graph", "create", "--graph", rel, "--output", "json");
-  expect(r.status).toBe(0);
-  const data = JSON.parse(r.stdout).data;
-  return {
-    goalId: data.goalId as string,
-    byAlias: data.aliasToId as Record<string, string>,
-  };
-}
-
-function complete(cwd: string, id: string, part: string): void {
-  const wt = join(cwd, ".sddx-worktrees", id);
-  expect(cli(wt, "task", "phase", id, "RED", "--test-exit", "1").status).toBe(0);
-  fakeRedCheck(wt, id);
-  mkdirSync(join(wt, part), { recursive: true });
-  writeFileSync(join(wt, part, "out.txt"), "done\n");
-  expect(cli(wt, "task", "phase", id, "GREEN", "--test-exit", "0").status).toBe(0);
-  expect(cli(wt, "task", "phase", id, "VERIFY").status).toBe(0);
-  expect(cli(wt, "verify", id).status).toBe(0);
-}
-
-/** Builds the partial run once: `ok` merged, `bad` abandoned, `dep` skipped. */
 function partialRun() {
   const { clone: cwd } = fixtureClone();
-  const rel = partialPlan(cwd);
-  const { goalId, byAlias } = create(cwd, rel);
-  complete(cwd, byAlias.ok as string, "good");
-  const badWt = join(cwd, ".sddx-worktrees", byAlias.bad as string);
-  expect(cli(badWt, "task", "phase", byAlias.bad as string, "ABANDONED").status).toBe(0);
-  return { cwd, goalId, byAlias };
+  const { goalId } = createRun(cwd, {
+    tasks: [{ id: "T1" }, { id: "T2" }, { id: "T3", dependsOn: ["T2"] }],
+  });
+  completeTask(cwd, "T1");
+  startTask(cwd, "T2");
+  expect(sddx(cwd, "task", "abandon", "T2", "--reason", "dead end").status).toBe(0);
+  return { cwd, goalId };
 }
 
 describe("a partial run reports completely in one summary", () => {
@@ -96,25 +47,31 @@ describe("a partial run reports completely in one summary", () => {
     expect(r.skipped).toBe(1);
     expect(r.total).toBe(3);
     // every task is accounted for exactly once
-    expect(r.merged + r.failed + r.skipped + r.blocked + r.outstanding).toBe(r.total);
+    expect(r.merged + r.failed + r.skipped + r.blocked + r.conflicted + r.outstanding).toBe(
+      r.total,
+    );
   });
 
   test("every task carries its status, receipt path, and integration result", () => {
-    const { cwd, goalId, byAlias } = partialRun();
+    const { cwd, goalId } = partialRun();
     const r = generateRunReport(cwd, goalId, "main");
 
-    const ok = r.tasks.find((t) => t.taskId === byAlias.ok);
+    const ok = r.tasks.find((t) => t.taskId === "T1");
     expect(ok?.status).toBe("merged");
+    expect(ok?.state).toBe("DONE");
     expect(ok?.receiptPath).toBeTruthy();
     expect(ok?.integration).toBe("merged");
 
-    const bad = r.tasks.find((t) => t.taskId === byAlias.bad);
+    const bad = r.tasks.find((t) => t.taskId === "T2");
     expect(bad?.status).toBe("failed");
+    expect(bad?.reason).toBe("dead end");
     expect(bad?.receiptPath).toBeNull();
     expect(bad?.integration).toBeNull();
 
-    const dep = r.tasks.find((t) => t.taskId === byAlias.dep);
+    const dep = r.tasks.find((t) => t.taskId === "T3");
     expect(dep?.status).toBe("skipped");
+    expect(dep?.because).toBe("T2");
+    expect(dep?.reason).toBe("skipped");
   });
 
   test("the rendered summary states the target branch is unchanged", () => {
@@ -128,16 +85,23 @@ describe("a partial run reports completely in one summary", () => {
 
   test("JSON carries the full field set even where the terminal collapses", () => {
     const { cwd, goalId } = partialRun();
-    const out = cli(cwd, "run", "report", "--goal", goalId, "--output", "json");
+    const out = sddx(cwd, "run", "report", "--goal", goalId, "--output", "json");
     expect(out.status).toBe(0);
     const data = JSON.parse(out.stdout).data;
     expect(data.tasks).toHaveLength(3);
     for (const t of data.tasks) {
-      expect(t).toHaveProperty("taskId");
-      expect(t).toHaveProperty("status");
-      expect(t).toHaveProperty("oracle");
-      expect(t).toHaveProperty("receiptPath");
-      expect(t).toHaveProperty("integration");
+      for (const k of [
+        "taskId",
+        "status",
+        "state",
+        "attempt",
+        "reason",
+        "oracle",
+        "receiptPath",
+        "integration",
+      ]) {
+        expect(t).toHaveProperty(k);
+      }
     }
     for (const k of ["merged", "failed", "skipped", "blocked", "conflicted", "outstanding"]) {
       expect(data).toHaveProperty(k);
@@ -148,7 +112,7 @@ describe("a partial run reports completely in one summary", () => {
 describe("next-actions is goal-scoped only", () => {
   test("without --goal it exits nonzero and produces no current-branch menu", () => {
     const { cwd } = partialRun();
-    const r = cli(cwd, "next-actions");
+    const r = sddx(cwd, "next-actions");
     expect(r.status).not.toBe(0);
     const all = `${r.stdout}${r.stderr}`;
     expect(all).toContain("--goal");
@@ -159,7 +123,7 @@ describe("next-actions is goal-scoped only", () => {
 
   test("with --goal it renders the run menu", () => {
     const { cwd, goalId } = partialRun();
-    const r = cli(cwd, "next-actions", "--goal", goalId);
+    const r = sddx(cwd, "next-actions", "--goal", goalId);
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("Review Changes");
   });
@@ -174,30 +138,21 @@ describe("next-actions is goal-scoped only", () => {
 });
 
 describe("no per-task menu after verification", () => {
-  test("verify emits no action menu of its own", () => {
+  test("neither verify nor review record emits an action menu of its own", () => {
     const { clone: cwd } = fixtureClone();
-    mkdirSync(join(cwd, "specs"), { recursive: true });
-    writeFileSync(join(cwd, "specs", "ok.yaml"), spec("build the good part", "good"));
-    writeFileSync(
-      join(cwd, "graph.yaml"),
-      `${GRAPH_HEADER}goal: ship the widget\ntasks:\n  - alias: ok\n    spec: specs/ok.yaml\n`,
-    );
-    const { byAlias } = create(cwd, "graph.yaml");
-    const id = byAlias.ok as string;
-    const wt = join(cwd, ".sddx-worktrees", id);
+    createRun(cwd, { tasks: [{ id: "T1" }] });
+    const wt = startTask(cwd, "T1");
+    writeFileSync(join(wt, doneFile("T1")), "done\n");
 
-    expect(cli(wt, "task", "phase", id, "RED", "--test-exit", "1").status).toBe(0);
-    fakeRedCheck(wt, id);
-    mkdirSync(join(wt, "good"), { recursive: true });
-    writeFileSync(join(wt, "good", "out.txt"), "done\n");
-    expect(cli(wt, "task", "phase", id, "GREEN", "--test-exit", "0").status).toBe(0);
-    expect(cli(wt, "task", "phase", id, "VERIFY").status).toBe(0);
-
-    const v = cli(wt, "verify", id);
-    expect(v.status).toBe(0);
-    const out = `${v.stdout}${v.stderr}`;
-    expect(out).not.toContain("Next Actions");
-    expect(out).not.toContain("Review Changes");
+    for (const r of [
+      sddx(cwd, "verify", "T1"),
+      sddx(cwd, "review", "record", "T1", "--verdict", "pass"),
+    ]) {
+      expect(r.status).toBe(0);
+      const out = `${r.stdout}${r.stderr}`;
+      expect(out).not.toContain("Next Actions");
+      expect(out).not.toContain("Review Changes");
+    }
   });
 
   test("no role or skill invokes next-actions without --goal", () => {

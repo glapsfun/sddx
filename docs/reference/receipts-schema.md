@@ -1,13 +1,16 @@
 # Receipt schema
 
 One JSON file per task at `.sddx/receipts/<task-id>.json`, written exactly
-once by the verifier — and only on a passing oracle. A failed verification
-writes nothing; there are no failure receipts, so `verdict` is always
-`"pass"`.
+once, when the task is finalized. Since sddx 6 that happens when a review of
+the verified diff passes (`sddx review record <id> --verdict pass`); earlier
+versions wrote it from `sddx verify`. A failed verification or review writes
+nothing, so `verdict` is always `"pass"`. sddx 6 writes version 5, described
+[at the end of this page](#v5-boundary-proof-review-and-approval-binding);
+`sddx audit` keeps validating versions 1 to 4 exactly as they were written.
 
 | Field            | Type              | Meaning                                                                  |
 | ---------------- | ----------------- | ------------------------------------------------------------------------ |
-| `version`        | `1 \| 2 \| 3 \| 4` | Receipt schema; v2 added `allow`, v3 added `runs`/`env`, v4 added `approval` |
+| `version`        | `1 \| 2 \| 3 \| 4 \| 5` | Receipt schema; v2 added `allow`, v3 added `runs`/`env`, v4 added `approval`, v5 added `spec`/`boundary`/`review`/`profile` |
 | `task_id`        | string            | The task this receipt settles                                            |
 | `seq`            | number            | Position in the chain; strictly greater than the parent's                |
 | `prev`           | string            | sha256 of the parent receipt *file*, or `"genesis"` for the first        |
@@ -139,3 +142,103 @@ self-reported unless you see that cross-check confirmed.
 **What this proves:** which plan a receipt descends from and which mode it ran
 under. **Not** who approved it — see
 [interaction-modes.md](../explanation/interaction-modes.md#what-sddx-can-and-cannot-prove).
+
+## v5: boundary proof, review and approval binding
+
+Written by sddx 6. Everything from v4 stays, with three changes in meaning:
+`runs` holds the GREEN half of the boundary proof, `approval` is always present
+(every v6 task belongs to a goal), and `harness`/`model` are the values passed
+to `review record`, as reported. Every new field is required; a v5 receipt
+without its proof or its review would claim a completion it cannot show.
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `spec` | `{path, goal_id}` | The goal spec the task came from |
+| `boundary.base_sha` | hex40 | The commit the task forked from |
+| `boundary.tree_sha` | hex40 | The verified tree: the worktree's content outside `.sddx/` when `verify` passed |
+| `boundary.test_files` | string[] | Changed test files applied in the RED half |
+| `boundary.red` | `{exit_code, stdout_sha256, stderr_sha256}` | The oracle's run on the base commit plus those test files; it had to fail |
+| `review` | `{verdict, diff_sha256, reviewer, findings_sha256?, at}` | The passing review; `diff_sha256` is the sha256 of `git diff --binary <base> <verified tree>` |
+| `profile` | `default \| strict` | The profile the task was gated under |
+| `strict_runs` | `{test_exit, source, at}[]` | Strict only: the per-edit test runs the hooks or `task phase` recorded |
+| `approval.binding` | `signed \| unsigned` | `signed` only when the approval token's `sddx-approval` signature verified at finalize time |
+| `approval.signature`, `approval.signer` | string | Present exactly when `binding` is `signed`: the token's signature, carried so a clone without the token can check it |
+| `approval.harness_reported` | string | The harness passed to `plan approve --harness`, as reported |
+
+Top-level `tree_sha` is the verified tree plus the task's state file, which is
+the committed tree minus the receipt itself; `boundary.tree_sha` is the code
+that was proven and reviewed. The finalize commit differs from
+`boundary.tree_sha` in exactly two files, `.sddx/tasks/<id>.json` and
+`.sddx/receipts/<id>.json`.
+
+<!-- receipt-example: v5 -->
+```json
+{
+  "version": 5,
+  "task_id": "h-1",
+  "seq": 1,
+  "prev": "genesis",
+  "harness": "claude-code",
+  "model": null,
+  "plugin_version": "6.0.0",
+  "oracle": { "run": "bun test tests/health.test.ts", "expect": "exit 0" },
+  "runs": [
+    {
+      "exit_code": 0,
+      "duration_ms": 11,
+      "stdout_sha256": "6043908c8d26d62698476b88f737f39d5d3e91008d4155a81730902f5a37479c",
+      "stderr_sha256": "e12f6a3653d952370da3db742dcc2e1971062511664d6ef72cf84d281ccba817"
+    }
+  ],
+  "env": { "os": "linux", "arch": "x64", "runtime": "bun", "runtime_version": "1.3.12", "dirty_tree": true },
+  "base_sha": "fabb01be13efa41fb9ccafcb0956560b39261fe6",
+  "tree_sha": "8384853a5fdd8b72e9b16c33e8d76936cf04c72a",
+  "verdict": "pass",
+  "verified_at": "2026-10-26T16:08:57.866Z",
+  "allow": [],
+  "approval": {
+    "mode": "human",
+    "authorization": "human-approval",
+    "plan_sha256": "2b36966e66162c14fbaabbfc03a0c5e8de2e43476fbf546acda3a759498f83fa",
+    "at": "2026-10-26T16:08:50.954Z",
+    "assumptions": [],
+    "amendments": [],
+    "binding": "unsigned",
+    "harness_reported": "claude-code"
+  },
+  "spec": { "path": ".sddx/specs/2026-10-26-health.md", "goal_id": "2026-10-26-health" },
+  "boundary": {
+    "base_sha": "fabb01be13efa41fb9ccafcb0956560b39261fe6",
+    "tree_sha": "efcc693d554a48ba6eacfd3c9def98419000b5c3",
+    "test_files": ["tests/health.test.ts"],
+    "red": {
+      "exit_code": 1,
+      "stdout_sha256": "6043908c8d26d62698476b88f737f39d5d3e91008d4155a81730902f5a37479c",
+      "stderr_sha256": "2b1699e1bbe0b4e0e3dc664a26cb4a2849621bbde6e04feb7e37a463279e5d90"
+    }
+  },
+  "review": {
+    "verdict": "pass",
+    "diff_sha256": "3432cca02fe48b965c65fcf172fd75cc1609e8f5cb431917fef3dc13df6f5ac2",
+    "reviewer": "critic",
+    "at": "2026-10-26T16:08:58.033Z"
+  },
+  "profile": "default"
+}
+```
+
+### What `sddx audit` says about a v5 receipt
+
+Audit keeps to what the receipt can actually show:
+
+- **Human approval** is reported as provable only when `binding` is `signed` and
+  the signature the receipt carries verifies against
+  `gpg.ssh.allowedSignersFile`; the signer is named. The approval token itself
+  is not needed, so this works in a fresh clone or CI. Without an allowed-signers
+  file the signature cannot be checked, which is a note ("not provable"), not a
+  finding. An `unsigned` binding is reported as "human approval not provable". A
+  `signed` claim whose signature does not verify is a finding.
+- **The harness** is shown as "reported, not verified".
+- **The review** is shown as "a recorded review, not a verified one", with the
+  reviewer as reported and the diff it covered. sddx proves the review covered
+  exactly the merged diff, never that the review was good.

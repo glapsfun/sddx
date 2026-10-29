@@ -1,0 +1,58 @@
+{
+  "skills": [
+    "sddx:brainstorm",
+    "sddx:debug",
+    "sddx:execute",
+    "sddx:finish",
+    "sddx:plan",
+    "sddx:review",
+    "sddx:using-sddx"
+  ],
+  "hooks": [
+    {
+      "eventName": "preToolUse",
+      "matcher": "Bash",
+      "command": "sh \"~/.codex/plugins/cache/sddx/sddx/5.0.0/hooks/run-hook\" approval-gate codex",
+      "timeoutSec": 30,
+      "pluginId": "sddx@sddx",
+      "sourcePath": "~/.codex/plugins/cache/sddx/sddx/5.0.0/hooks/hooks-codex.json",
+      "trustStatus": "untrusted"
+    },
+    {
+      "eventName": "preToolUse",
+      "matcher": "apply_patch",
+      "command": "sh \"~/.codex/plugins/cache/sddx/sddx/5.0.0/hooks/run-hook\" approval-gate codex",
+      "timeoutSec": 30,
+      "pluginId": "sddx@sddx",
+      "sourcePath": "~/.codex/plugins/cache/sddx/sddx/5.0.0/hooks/hooks-codex.json",
+      "trustStatus": "untrusted"
+    },
+    {
+      "eventName": "sessionStart",
+      "matcher": "startup|clear|compact",
+      "command": "sh \"~/.codex/plugins/cache/sddx/sddx/5.0.0/hooks/run-hook\" session-start codex",
+      "timeoutSec": 10,
+      "pluginId": "sddx@sddx",
+      "sourcePath": "~/.codex/plugins/cache/sddx/sddx/5.0.0/hooks/hooks-codex.json",
+      "trustStatus": "untrusted"
+    },
+    {
+      "eventName": "subagentStop",
+      "matcher": null,
+      "command": "sh \"~/.codex/plugins/cache/sddx/sddx/5.0.0/hooks/run-hook\" stop-gate codex",
+      "timeoutSec": 10,
+      "pluginId": "sddx@sddx",
+      "sourcePath": "~/.codex/plugins/cache/sddx/sddx/5.0.0/hooks/hooks-codex.json",
+      "trustStatus": "untrusted"
+    },
+    {
+      "eventName": "stop",
+      "matcher": null,
+      "command": "sh \"~/.codex/plugins/cache/sddx/sddx/5.0.0/hooks/run-hook\" stop-gate codex",
+      "timeoutSec": 10,
+      "pluginId": "sddx@sddx",
+      "sourcePath": "~/.codex/plugins/cache/sddx/sddx/5.0.0/hooks/hooks-codex.json",
+      "trustStatus": "untrusted"
+    }
+  ]
+}

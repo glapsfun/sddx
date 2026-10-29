@@ -2,125 +2,186 @@ import { expect } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { taskId } from "../src/lib/task";
 
 export const repoRoot = new URL("..", import.meta.url).pathname;
 
-/** The Goal Brief header keys every *planned* graph must carry. Intake writes
- * the header; the orchestrator appends `tasks:`. Fixtures that hand-write a
- * plan prepend this so they describe a plan rather than a half-written draft.
- * The optional list keys (answers, assumptions, …) are omitted on purpose —
- * this is the minimum a graph needs to parse. */
-export const GRAPH_HEADER_LINES = ['schema_version: "1.0"', "interaction_mode: human"];
-export const GRAPH_HEADER = `${GRAPH_HEADER_LINES.join("\n")}\n`;
+export const CLI = join(repoRoot, "src/cli.ts");
 
-/** The task id sddx will derive from a spec's `task:` sentence — the stable key
- * that lets `createRun` match created ids back to aliases without relying on
- * the order `graph create` happens to emit them in. */
-function specTaskId(spec: string): string {
-  const sentence = /^task:\s*(.+)$/m.exec(spec)?.[1]?.trim();
-  if (!sentence) throw new Error(`createRun: spec has no \`task:\` line:\n${spec}`);
-  return taskId(sentence);
+/** This process's environment as a person's own shell would pass it on: never
+ * marked as a Codex agent's tool call, even when the tests run inside Codex. */
+export function userEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.CODEX_TOOL_CALL_ID;
+  return { ...env, ...extra };
 }
 
-export interface RunNode {
-  alias: string;
-  /** Full spec YAML for this node. */
-  spec: string;
+/** Runs the CLI from source, as the user would. */
+export function sddx(cwd: string, ...args: string[]) {
+  return spawnSync("bun", [CLI, ...args], {
+    cwd,
+    encoding: "utf8",
+    env: userEnv({ NO_COLOR: "1" }),
+  });
+}
+
+export interface SpecTaskInput {
+  id: string;
+  title?: string;
+  /** Oracle command. Defaults to `test -f <id>.done`, which fails on the base and
+   * passes once `completeTask` creates the file, so the boundary proof holds. */
+  run?: string;
+  type?: string;
+  expect?: string;
+  scope?: string[] | null;
   dependsOn?: string[];
+  /** Raw YAML lines appended to the task's sddx block. */
+  extra?: string;
+  /** Raw YAML lines appended inside `oracle:`, e.g. "runs: 3" (indentation is added). */
+  oracleExtra?: string;
+}
+
+export interface GoalSpecInput {
+  title?: string;
+  tasks: SpecTaskInput[];
+  openDecisions?: string[];
+  assumptions?: string[];
+}
+
+export const doneFile = (id: string): string => `${id}.done`;
+
+/** Markdown for a goal spec with the required Design skeleton. */
+export function goalSpec(input: GoalSpecInput): string {
+  const lines = [
+    `# ${input.title ?? "Test goal"}`,
+    "",
+    "## Design",
+    "",
+    "### Goal",
+    "Exercise sddx.",
+    "",
+    "### Acceptance",
+    "- every task's oracle passes",
+    "",
+    "### Non-goals",
+    "",
+    "### Assumptions",
+    ...(input.assumptions ?? []).map((a) => `- ${a}`),
+    "",
+    "### Open decisions",
+    ...(input.openDecisions ?? []).map((d) => `- ${d}`),
+    "",
+    "## Tasks",
+    "",
+  ];
+  for (const t of input.tasks) {
+    const scope = t.scope === null ? [] : (t.scope ?? [doneFile(t.id)]);
+    lines.push(`### ${t.id} ${t.title ?? `Task ${t.id}`}`, "", "```sddx", "oracle:");
+    lines.push(`  type: ${t.type ?? "command"}`);
+    if ((t.type ?? "command") !== "manual") {
+      lines.push(`  run: ${JSON.stringify(t.run ?? `test -f ${doneFile(t.id)}`)}`);
+      lines.push(`  expect: ${t.expect ?? "exit 0"}`);
+    }
+    for (const l of (t.oracleExtra ?? "").split("\n").filter((x) => x.trim() !== "")) {
+      lines.push(`  ${l}`);
+    }
+    if (scope.length > 0) lines.push(`scope: [${scope.map((g) => JSON.stringify(g)).join(", ")}]`);
+    if (t.dependsOn && t.dependsOn.length > 0)
+      lines.push(`depends_on: [${t.dependsOn.join(", ")}]`);
+    if (t.extra) lines.push(t.extra);
+    lines.push("```", "");
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+/** Writes `.sddx/specs/<name>.md` and returns its repository-relative path. */
+export function writeSpec(cwd: string, name: string, text: string): string {
+  const rel = join(".sddx", "specs", `${name}.md`);
+  mkdirSync(join(cwd, ".sddx", "specs"), { recursive: true });
+  writeFileSync(join(cwd, rel), text);
+  commitSpec(cwd, rel);
+  return rel;
+}
+
+/** Commits a spec as the brainstorm step would: plan commands refuse an uncommitted one. */
+export function commitSpec(cwd: string, rel: string): void {
+  spawnSync("git", ["add", "--", rel], { cwd });
+  const staged = spawnSync("git", ["diff", "--cached", "--quiet", "--", rel], { cwd });
+  if (staged.status === 0) return;
+  const r = spawnSync("git", ["commit", "-q", "-m", `plan: ${rel}`, "--", rel], {
+    cwd,
+    encoding: "utf8",
+  });
+  if (r.status !== 0) throw new Error(`commitSpec ${rel}: ${r.stderr}`);
 }
 
 export interface CreatedRun {
-  /** alias → task id, in graph order. */
-  ids: Record<string, string>;
-  /** Task ids in graph order — the common case is `taskIds[0]` for a one-node run. */
-  taskIds: string[];
   goalId: string;
+  specPath: string;
   runBranch: string;
+  taskIds: string[];
 }
 
-/**
- * Create a canonical run: writes the specs and a graph, approves the plan, and
- * runs `graph create`. This is the ONLY creation surface — `task create` and
- * `goal create` were removed, so every test that just needs "a task to exist"
- * goes through here. A single task is a one-node run, not a special case.
- *
- * `cli` is the caller's own spawn wrapper so each test file keeps its env and
- * interaction-mode setup; it must return the spawn result.
- */
+/** Writes a spec, approves it unless told not to, and starts the plan. */
 export function createRun(
   cwd: string,
-  cli: (
-    cwd: string,
-    ...args: string[]
-  ) => { status: number | null; stdout: string; stderr: string },
-  goal: string,
-  nodes: RunNode[],
-  opts: { graphName?: string; approve?: boolean } = {},
+  input: GoalSpecInput & { name?: string; approve?: boolean },
 ): CreatedRun {
-  const rel = opts.graphName ?? "graph.yaml";
-  mkdirSync(join(cwd, "specs"), { recursive: true });
-  const lines = [...GRAPH_HEADER_LINES, `goal: ${goal}`, "tasks:"];
-  for (const n of nodes) {
-    writeFileSync(join(cwd, "specs", `${n.alias}.yaml`), n.spec);
-    lines.push(`  - alias: ${n.alias}`, `    spec: specs/${n.alias}.yaml`);
-    if (n.dependsOn && n.dependsOn.length > 0) {
-      lines.push(`    depends_on: [${n.dependsOn.join(", ")}]`);
-    }
+  const name = input.name ?? "2026-01-01-test-goal";
+  const specPath = writeSpec(cwd, name, goalSpec(input));
+  if (input.approve !== false) {
+    const a = sddx(cwd, "plan", "approve", specPath);
+    if (a.status !== 0) throw new Error(`plan approve failed: ${a.stderr || a.stdout}`);
   }
-  writeFileSync(join(cwd, rel), `${lines.join("\n")}\n`);
-
-  if (opts.approve !== false) {
-    const a = cli(cwd, "graph", "approve", "--graph", rel);
-    if (a.status !== 0) throw new Error(`graph approve failed: ${a.stderr || a.stdout}`);
-  }
-  const c = cli(cwd, "graph", "create", "--graph", rel, "--output", "json");
-  if (c.status !== 0) throw new Error(`graph create failed: ${c.stderr || c.stdout}`);
-  const data = JSON.parse(c.stdout).data as {
-    taskIds: string[];
+  const s = sddx(cwd, "plan", "start", specPath, "--output", "json");
+  if (s.status !== 0) throw new Error(`plan start failed: ${s.stderr || s.stdout}`);
+  const data = JSON.parse(s.stdout).data as {
     goalId: string;
     runBranch: string;
+    taskIds: string[];
   };
-  // Map by DERIVED ID, never by position: `graph create` emits ids in
-  // topological order (roots first), which is not the caller's declaration
-  // order whenever a dependent is listed before its parent. Zipping the two
-  // lists positionally silently swapped the aliases in exactly that case, so a
-  // test asserting on `ids.child` would have been reading the root's task.
-  const ids: Record<string, string> = {};
-  for (const n of nodes) {
-    const expected = specTaskId(n.spec);
-    const match = data.taskIds.find((id) => id === expected);
-    if (!match) {
-      throw new Error(
-        `createRun: no created task id matched alias "${n.alias}" (derived "${expected}") in [${data.taskIds.join(", ")}]`,
-      );
-    }
-    ids[n.alias] = match;
-  }
-  return { ids, taskIds: data.taskIds, goalId: data.goalId, runBranch: data.runBranch };
+  return { goalId: data.goalId, specPath, runBranch: data.runBranch, taskIds: data.taskIds };
 }
 
-/** A minimal always-passing spec, the shape most scaffolding tests want. */
-export const passingSpec = (task: string, scope?: string): string =>
-  `task: ${task}\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\n${
-    scope ? `scope:\n  - ${scope}\n` : ""
-  }`;
-
-/** Inject oracle_red evidence dated 1970 — satisfies verify's red-check gate in
- * fixtures whose oracles pass from the start. Real red-checks are e2e-tested. */
-export function fakeRedCheck(root: string, id: string): void {
-  const path = taskStatePath(root, id);
-  const t = JSON.parse(readFileSync(path, "utf8"));
-  t.evidence.oracle_red = { exit_code: 1, at: new Date(0).toISOString() };
-  writeFileSync(path, `${JSON.stringify(t, null, 2)}\n`);
+/** `sddx task start <id>`, returning the worktree path. */
+export function startTask(cwd: string, id: string): string {
+  const r = sddx(cwd, "task", "start", id, "--output", "json");
+  if (r.status !== 0) throw new Error(`task start ${id} failed: ${r.stderr || r.stdout}`);
+  return JSON.parse(r.stdout).data.path as string;
 }
 
-/** Where a task's state file actually lives. A canonical run puts root tasks in
- * their own worktree, so the main checkout's `.sddx/tasks/` holds only deferred
- * dependents — checking the worktree first is what makes this work for both. */
+/** Creates the file the default oracle checks, then verifies and passes review. */
+export function completeTask(cwd: string, id: string): { worktree: string; receiptPath: string } {
+  const wt = startTask(cwd, id);
+  writeFileSync(join(wt, doneFile(id)), "done\n");
+  const v = sddx(cwd, "verify", id);
+  if (v.status !== 0) throw new Error(`verify ${id} failed: ${v.stderr || v.stdout}`);
+  const r = sddx(
+    cwd,
+    "review",
+    "record",
+    id,
+    "--verdict",
+    "pass",
+    "--reviewer",
+    "test",
+    "--output",
+    "json",
+  );
+  if (r.status !== 0) throw new Error(`review ${id} failed: ${r.stderr || r.stdout}`);
+  return { worktree: wt, receiptPath: JSON.parse(r.stdout).data.receiptPath as string };
+}
+
+/** Where a task's state file lives: its worktree once started, else the main checkout. */
 export function taskStatePath(root: string, id: string): string {
   const inWorktree = join(root, ".sddx-worktrees", id, ".sddx", "tasks", `${id}.json`);
   return existsSync(inWorktree) ? inWorktree : join(root, ".sddx", "tasks", `${id}.json`);
+}
+
+export function readTaskState(
+  root: string,
+  id: string,
+): Record<string, unknown> & { phase: string } {
+  return JSON.parse(readFileSync(taskStatePath(root, id), "utf8"));
 }
 
 export async function runsCleanly(cmd: string[], env?: Record<string, string>): Promise<void> {
@@ -136,13 +197,7 @@ export async function runsCleanly(cmd: string[], env?: Record<string, string>): 
   expect(await new Response(proc.stderr).text()).toBe("");
 }
 
-/**
- * Goal ids visible to sddx, wherever their records live.
- *
- * A canonical run commits its goal record to `sddx/run-<goal-id>`, so counting
- * files in the main checkout's `.sddx/goals/` no longer answers "did a goal get
- * created". Legacy loose records are still counted, since they are still read.
- */
+/** Goal ids visible to sddx: goal refs plus legacy loose records. */
 export function goalIds(cwd: string): string[] {
   const ids = new Set<string>();
   const dir = join(cwd, ".sddx", "goals");

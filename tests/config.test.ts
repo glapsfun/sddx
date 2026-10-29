@@ -11,6 +11,7 @@ import {
   KNOWN_CONFIG_KEYS,
   oracleRuns,
   parseAgentModel,
+  profile,
   resolveConfig,
   resolveValue,
   stuckThreshold,
@@ -283,16 +284,19 @@ describe("CLI-owned config schema", () => {
     expect(configSource).not.toContain("plugin.json");
   });
 
-  test("bootstrap policy keys resolve to their defaults when absent", () => {
+  test("an absent config resolves to the defaults, profile included", () => {
     const cwd = fixtureRepo();
-    const cfg = resolveConfig(cwd);
-    expect(cfg.runtime_scope).toBe("global");
-    expect(cfg.package_manager).toBe("npm");
-    expect(cfg.adapters).toEqual([]);
+    const cfg = resolveConfig(cwd) as unknown as Record<string, unknown>;
+    expect(cfg.profile).toBe("default");
+    expect(cfg.interaction_mode).toBe("human");
     expect(cfg.schema_version).toBeNull();
+    // removed in sddx 6 along with the generated adapters
+    expect(cfg.runtime_scope).toBeUndefined();
+    expect(cfg.package_manager).toBeUndefined();
+    expect(cfg.adapters).toBeUndefined();
   });
 
-  test("bootstrap policy keys resolve from the config file", () => {
+  test("the removed bootstrap keys are ignored, and validation names each as removed", () => {
     const cwd = fixtureRepo();
     withConfig(cwd, {
       schema_version: CONFIG_SCHEMA_VERSION,
@@ -300,31 +304,39 @@ describe("CLI-owned config schema", () => {
       package_manager: "bun",
       adapters: ["claude"],
     });
-    const cfg = resolveConfig(cwd);
-    expect(cfg.runtime_scope).toBe("project");
-    expect(cfg.package_manager).toBe("bun");
-    expect(cfg.adapters).toEqual(["claude"]);
+    const cfg = resolveConfig(cwd) as unknown as Record<string, unknown>;
+    expect(cfg.runtime_scope).toBeUndefined();
+    expect(cfg.package_manager).toBeUndefined();
+    expect(cfg.adapters).toBeUndefined();
     expect(cfg.schema_version).toBe(CONFIG_SCHEMA_VERSION);
+    const warnings = validateConfigObject({
+      runtime_scope: "nonsense",
+      package_manager: "pnpm",
+      adapters: ["claude"],
+    });
+    for (const key of ["runtime_scope", "package_manager", "adapters"]) {
+      expect(warnings.some((w) => w.startsWith(`"${key}" removed in sddx 6`))).toBe(true);
+    }
   });
 
-  test("an environment variable cannot change the runtime scope", () => {
+  test("an environment variable cannot change the profile", () => {
     // Same threat model as interaction_mode: an env var is composable by the
-    // agent, and this key decides which sddx a generated adapter invokes.
+    // agent, and this key decides whether edits are gated test-first at all.
     const cwd = fixtureRepo();
-    withConfig(cwd, { runtime_scope: "project" });
-    expect(resolveConfig(cwd, { SDDX_RUNTIME_SCOPE: "global" }).runtime_scope).toBe("project");
+    withConfig(cwd, { profile: "strict" });
+    expect(profile(cwd)).toBe("strict");
+    expect(resolveConfig(cwd, { SDDX_PROFILE: "default" }).profile).toBe("strict");
   });
 
-  test("an invalid bootstrap value falls back rather than throwing", () => {
+  test("an invalid profile fails closed to strict rather than throwing", () => {
     const cwd = fixtureRepo();
-    withConfig(cwd, { runtime_scope: "nonsense", package_manager: "pnpm" });
-    const cfg = resolveConfig(cwd);
-    expect(cfg.runtime_scope).toBe("global");
-    expect(cfg.package_manager).toBe("npm");
-    // ...and validate names both, so the user is told why they were ignored
-    const warnings = validateConfigObject({ runtime_scope: "nonsense", package_manager: "pnpm" });
-    expect(warnings.some((w) => w.includes("runtime_scope"))).toBe(true);
-    expect(warnings.some((w) => w.includes("package_manager"))).toBe(true);
+    withConfig(cwd, { profile: "strikt" });
+    expect(profile(cwd)).toBe("strict");
+    expect(resolveConfig(cwd).profile).toBe("strict");
+    // ...and validate names it, so the user is told why
+    expect(validateConfigObject({ profile: "strikt" }).some((w) => w.includes("profile"))).toBe(
+      true,
+    );
   });
 
   test("a stale schema_version is reported, never silently upgraded", () => {
@@ -333,7 +345,13 @@ describe("CLI-owned config schema", () => {
     const before = readFileSync(join(cwd, ".sddx", "config.json"), "utf8");
 
     const warnings = validateConfigObject({ schema_version: "0.9" });
-    expect(warnings.some((w) => w.includes("0.9") && w.includes("sddx init"))).toBe(true);
+    expect(warnings.some((w) => w.includes("0.9") && w.includes(CONFIG_SCHEMA_VERSION))).toBe(true);
+    // a sddx 5 schema names the command that upgrades it
+    expect(
+      validateConfigObject({ schema_version: "1.0" }).some(
+        (w) => w.includes("1.0") && w.includes("sddx migrate"),
+      ),
+    ).toBe(true);
 
     // reading it changed nothing on disk
     resolveConfig(cwd);

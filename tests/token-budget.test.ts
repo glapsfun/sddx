@@ -1,75 +1,119 @@
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BUDGET, measureAlwaysOn } from "../scripts/token-budget";
+import {
+  ALWAYS_ON_BUDGET,
+  measureAlwaysOn,
+  measureRouter,
+  overBudget,
+  ROUTER_BUDGET,
+  renderReport,
+} from "../scripts/token-budget";
 import { repoRoot } from "./helpers";
+import { scenario } from "./scenario";
 
-/** Minimal plugin root with one skill and one agent carrying the given descriptions. */
+/** A plugin root with one skill and one agent carrying the given descriptions. */
 function fixturePlugin(skillDesc: string, agentDesc: string): string {
-  const root = mkdtempSync(join(tmpdir(), "sddx-budget-"));
-  mkdirSync(join(root, "templates", "claude", "skills", "demo"), { recursive: true });
-  mkdirSync(join(root, "templates", "claude", "agents"), { recursive: true });
+  const root = mkdtempSync(join(tmpdir(), "budget-"));
+  mkdirSync(join(root, "skills", "demo"), { recursive: true });
+  mkdirSync(join(root, "agents"));
   writeFileSync(
-    join(root, "templates", "claude", "skills", "demo", "SKILL.md"),
-    `---\nname: demo\ndescription: ${skillDesc}\n---\n\nBody text is lazy-loaded and must not count.\n`,
+    join(root, "skills", "demo", "SKILL.md"),
+    `---\nname: demo\ndescription: ${skillDesc}\n---\n\nBody text is loaded on use and must not count.\n`,
   );
   writeFileSync(
-    join(root, "templates", "claude", "agents", "helper.md"),
-    `---\nname: helper\ndescription: ${agentDesc}\n---\n\nAgent body, also not always-on.\n`,
+    join(root, "agents", "helper.md"),
+    `---\nname: helper\ndescription: ${agentDesc}\ntools: Read\n---\n\nAgent body, also not always-on.\n`,
   );
   return root;
 }
 
-describe("measureAlwaysOn", () => {
-  test("is deterministic over an unchanged checkout", () => {
-    const a = measureAlwaysOn(repoRoot);
-    const b = measureAlwaysOn(repoRoot);
-    expect(a.total).toBe(b.total);
-    expect(a.items).toEqual(b.items);
-  });
-
-  test("counts frontmatter name and description, not body text", () => {
-    const root = fixturePlugin("short", "short");
-    const report = measureAlwaysOn(root);
-    expect(report.items.map((i) => i.file).sort()).toEqual([
-      "templates/claude/agents/helper.md",
-      "templates/claude/skills/demo/SKILL.md",
+describe("always-on budget", () => {
+  test("counts frontmatter name and description, not the body or other keys", () => {
+    const report = measureAlwaysOn(fixturePlugin("short", "short"));
+    expect(report.items.map((i) => i.file)).toEqual([
+      join("agents", "helper.md"),
+      join("skills", "demo", "SKILL.md"),
     ]);
-    // "namedemodescriptionshort" scale, never the multi-line bodies
-    for (const item of report.items) expect(item.tokens).toBeLessThan(20);
+    // "demo" + "short" = 9 chars, "helper" + "short" = 11 chars
+    expect(report.items.map((i) => i.tokens)).toEqual([3, 3]);
   });
 
-  test("growth is visible: +400 chars costs at least 100 estimated tokens", () => {
-    const base = measureAlwaysOn(fixturePlugin("short", "short"));
-    const grown = measureAlwaysOn(fixturePlugin(`short${"x".repeat(400)}`, "short"));
-    expect(grown.total - base.total).toBeGreaterThanOrEqual(100);
+  test("a folded description is measured in full", () => {
+    const root = fixturePlugin("short", "short");
+    writeFileSync(
+      join(root, "skills", "demo", "SKILL.md"),
+      `---\nname: demo\ndescription: >-\n  ${"x".repeat(396)}\n---\n\nbody\n`,
+    );
+    const demo = measureAlwaysOn(root).items.find((i) => i.file.includes("demo"));
+    expect(demo?.tokens).toBe(100);
   });
 
-  test("always-on surface of this checkout fits the 500-token budget", () => {
-    const report = measureAlwaysOn(repoRoot);
-    const breakdown = report.items.map((i) => `${i.file}: ${i.tokens}`).join(", ");
-    expect(BUDGET).toBe(500);
-    expect(
-      report.total,
-      `over budget (${report.total} > ${BUDGET}): ${breakdown}`,
-    ).toBeLessThanOrEqual(BUDGET);
+  test("CRLF line endings are measured like LF", () => {
+    const root = fixturePlugin("short", "short");
+    for (const f of [join(root, "skills", "demo", "SKILL.md"), join(root, "agents", "helper.md")]) {
+      writeFileSync(f, readFileSync(f, "utf8").replaceAll("\n", "\r\n"));
+    }
+    expect(measureAlwaysOn(root).items.map((i) => i.tokens)).toEqual([3, 3]);
+  });
+
+  scenario("workflow-skills", "Growth over budget fails", () => {
+    // "demo" (4 chars) + 2,396 chars = 600 tokens, "helper" + "x" = 2 tokens
+    const root = fixturePlugin("x".repeat(2396), "x");
+    const report = measureAlwaysOn(root);
+    expect(report.total).toBe(ALWAYS_ON_BUDGET + 2);
+    expect(overBudget(report)).toBe(true);
+
+    const r = spawnSync("bun", [join(repoRoot, "scripts", "token-budget.ts"), root], {
+      encoding: "utf8",
+    });
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain(`  600  ${join("skills", "demo", "SKILL.md")}`);
+    expect(r.stdout).toContain(`    2  ${join("agents", "helper.md")}`);
+    expect(r.stdout).toContain(`over budget`);
+  });
+
+  test("the budgets are the ones the workflow-skills spec sets", () => {
+    expect(ALWAYS_ON_BUDGET).toBe(600);
+    expect(ROUTER_BUDGET).toBe(1500);
   });
 });
 
-describe("session-start always-on cost", () => {
-  test("injects no context in a repo without .sddx", () => {
-    const cwd = mkdtempSync(join(tmpdir(), "sddx-plain-"));
-    const r = spawnSync("bun", [join(repoRoot, "src/hooks.ts"), "session-start"], {
-      cwd,
-      encoding: "utf8",
-      input: JSON.stringify({ cwd }),
-    });
-    expect(r.status).toBe(0);
-    expect(r.stderr).toBe("");
-    const decision = JSON.parse(r.stdout) as Record<string, unknown>;
-    expect(decision.hookSpecificOutput).toBeUndefined();
-    expect(decision.systemMessage).toBeUndefined();
+describe("router budget per harness", () => {
+  /** A router body of `bodyTokens` and a Codex mapping of `mappingTokens`, in estimated tokens. */
+  function routerPlugin(bodyTokens: number, mappingTokens: number): string {
+    const root = mkdtempSync(join(tmpdir(), "router-"));
+    const dir = join(root, "skills", "using-sddx");
+    mkdirSync(join(dir, "references"), { recursive: true });
+    writeFileSync(
+      join(dir, "SKILL.md"),
+      `---\nname: using-sddx\ndescription: d\n---\n${"x".repeat(bodyTokens * 4)}`,
+    );
+    writeFileSync(join(dir, "references", "claude-code.md"), "short");
+    writeFileSync(join(dir, "references", "codex.md"), "y".repeat(mappingTokens * 4));
+    return root;
+  }
+
+  scenario("workflow-skills", "A mapping over budget fails", () => {
+    const root = routerPlugin(1000, 501);
+    const codex = measureRouter(root, "codex");
+    expect(codex.total).toBe(1501);
+    expect(overBudget(codex)).toBe(true);
+    expect(renderReport("router (codex)", codex)).toContain(join("references", "codex.md"));
+    expect(overBudget(measureRouter(root, "claude-code"))).toBe(false);
+  });
+
+  test("the script fails when either router is over budget", () => {
+    const r = spawnSync(
+      "bun",
+      [join(repoRoot, "scripts", "token-budget.ts"), routerPlugin(1000, 501)],
+      {
+        encoding: "utf8",
+      },
+    );
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain("codex.md");
   });
 });

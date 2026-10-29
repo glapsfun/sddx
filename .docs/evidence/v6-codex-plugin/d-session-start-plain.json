@@ -1,0 +1,10 @@
+{
+  "fixture": "<fixture>/plain, a git repository without .sddx/",
+  "session_start_context": [
+    {
+      "role": "developer",
+      "content_item_kinds": ["hooks.additional_context"],
+      "text": "sddx is installed. To plan a change with it in this repository, mention $sddx:brainstorm."
+    }
+  ]
+}

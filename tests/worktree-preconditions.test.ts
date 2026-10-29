@@ -16,7 +16,7 @@
 //                      already knows what each task touches: `scope`.
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   createWorktree,
@@ -25,7 +25,7 @@ import {
   worktreeAvailable,
 } from "../src/lib/worktree";
 import { fixtureRepo } from "./fixtures";
-import { GRAPH_HEADER, goalIds } from "./helpers";
+import { goalIds, goalSpec, sddx, writeSpec } from "./helpers";
 
 const g = (cwd: string, ...args: string[]) => spawnSync("git", args, { cwd, encoding: "utf8" });
 const head = (cwd: string) => g(cwd, "rev-parse", "HEAD").stdout.trim();
@@ -128,30 +128,24 @@ describe("submodule preconditions are scope-scoped", () => {
   });
 });
 
-describe("the canonical create path refuses rather than downgrading", () => {
-  const CLI = join(import.meta.dir, "..", "src", "cli.ts");
-  const cli = (cwd: string, ...args: string[]) =>
-    spawnSync("bun", [CLI, ...args], { cwd, encoding: "utf8" });
-
+describe("the plan start path refuses rather than downgrading", () => {
   function planWithScope(cwd: string, scope: string | null): string {
-    mkdirSync(join(cwd, "specs"), { recursive: true });
-    writeFileSync(
-      join(cwd, "specs", "a.yaml"),
-      `task: do the widget work\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: "exit 0"\n${scope ? `scope:\n  - ${scope}\n` : ""}`,
+    return writeSpec(
+      cwd,
+      "2026-01-01-ship-the-widget",
+      goalSpec({
+        title: "ship the widget",
+        tasks: [{ id: "a", run: "exit 0", scope: scope === null ? null : [scope] }],
+      }),
     );
-    writeFileSync(
-      join(cwd, "graph.yaml"),
-      `${GRAPH_HEADER}goal: ship the widget\ntasks:\n  - alias: a\n    spec: specs/a.yaml\n`,
-    );
-    return "graph.yaml";
   }
 
-  test("a submodule outside every scope materializes normally", () => {
+  test("a submodule outside every scope starts normally", () => {
     const repo = fixtureRepo();
     withGitmodules(repo, ["vendor/lib"]);
     const rel = planWithScope(repo, "src/**");
-    expect(cli(repo, "graph", "approve", "--graph", rel).status).toBe(0);
-    const r = cli(repo, "graph", "create", "--graph", rel);
+    expect(sddx(repo, "plan", "approve", rel).status).toBe(0);
+    const r = sddx(repo, "plan", "start", rel);
     expect(r.status).toBe(0);
     expect(r.stdout).not.toContain("branch mode");
   });
@@ -161,16 +155,17 @@ describe("the canonical create path refuses rather than downgrading", () => {
     withGitmodules(repo, ["vendor/lib"]);
     const rel = planWithScope(repo, "vendor/lib/**");
 
-    // approve refuses too — it runs the same validation, so a plan that cannot
-    // execute is never given a token a later create would honor
-    const approve = cli(repo, "graph", "approve", "--graph", rel);
+    // approve refuses too: it runs the same validation, so a plan that cannot
+    // execute is never given a token a later start would honor
+    const approve = sddx(repo, "plan", "approve", rel);
     expect(approve.status).not.toBe(0);
     expect(approve.stderr).toContain("vendor/lib");
+    expect(existsSync(join(repo, ".sddx", "approvals"))).toBe(false);
 
-    const r = cli(repo, "graph", "create", "--graph", rel);
+    const r = sddx(repo, "plan", "start", rel);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("vendor/lib");
-    expect(r.stderr).toContain('task "a"');
+    expect(r.stderr).toContain("task a ");
     expect(goalIds(repo)).toEqual([]);
   });
 
@@ -178,18 +173,18 @@ describe("the canonical create path refuses rather than downgrading", () => {
     const repo = fixtureRepo();
     withGitmodules(repo, ["vendor/lib"]);
     const rel = planWithScope(repo, null);
-    const r = cli(repo, "graph", "create", "--graph", rel);
+    const r = sddx(repo, "plan", "start", rel);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("no scope");
     expect(goalIds(repo)).toEqual([]);
   });
 
-  test("the dry run reports the same refusal a real create would", () => {
+  test("the check reports the same refusal a real start would", () => {
     const repo = fixtureRepo();
     withGitmodules(repo, ["vendor/lib"]);
     const rel = planWithScope(repo, "vendor/lib/**");
-    const dry = cli(repo, "graph", "create", "--graph", rel, "--dry-run");
-    expect(dry.status).not.toBe(0);
-    expect(dry.stderr).toContain("vendor/lib");
+    const check = sddx(repo, "plan", "check", rel);
+    expect(check.status).not.toBe(0);
+    expect(check.stderr).toContain("vendor/lib");
   });
 });

@@ -1,0 +1,260 @@
+#!/bin/sh
+# sddx hook launcher: run-hook <handler> [codex]
+#
+# Decides in shell, before paying for a Bun start, whether the handler has to
+# run at all: the approval gate only for events that can concern sddx, the
+# strict-profile hooks only where a strict profile can apply, and the stop
+# gate only in a repository that opted in to sddx (a .sddx/ directory). Always exits 0:
+# Claude Code reads exit status 2 as a blocking decision, and a crash here
+# must never block a session.
+#
+# With "codex", the handler is told the harness, and the approval gate denies
+# where it would ask: Codex cannot raise a dialog from a hook, and runs the
+# call when a hook fails.
+
+handler=$1
+harness=${2:-}
+
+pass() {
+  printf '{}\n'
+  exit 0
+}
+
+# The approval gate's own decision when it cannot run the handler: ask in
+# Claude Code, deny in Codex. $1 must not contain double quotes or backslashes.
+hold() {
+  decision=ask
+  [ "$harness" = codex ] && decision=deny
+  printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"%s","permissionDecisionReason":"%s"}}\n' "$decision" "$1"
+  exit 0
+}
+
+BUN_INSTALL_HINT='curl -fsSL https://bun.sh/install | bash'
+
+case $0 in
+  */*) self_dir=${0%/*} ;;
+  *) self_dir=. ;;
+esac
+root=$(cd "$self_dir/.." && pwd)
+
+# A SessionStart hook can run with a broken or empty PATH, so look where the
+# Bun installer puts it too.
+bun=$(command -v bun 2>/dev/null) || bun=
+if [ -z "$bun" ] && [ -x "${HOME:-}/.bun/bin/bun" ]; then
+  bun=$HOME/.bun/bin/bun
+fi
+
+parent() {
+  p=${1%/*}
+  [ -n "$p" ] || p=/
+  printf '%s' "$p"
+}
+
+# Opted in: .sddx/ in $base or an ancestor up to the git working-tree root.
+# Outside a git working tree only the directory itself counts.
+opted_in() {
+  top=
+  d=$base
+  while :; do
+    if [ -e "$d/.git" ]; then
+      top=$d
+      break
+    fi
+    [ "$d" = / ] && break
+    d=$(parent "$d")
+  done
+  if [ -z "$top" ]; then
+    [ -d "$base/.sddx" ]
+    return
+  fi
+  d=$base
+  while :; do
+    [ -d "$d/.sddx" ] && return 0
+    [ "$d" = "$top" ] && return 1
+    d=$(parent "$d")
+  done
+}
+
+have_text_tools() {
+  command -v tr >/dev/null 2>&1 && command -v sed >/dev/null 2>&1
+}
+
+# The approval handler joins quoted and escaped pieces (s'ddx', s\ddx, SDDX)
+# into one word before it looks for sddx, so the probe joins them too:
+# lowercase, then delete escaped control characters, quotes and backslashes.
+# Deleting characters can create a match but never destroy one. When the
+# tools are missing or the result is empty, the probe falls back to "sddx",
+# which runs the handler.
+probe_of() {
+  p=
+  if have_text_tools; then
+    p=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]' | sed 's/\\[nrt]//g' | tr -d "\"'\\\\")
+  fi
+  [ -n "$p" ] || p=sddx
+  printf '%s' "$p"
+}
+
+# The main checkout a directory belongs to: up to the working-tree root (a
+# directory holding .git), then cut at /.sddx-worktrees/. The same rule as
+# workspaceRoot and mainRootOf. Fails outside any git working tree.
+main_of() {
+  d=$1
+  while :; do
+    [ -e "$d/.git" ] && break
+    [ "$d" = / ] && return 1
+    d=$(parent "$d")
+  done
+  case $d in
+    */.sddx-worktrees/*) d=${d%%/.sddx-worktrees/*} ;;
+  esac
+  printf '%s' "$d"
+}
+
+# Whether the handlers would read a strict profile in this main checkout:
+# anything but an absent config, an absent "profile" key, or exactly one
+# "profile" whose value is "default". An invalid value counts as strict, as it
+# does for the handlers.
+strict_at() {
+  cfg=$1/.sddx/config.json
+  [ -f "$cfg" ] || return 1
+  have_text_tools || return 0
+  flat=$(tr -d '\n\r' < "$cfg")
+  case $flat in
+    *'"profile"'*'"profile"'*) return 0 ;;
+    *'"profile"'*) ;;
+    *) return 1 ;;
+  esac
+  v=$(printf '%s' "$flat" | sed -n 's/.*"profile"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+  [ "$v" != default ]
+}
+
+# A plain string field of the event JSON, or nothing when it is absent or
+# holds an escape sequence the shell cannot read safely.
+field_of() {
+  have_text_tools || return 0
+  printf '%s' "$2" | tr -d '\n' | sed -n 's/.*"'"$1"'"[[:space:]]*:[[:space:]]*"\([^"\\]*\)".*/\1/p'
+}
+
+# The directory a command's leading `cd <dir> &&` or `cd <dir>;` moves to.
+# Prints nothing when the command does not start with cd, and fails when it
+# does but the directory cannot be read plainly.
+cd_target_of() {
+  have_text_tools || return 1
+  flat=$(printf '%s' "$1" | tr -d '\n')
+  case $(printf '%s' "$flat" | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"[[:space:]]*cd[[:space:]].*/y/p') in
+    y) ;;
+    *) return 0 ;;
+  esac
+  t=$(printf '%s' "$flat" | sed -n 's/.*"command"[[:space:]]*:[[:space:]]*"[[:space:]]*cd[[:space:]]\{1,\}\([^"\\ ;&|$~`]\{1,\}\)[[:space:]]*[;&].*/\1/p')
+  [ -n "$t" ] || return 1
+  printf '%s' "$t"
+}
+
+# The directory the handlers judge by: the event's cwd, or the hook's own
+# when the event names none. Fails when the event's cwd cannot be read
+# plainly, or is named more than once.
+event_dir() {
+  case $1 in
+    *'"cwd"'*'"cwd"'*) return 1 ;;
+    *'"cwd"'*) ;;
+    *)
+      printf '%s' "$PWD"
+      return 0
+      ;;
+  esac
+  d=$(field_of cwd "$1")
+  case $d in
+    /*) printf '%s' "$d" ;;
+    *) return 1 ;;
+  esac
+}
+
+absolute() {
+  case $1 in
+    /*) printf '%s' "$1" ;;
+    *) printf '%s/%s' "$base" "$1" ;;
+  esac
+}
+
+# Whether a strict-profile handler could act on this event. It follows the
+# directory each handler judges by: the written file's for tdd-gate, the
+# working directory and a leading cd target for bash-gate and record-test.
+# When that directory cannot be worked out, the handler runs.
+strict_may_apply() {
+  base=$(event_dir "$2") || return 0
+  dirs=
+  if [ "$1" = tdd-gate ]; then
+    t=$(field_of file_path "$2")
+    [ -n "$t" ] || t=$(field_of notebook_path "$2")
+    [ -n "$t" ] || return 0
+    t=$(absolute "$t")
+    dirs=$(parent "$t")
+  else
+    dirs=$base
+    c=$(cd_target_of "$2") || return 0
+    [ -z "$c" ] || dirs="$dirs
+$(absolute "$c")"
+  fi
+  old_ifs=$IFS
+  IFS='
+'
+  for d in $dirs; do
+    IFS=$old_ifs
+    m=$(main_of "$d") && strict_at "$m" && return 0
+  done
+  IFS=$old_ifs
+  return 1
+}
+
+payload=$(cat)
+case $handler in
+  session-start)
+    if [ -z "$bun" ]; then
+      printf '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"sddx needs Bun, which was not found on PATH or in ~/.bun/bin. Install it with: %s"}}\n' "$BUN_INSTALL_HINT"
+      exit 0
+    fi
+    ;;
+  approval-gate)
+    probe=$(probe_of "$payload")
+    if [ -z "$bun" ]; then
+      case $probe in
+        *sddx*) hold "sddx needs Bun to check this, and Bun was not found. Install it with: $BUN_INSTALL_HINT" ;;
+        *) pass ;;
+      esac
+    fi
+    # Every decision the handler can make other than pass-through needs one of
+    # these strings in the command, the file path or the working directory.
+    case $probe in
+      *sddx* | *cli.mjs* | *cli.ts*) ;;
+      *) pass ;;
+    esac
+    ;;
+  tdd-gate | bash-gate | record-test)
+    [ -n "$bun" ] || pass
+    strict_may_apply "$handler" "$payload" || pass
+    ;;
+  *)
+    [ -n "$bun" ] || pass
+    if base=$(event_dir "$payload"); then
+      opted_in || pass
+    fi
+    ;;
+esac
+
+hooks=$root/dist/hooks.mjs
+set -- "$hooks" "$handler"
+[ "$harness" = codex ] && set -- "$@" codex
+out=$(printf '%s' "$payload" | "$bun" "$@")
+status=$?
+
+if [ "$status" -ne 0 ] || [ -z "$out" ]; then
+  if [ "$handler" = approval-gate ]; then
+    if [ "$harness" = codex ]; then
+      hold "The sddx approval gate failed to run (exit $status), so this was refused. Check that sddx and Bun are installed, or run the command yourself with the ! prefix."
+    fi
+    hold "The sddx approval gate failed to run (exit $status), so it cannot vouch for this. Allow it only if you meant to."
+  fi
+  pass
+fi
+printf '%s\n' "$out"
+exit 0

@@ -1,61 +1,61 @@
+// Stuck detection lives in `sddx verify`: consecutive verify failures with an
+// identical fingerprint (proof half, exit code, oracle output) count up to
+// `stuck_threshold`. The board side is covered in board.test.ts and
+// lifecycle.test.ts; this file covers the counter itself and the stop gate.
 import { describe, expect, test } from "bun:test";
-import { renderBoard } from "../src/board";
-import { headSha } from "../src/lib/git";
-import { failureFingerprint, recordTestRun } from "../src/lib/recorder";
-import { parseSpec } from "../src/lib/spec";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { stopGate } from "../src/lib/stopgate";
-import { createTask, readTask, transition, writeTask } from "../src/lib/task";
 import { fixtureRepo } from "./fixtures";
+import { createRun, doneFile, readTaskState, sddx, startTask } from "./helpers";
 
-function repoWithRedTask() {
+type Stuck = { fingerprint: string; count: number } | undefined;
+const stuckOf = (cwd: string): Stuck => readTaskState(cwd, "T1").stuck as Stuck;
+
+/** T1's oracle prints msg.txt, so a test controls whether two failures are identical. */
+function repoWithStartedTask(): { cwd: string; wt: string } {
   const cwd = fixtureRepo();
-  const spec = parseSpec(
-    "task: stuck fixture\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: x\n",
-  ).spec!;
-  let t = createTask(cwd, spec, "s", { mode: "worktree", branch: null, base_sha: headSha(cwd) });
-  t = transition(t, "RED", { testExit: 1 });
-  writeTask(cwd, t);
-  return { cwd, id: t.id };
+  createRun(cwd, {
+    tasks: [
+      {
+        id: "T1",
+        run: "cat msg.txt 2>/dev/null; test -f T1.done",
+        scope: [doneFile("T1"), "msg.txt"],
+      },
+    ],
+  });
+  return { cwd, wt: startTask(cwd, "T1") };
 }
 
-describe("failureFingerprint", () => {
-  test("stable across numeric noise, distinct across different failures", () => {
-    const a = failureFingerprint(1, "FAIL x.test.ts\n1 fail in 12.3ms");
-    const b = failureFingerprint(1, "FAIL x.test.ts\n1 fail in 99.9ms");
-    const c = failureFingerprint(1, "FAIL y.test.ts\nother error");
-    expect(a).toBe(b);
-    expect(a).not.toBe(c);
-  });
-});
-
 describe("stuck tracking", () => {
-  test("three identical failures set stuck; different output resets; success clears", () => {
-    const { cwd, id } = repoWithRedTask();
-    const failOut = "FAIL same assertion";
+  test("three identical failures set stuck; a different failure resets; a pass clears", () => {
+    const { cwd, wt } = repoWithStartedTask();
+    writeFileSync(join(wt, "msg.txt"), "FAIL same assertion\n");
     for (let i = 1; i <= 3; i += 1) {
-      const res = recordTestRun(cwd, "bun test", 1, failOut);
-      expect(readTask(cwd, id).stuck?.count).toBe(i);
-      if (i === 3) expect(res.stuck).toEqual({ count: 3, threshold: 3 });
-      else expect(res.stuck).toBeUndefined();
+      const r = sddx(cwd, "verify", "T1", "--output", "json");
+      expect(r.status).toBe(1);
+      expect(stuckOf(cwd)?.count).toBe(i);
+      expect(JSON.parse(r.stdout).data.stuck).toBe(i === 3);
     }
-    recordTestRun(cwd, "bun test", 1, "FAIL a different assertion");
-    expect(readTask(cwd, id).stuck?.count).toBe(1);
-    recordTestRun(cwd, "bun test", 0, "all pass");
-    expect(readTask(cwd, id).stuck).toBeUndefined();
+
+    writeFileSync(join(wt, "msg.txt"), "FAIL a different assertion\n");
+    expect(sddx(cwd, "verify", "T1").status).toBe(1);
+    expect(stuckOf(cwd)?.count).toBe(1);
+
+    writeFileSync(join(wt, doneFile("T1")), "done\n");
+    expect(sddx(cwd, "verify", "T1").status).toBe(0);
+    expect(stuckOf(cwd)).toBeUndefined();
+    expect(readTaskState(cwd, "T1").phase).toBe("IN_REVIEW");
   });
 
   test("stop gate allows stopping a stuck task with an escalation note", () => {
-    const { cwd, id } = repoWithRedTask();
-    for (let i = 0; i < 3; i += 1) recordTestRun(cwd, "bun test", 1, "FAIL same");
-    const d = stopGate({ cwd });
+    const { cwd, wt } = repoWithStartedTask();
+    // below the threshold, an unfinished task blocks the stop
+    expect(stopGate({ cwd: wt }).block).toBe(true);
+    for (let i = 0; i < 3; i += 1) sddx(cwd, "verify", "T1");
+    const d = stopGate({ cwd: wt });
     expect(d.block).toBe(false);
-    expect(d.note).toContain(id);
+    expect(d.note).toContain("T1");
     expect(d.note).toContain("stuck");
-  });
-
-  test("board marks stuck tasks", () => {
-    const { cwd, id } = repoWithRedTask();
-    for (let i = 0; i < 3; i += 1) recordTestRun(cwd, "bun test", 1, "FAIL same");
-    expect(renderBoard(cwd)).toContain(`| ${id} | Running ⚠stuck |`);
   });
 });

@@ -40,16 +40,30 @@ export function parseReadmeBlocks(markdown: string): Block[] {
 /** Each block becomes a bash function so `cd`/exported vars persist into the
  * next block (bash functions run in the caller's shell, not a subshell) —
  * required for a walkthrough that captures a task id in one step and reuses
- * it several steps later, exactly like a human running the same commands. */
+ * it several steps later, exactly like a human running the same commands.
+ *
+ * A block expected to succeed runs under `set -e` with an ERR trap, so every
+ * command in it must succeed, not just the last: an assertion in the middle of
+ * a block (`test -f …`, `grep …`) that silently failed would be evidence of
+ * nothing. A block with a non-zero `expect=` is judged by its last command. */
 export function buildScript(blocks: Block[]): string {
   const parts = ["set -u"];
   blocks.forEach((b, i) => {
+    const strict = b.expectExit === 0;
+    parts.push(`__block_${i}() {`, b.code, "}");
+    if (strict) {
+      parts.push(
+        `trap 'echo "block ${i + 1}: a command failed (exit $?)" >&2' ERR`,
+        "set -eE",
+        `__block_${i}`,
+        "set +eE",
+        "trap - ERR",
+        `__actual_${i}=0`,
+      );
+    } else {
+      parts.push(`__block_${i}`, `__actual_${i}=$?`);
+    }
     parts.push(
-      `__block_${i}() {`,
-      b.code,
-      "}",
-      `__block_${i}`,
-      `__actual_${i}=$?`,
       `if [ "$__actual_${i}" -ne "${b.expectExit}" ]; then echo "block ${i + 1}: expected exit ${b.expectExit}, got $__actual_${i}" >&2; exit 1; fi`,
     );
   });
@@ -74,14 +88,21 @@ export function runExample(repoRoot: string, name: string, targetDir: string): E
   if (blocks.length === 0) {
     return { name, ok: false, message: "no executable ```sh blocks found in README.md" };
   }
+  // the examples are what a person types, so they never run as a Codex agent's tool call
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  delete env.CODEX_TOOL_CALL_ID;
   const setupPath = join(exampleDir, "setup.sh");
   if (existsSync(setupPath)) {
-    const s = spawnSync("bash", [setupPath, targetDir], { cwd: exampleDir, encoding: "utf8" });
+    const s = spawnSync("bash", [setupPath, targetDir], { cwd: exampleDir, encoding: "utf8", env });
     if (s.status !== 0) {
       return { name, ok: false, message: `setup.sh failed: ${s.stderr || s.stdout}` };
     }
   }
-  const r = spawnSync("bash", ["-c", buildScript(blocks)], { cwd: targetDir, encoding: "utf8" });
+  const r = spawnSync("bash", ["-c", buildScript(blocks)], {
+    cwd: targetDir,
+    encoding: "utf8",
+    env,
+  });
   if (r.status !== 0) {
     return { name, ok: false, message: r.stderr || r.stdout || `exit ${r.status}` };
   }

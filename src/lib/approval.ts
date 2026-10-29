@@ -1,8 +1,8 @@
-// Plan approval: the deterministic gate between a draft plan (no side effects)
-// and a materialized one (run branch, worktrees, task files). Approval is
-// content-addressed over `plan_sha256` — the hash of the graph plus every spec
-// it references — so a plan edited after approval no longer matches its token
-// and approve-A-execute-B is impossible rather than merely discouraged.
+// Plan approval: the deterministic gate between a goal spec (no side effects)
+// and a started plan (run branch, goal record, task files). Approval is
+// content-addressed over `plan_sha256`, the hash of the spec file's bytes, so a
+// spec edited after approval no longer matches its token and approve-A-start-B
+// is impossible rather than merely discouraged.
 //
 // What this proves and what it does not: a matching token proves the plan that
 // runs is the plan that was approved. It does NOT prove a human approved it —
@@ -11,17 +11,11 @@
 // configuration that binds approval to a person. See
 // docs/explanation/interaction-modes.md.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { join } from "node:path";
 import type { InteractionMode } from "./config";
-import { parseGraph } from "./graph";
 import { sha256 } from "./receipt";
 import { signPayload } from "./sign";
 import { sddxDir } from "./task";
-
-/** The only workspace strategy. Tokens still RECORD the value — a wider read
- * type than the write type, so a token written by an older sddx under `branch`
- * or `none` parses rather than throwing, and is then refused by name. */
-const WORKSPACE = "worktree";
 
 export interface Approval {
   plan_sha256: string;
@@ -35,10 +29,10 @@ export interface Approval {
   /** READ-ONLY COMPATIBILITY — see `requested_mode`. */
   degraded_reason?: string;
   at: string;
-  /** The `--workspace` strategy this plan was approved under. A token does not
-   * vouch for a different one — swapping `worktree` for `none` moves every task
-   * into the user's live checkout. Absent on tokens written before this existed. */
+  /** READ-ONLY COMPATIBILITY: the workspace strategy sddx 4 and 5 recorded. */
   workspace_mode?: string;
+  /** The harness the approver reported (`sddx plan approve --harness`). A claim, not proof. */
+  harness_reported?: string;
   /** Optional SSH signature over `plan_sha256`, namespace `sddx-approval`. */
   signature?: string;
   signer?: string;
@@ -53,56 +47,21 @@ export const approvalPath = (cwd: string, hash: string): string =>
 
 export interface PlanHash {
   hash: string;
-  /** Absolute paths hashed, in the canonical order used — graph first, then
-   * specs by alias. Useful for reporting what a hash actually covered. */
-  files: string[];
   errors: string[];
 }
 
 /**
- * sha256 over the graph file's bytes plus every referenced spec's bytes, in a
- * canonical order (graph first, then specs sorted by node alias). Ordering is
- * derived from the parsed aliases rather than from directory enumeration, so
- * the hash cannot move with filesystem ordering or with the order nodes happen
- * to be declared in.
- *
- * Any unreadable input yields `hash: ""` plus errors — an unhashable plan must
- * never silently hash to something, since that something could match a token.
+ * sha256 of the spec file's raw bytes. Any byte change, prose included, is a
+ * different plan: a semantic hash would have to enumerate every meaningful
+ * field, and missing one would leave an edit silently approved. An unreadable
+ * file yields `hash: ""`, which can never match a token.
  */
-export function planHash(graphPath: string): PlanHash {
-  const files: string[] = [];
-  if (!existsSync(graphPath)) {
-    return { hash: "", files, errors: [`plan: ${graphPath} not found`] };
-  }
-  let graphText: string;
+export function planHash(specPath: string): PlanHash {
   try {
-    graphText = readFileSync(graphPath, "utf8");
+    return { hash: sha256(readFileSync(specPath)), errors: [] };
   } catch (e) {
-    return { hash: "", files, errors: [`plan: ${graphPath} unreadable: ${(e as Error).message}`] };
+    return { hash: "", errors: [`plan: ${specPath} unreadable: ${(e as Error).message}`] };
   }
-  const { graph, errors } = parseGraph(graphText);
-  if (!graph) return { hash: "", files, errors };
-
-  const graphDir = dirname(graphPath);
-  const parts: string[] = [`graph\0${sha256(graphText)}`];
-  files.push(graphPath);
-
-  // canonical: by alias, never by declaration or directory order
-  const nodes = [...graph.tasks].sort((a, b) =>
-    a.alias < b.alias ? -1 : a.alias > b.alias ? 1 : 0,
-  );
-  const specErrors: string[] = [];
-  for (const node of nodes) {
-    const specPath = resolve(graphDir, node.spec);
-    try {
-      parts.push(`spec\0${node.alias}\0${sha256(readFileSync(specPath, "utf8"))}`);
-      files.push(specPath);
-    } catch {
-      specErrors.push(`plan: node "${node.alias}" spec ${node.spec} is missing or unreadable`);
-    }
-  }
-  if (specErrors.length > 0) return { hash: "", files, errors: specErrors };
-  return { hash: sha256(parts.join("\n")), files, errors: [] };
 }
 
 /** Writes the token for `plan_sha256`, signing best-effort. An unconfigured or
@@ -113,7 +72,7 @@ export function writeApproval(
   input: {
     plan_sha256: string;
     mode: InteractionMode;
-    workspace_mode?: string;
+    harness_reported?: string;
   },
 ): Approval {
   const sig = signPayload(cwd, input.plan_sha256, "sddx-approval");
@@ -122,7 +81,7 @@ export function writeApproval(
   const approval: Approval = {
     plan_sha256: input.plan_sha256,
     mode: input.mode,
-    ...(input.workspace_mode ? { workspace_mode: input.workspace_mode } : {}),
+    ...(input.harness_reported ? { harness_reported: input.harness_reported } : {}),
     at: new Date().toISOString(),
     ...(sig ? { signature: sig.signature, signer: sig.signer } : {}),
     amendments: [],
@@ -156,16 +115,16 @@ export interface ApprovalLookup {
   reason?: string;
 }
 
-/** Resolves whether `graphPath` is approved as it currently stands on disk. */
-export function findApproval(cwd: string, graphPath: string): ApprovalLookup {
-  const { hash, errors } = planHash(graphPath);
+/** Resolves whether `specPath` is approved as it currently stands on disk. */
+export function findApproval(cwd: string, specPath: string): ApprovalLookup {
+  const { hash, errors } = planHash(specPath);
   if (hash === "") return { ok: false, hash: "", reason: errors.join("; ") };
   const approval = readApproval(cwd, hash);
   if (!approval) {
     return {
       ok: false,
       hash,
-      reason: `no approval on file for plan ${hash.slice(0, 12)} — approve it with: sddx graph approve --graph <path>`,
+      reason: `no approval on file for plan ${hash.slice(0, 12)}; approve it with: sddx plan approve ${specPath}`,
     };
   }
   return { ok: true, hash, approval };
@@ -360,13 +319,14 @@ const REMEDY =
  */
 export function decideGate(
   cwd: string,
-  graphPath: string,
+  specPath: string,
   nodes: GateNode[],
   requestedMode: InteractionMode,
   ceiling: number,
   overlaps: (a: string[], b: string[]) => boolean,
+  openDecisions: string[],
 ): GateDecision {
-  const { hash, errors } = planHash(graphPath);
+  const { hash, errors } = planHash(specPath);
   const base = { hash, requestedMode, nodeCount: nodes.length };
   if (hash === "") {
     return { ...base, ok: false, mode: "human", reason: errors.join("; ") || "plan unreadable" };
@@ -375,13 +335,11 @@ export function decideGate(
   // Every autonomy bound is a hard refusal, and every one is evaluated BEFORE
   // the token check. Ordering is the whole design: a token cannot buy an
   // unattended run past a bound, because writing a token is a human act and a
-  // human acts in human mode. The previous ordering — bounds after the token,
-  // arming the gate instead of refusing — meant `graph approve` in auto mode
+  // human acts in human mode. The previous ordering (bounds after the token,
+  // arming the gate instead of refusing) meant approving in auto mode
   // produced a run recorded `auto` that a human had in fact approved.
   if (requestedMode === "auto") {
-    // The header is read here rather than passed in, so the CLI predicate and
-    // the PreToolUse hook cannot disagree about what the plan declared.
-    const blocker = autoRefusal(nodes, ceiling, overlaps, unresolvedOf(graphPath));
+    const blocker = autoRefusal(nodes, ceiling, overlaps, openDecisions);
     if (blocker) {
       return { ...base, ok: false, mode: "auto", refusal: renderBlocker(blocker), blocker };
     }
@@ -389,19 +347,6 @@ export function decideGate(
 
   const approval = readApproval(cwd, hash);
   if (approval) {
-    // A token vouches for the plan AND the workspace strategy it was rendered
-    // under. Worktree is now the only strategy, so this can only fire for a
-    // token written by an older sddx under `branch` or `none` — which must not
-    // silently authorize a canonical run it was never rendered for. The value is
-    // read as a loose string precisely so those legacy tokens still parse.
-    if (approval.workspace_mode !== undefined && approval.workspace_mode !== WORKSPACE) {
-      return {
-        ...base,
-        ok: false,
-        mode: "human",
-        reason: `plan ${hash.slice(0, 12)} was approved for workspace "${approval.workspace_mode}", which is no longer supported — re-render and re-approve this plan`,
-      };
-    }
     return { ...base, ok: true, mode: approval.mode, hash };
   }
 
@@ -410,7 +355,7 @@ export function decideGate(
       ...base,
       ok: false,
       mode: "human",
-      reason: `no approval on file for plan ${hash.slice(0, 12)} — review it with: sddx graph create --graph <path> --dry-run, then approve with: sddx graph approve --graph <path>`,
+      reason: `no approval on file for plan ${hash.slice(0, 12)}; review it with: sddx plan check ${specPath}, then approve it with: sddx plan approve ${specPath}`,
     };
   }
 
@@ -446,19 +391,18 @@ function autoRefusal(
   }
 
   // The ADDITIVE half of the blocker rule. Not every critical decision is
-  // path-shaped ("should signup collect date of birth?"), so intake reporting
-  // what it could not settle catches the residue the constants below cannot
-  // express. It is layered on top of them, never in place of them: the bounds
+  // path-shaped ("should signup collect date of birth?"), so the spec's Open
+  // decisions list catches the residue the constants below cannot express. It is layered on top of them, never in place of them: the bounds
   // fire whether or not this list is empty, which is what keeps the rule out of
   // the reach of a model that simply reports nothing.
   if (unresolved.length > 0) {
     const list = unresolved.map((u) => `"${u}"`).join(", ");
     return {
       bound: "unresolved",
-      decision: `${unresolved.length} decision${unresolved.length === 1 ? "" : "s"} intake could not safely take: ${list}`,
+      decision: `${unresolved.length} open decision${unresolved.length === 1 ? "" : "s"} in the spec: ${list}`,
       impact:
         "the plan rests on a choice nobody has made, and an unattended run would make it by accident",
-      next_step: `Decide them and record them as answers in the Goal Brief header, or run in human mode. ${REMEDY}`,
+      next_step: `Decide them, record the outcome in the spec's Design section, and empty Open decisions. ${REMEDY}`,
     };
   }
 
@@ -525,17 +469,6 @@ function autoRefusal(
     };
   }
   return undefined;
-}
-
-/** The plan's `unresolved` header list, or empty when the draft is missing or
- * unparseable — an unhashable plan is already refused by the hash check above,
- * so this never has to invent a reason of its own. */
-function unresolvedOf(graphPath: string): string[] {
-  try {
-    return parseGraph(readFileSync(graphPath, "utf8")).graph?.unresolved ?? [];
-  } catch {
-    return [];
-  }
 }
 
 /** Every approval token on disk, newest first. Used by the audit to check

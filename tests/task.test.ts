@@ -3,174 +3,163 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { parseSpec } from "../src/lib/spec";
 import {
   abandonOrRetry,
   blockedOn,
-  createTask,
+  createPlannedTask,
   dependsOnList,
   failurePolicyOf,
-  type Phase,
+  isStarted,
+  isV6Task,
+  type PlannedTaskInput,
   readTask,
   resolveTaskState,
   retryPolicyOf,
   skippedOn,
-  taskId,
+  type TaskState,
   transition,
   writeTask,
 } from "../src/lib/task";
 import { fixtureRepo } from "./fixtures";
 
-const spec = parseSpec(
-  "task: Add a Health endpoint!\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: t\n",
-).spec!;
-
 function tmpCwd(): string {
   return mkdtempSync(join(tmpdir(), "sddx-task-"));
 }
 
-describe("taskId", () => {
-  test("slugifies and date-prefixes", () => {
-    expect(taskId("Add a Health endpoint!", new Date("2026-07-17T00:00:00Z"))).toBe(
-      "20260717-add-a-health-endpoint",
-    );
+/** A PLANNED task file, the shape `plan start` writes for each spec task. */
+function plant(cwd: string, id: string, input: Partial<PlannedTaskInput> = {}): TaskState {
+  return createPlannedTask(cwd, {
+    id,
+    title: `task ${id}`,
+    goal_id: "2026-01-01-test-goal",
+    spec_path: ".sddx/specs/2026-01-01-test-goal.md",
+    oracle: { type: "command", run: "t", expect: "exit 0" },
+    scope: [],
+    assumptions: [],
+    depends_on: [],
+    ...input,
   });
-});
+}
 
 describe("task state", () => {
-  test("create + read roundtrip, starts in PLAN", () => {
+  test("create + read roundtrip starts in PLANNED with no workspace; a duplicate is refused", () => {
     const cwd = tmpCwd();
-    const t = createTask(cwd, spec, ".sddx/specs/x.yaml", {
-      mode: "worktree",
-      branch: "sddx/x",
-      base_sha: "abc",
-    });
-    expect(readTask(cwd, t.id).phase).toBe("PLAN");
-    expect(() => createTask(cwd, spec, "s", t.workspace)).toThrow(/exists/);
+    plant(cwd, "T1");
+    const back = readTask(cwd, "T1");
+    expect(back.phase).toBe("PLANNED");
+    expect(isV6Task(back)).toBe(true);
+    expect(back.goal_id).toBe("2026-01-01-test-goal");
+    expect(back.spec_path).toBe(".sddx/specs/2026-01-01-test-goal.md");
+    expect(back.reviews).toEqual([]);
+    expect(back.workspace).toBeUndefined();
+    expect(isStarted(back)).toBe(false);
+    expect(() => plant(cwd, "T1")).toThrow(/exists/);
   });
 
-  test("legal path PLAN→RED→GREEN→REFACTOR→VERIFY with evidence", () => {
-    let t = createTask(tmpCwd(), spec, "s", { mode: "worktree", branch: null, base_sha: "abc" });
-    t = transition(t, "RED", { testExit: 1 });
-    t = transition(t, "GREEN", { testExit: 0 });
-    t = transition(t, "REFACTOR");
-    t = transition(t, "VERIFY");
-    expect(t.phase).toBe("VERIFY");
-    expect(t.evidence.red?.test_exit).toBe(1);
-    expect(t.evidence.green?.test_exit).toBe(0);
-    expect(t.history.map((h) => h.phase)).toEqual(["PLAN", "RED", "GREEN", "REFACTOR", "VERIFY"]);
+  test("legal path PLANNED→IN_PROGRESS→IN_REVIEW→IN_PROGRESS→IN_REVIEW→DONE, all in history", () => {
+    let t = plant(tmpCwd(), "T1");
+    t = transition(t, "IN_PROGRESS");
+    t = transition(t, "IN_REVIEW");
+    t = transition(t, "IN_PROGRESS", "review failed");
+    t = transition(t, "IN_REVIEW");
+    t = transition(t, "DONE");
+    expect(t.phase).toBe("DONE");
+    expect(t.history.map((h) => h.phase)).toEqual([
+      "PLANNED",
+      "IN_PROGRESS",
+      "IN_REVIEW",
+      "IN_PROGRESS",
+      "IN_REVIEW",
+      "DONE",
+    ]);
+    expect(t.history[3]?.note).toBe("review failed");
   });
 
-  test("evidence gates: RED needs failing exit, GREEN needs passing exit", () => {
-    let t = createTask(tmpCwd(), spec, "s", { mode: "worktree", branch: null, base_sha: "a" });
-    expect(() => transition(t, "RED", { testExit: 0 })).toThrow(/failing test/);
-    expect(() => transition(t, "RED")).toThrow(/failing test/);
-    t = transition(t, "RED", { testExit: 1 });
-    expect(() => transition(t, "GREEN", { testExit: 2 })).toThrow(/passing test/);
+  test("illegal jumps are rejected: DONE is reachable only from IN_REVIEW, terminal states are final", () => {
+    const t = plant(tmpCwd(), "T1");
+    expect(() => transition(t, "IN_REVIEW")).toThrow(/PLANNED -> IN_REVIEW/);
+    expect(() => transition(t, "DONE")).toThrow(/PLANNED -> DONE/);
+    transition(t, "IN_PROGRESS");
+    expect(() => transition(t, "DONE")).toThrow(/IN_PROGRESS -> DONE/);
+    const done = { ...t, phase: "DONE" as const };
+    expect(() => transition(done, "IN_PROGRESS")).toThrow(/illegal transition/);
+    const abandoned = { ...t, phase: "ABANDONED" as const };
+    expect(() => transition(abandoned, "PLANNED")).toThrow(/illegal transition/);
   });
 
-  test("illegal jumps and model-claimed DONE are rejected", () => {
-    const t = createTask(tmpCwd(), spec, "s", { mode: "worktree", branch: null, base_sha: "a" });
-    expect(() => transition(t, "GREEN", { testExit: 0 })).toThrow(/PLAN → GREEN/);
-    const v = { ...t, phase: "VERIFY" as const };
-    expect(() => transition(v, "DONE")).toThrow(/verifier/);
-    expect(transition(v, "DONE", { internal: true }).phase).toBe("DONE");
+  test("a task file without the v6 schema marker is refused before any transition", () => {
+    const t = plant(tmpCwd(), "T1");
+    const v5 = { ...t, schema: undefined } as unknown as TaskState;
+    expect(() => transition(v5, "IN_PROGRESS")).toThrow(/sddx 5/);
   });
 
-  test("M1 task files (no workspace.path) still parse; worktree mode records one", () => {
+  test("a started task round-trips its workspace branch, base sha and path", () => {
     const cwd = tmpCwd();
-    const m1 = createTask(cwd, spec, "s", { mode: "worktree", branch: "sddx/x", base_sha: "a" });
-    expect(readTask(cwd, m1.id).workspace.path).toBeUndefined();
-
-    const cwd2 = tmpCwd();
-    const m2 = createTask(cwd2, spec, "s", {
-      mode: "worktree",
-      branch: "sddx/y",
-      base_sha: "b",
-      path: ".sddx-worktrees/y",
+    const t = plant(cwd, "T1");
+    t.workspace = { branch: "sddx/T1", base_sha: "b".repeat(40), path: ".sddx-worktrees/T1" };
+    writeTask(cwd, t);
+    const back = readTask(cwd, "T1");
+    expect(isStarted(back)).toBe(true);
+    expect(back.workspace).toEqual({
+      branch: "sddx/T1",
+      base_sha: "b".repeat(40),
+      path: ".sddx-worktrees/T1",
     });
-    const back = readTask(cwd2, m2.id);
-    expect(back.workspace.mode).toBe("worktree");
-    expect(back.workspace.path).toBe(".sddx-worktrees/y");
   });
 
   test("writeTask bumps updated_at", async () => {
     const cwd = tmpCwd();
-    const t = createTask(cwd, spec, "s", { mode: "worktree", branch: null, base_sha: "a" });
-    const before = readTask(cwd, t.id).updated_at;
+    const t = plant(cwd, "T1");
+    const before = readTask(cwd, "T1").updated_at;
     await new Promise((r) => setTimeout(r, 5));
     writeTask(cwd, t);
-    expect(readTask(cwd, t.id).updated_at > before).toBe(true);
+    expect(readTask(cwd, "T1").updated_at > before).toBe(true);
   });
 });
 
 describe("scope and depends_on", () => {
-  const scopedSpec = parseSpec(
-    "task: build the api\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: t\nscope:\n  - src/api/**\n",
-  ).spec!;
-
-  test("scope copied from the spec; root omits depends_on", () => {
+  test("scope is copied; a root task omits depends_on", () => {
     const cwd = tmpCwd();
-    const t = createTask(cwd, scopedSpec, "s", { mode: "worktree", branch: null, base_sha: "a" });
-    const back = readTask(cwd, t.id);
+    plant(cwd, "T1", { scope: ["src/api/**"] });
+    const back = readTask(cwd, "T1");
     expect(back.scope).toEqual(["src/api/**"]);
     expect(back.depends_on).toBeUndefined();
   });
 
-  test("depends_on recorded as a list and round-trips when a single parent is given", () => {
+  test("depends_on records a single parent as a list", () => {
     const cwd = tmpCwd();
-    const t = createTask(
-      cwd,
-      scopedSpec,
-      "s",
-      { mode: "worktree", branch: null, base_sha: "pending:20260721-parent" },
-      { dependsOn: "20260721-parent" },
-    );
-    const back = readTask(cwd, t.id);
-    expect(back.depends_on).toEqual(["20260721-parent"]);
-    expect(back.workspace.base_sha).toBe("pending:20260721-parent");
-    expect(back.workspace.path).toBeUndefined();
+    plant(cwd, "T2", { depends_on: ["T1"] });
+    expect(readTask(cwd, "T2").depends_on).toEqual(["T1"]);
   });
 
   test("depends_on records multiple parents (fan-in)", () => {
     const cwd = tmpCwd();
-    const t = createTask(
-      cwd,
-      scopedSpec,
-      "s",
-      { mode: "worktree", branch: null, base_sha: "pending:a,b" },
-      { dependsOn: ["20260721-a", "20260721-b"] },
-    );
-    const back = readTask(cwd, t.id);
-    expect(back.depends_on).toEqual(["20260721-a", "20260721-b"]);
+    plant(cwd, "T3", { depends_on: ["T1", "T2"] });
+    expect(readTask(cwd, "T3").depends_on).toEqual(["T1", "T2"]);
   });
 
   test("legacy single-string depends_on on disk reads as a one-element list", () => {
     const cwd = tmpCwd();
-    const t = createTask(cwd, scopedSpec, "s", { mode: "worktree", branch: null, base_sha: "a" });
-    // simulate a pre-DAG task file written with the old scalar shape
-    const legacy = { ...readTask(cwd, t.id), depends_on: "20260721-parent" };
+    plant(cwd, "T2");
+    // the pre-DAG scalar shape
+    const legacy = { ...readTask(cwd, "T2"), depends_on: "T1" };
     writeTask(cwd, legacy as never);
-    expect(dependsOnList(readTask(cwd, t.id))).toEqual(["20260721-parent"]);
+    expect(dependsOnList(readTask(cwd, "T2"))).toEqual(["T1"]);
   });
 
   test("attempt_count defaults to 1 and on_dependency_failure/retry default via helpers", () => {
-    const cwd = tmpCwd();
-    const t = createTask(cwd, scopedSpec, "s", { mode: "worktree", branch: null, base_sha: "a" });
+    const t = plant(tmpCwd(), "T1");
     expect(t.attempt_count).toBe(1);
+    expect(t.on_dependency_failure).toBeUndefined();
+    expect(t.retry).toBeUndefined();
     expect(failurePolicyOf(t)).toBe("skip");
     expect(retryPolicyOf(t)).toEqual({ max_attempts: 1, workspace: "fresh" });
   });
 
-  test("on_dependency_failure and retry are copied from the spec", () => {
-    const specWithPolicy = parseSpec(
-      "task: build the api\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: t\non_dependency_failure: block\nretry:\n  max_attempts: 3\n  workspace: reuse\n",
-    ).spec!;
-    const cwd = tmpCwd();
-    const t = createTask(cwd, specWithPolicy, "s", {
-      mode: "worktree",
-      branch: null,
-      base_sha: "a",
+  test("on_dependency_failure and retry are copied from the spec task", () => {
+    const t = plant(tmpCwd(), "T1", {
+      on_dependency_failure: "block",
+      retry: { max_attempts: 3, workspace: "reuse" },
     });
     expect(t.on_dependency_failure).toBe("block");
     expect(retryPolicyOf(t)).toEqual({ max_attempts: 3, workspace: "reuse" });
@@ -178,196 +167,179 @@ describe("scope and depends_on", () => {
 });
 
 describe("blockedOn / skippedOn", () => {
-  function makeTask(cwd: string, sentence: string, dependsOn?: string | string[]) {
-    const s = parseSpec(
-      `task: ${sentence}\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: t\n`,
-    ).spec!;
-    return createTask(
-      cwd,
-      s,
-      "s",
-      { mode: "worktree", branch: null, base_sha: "a" },
-      dependsOn ? { dependsOn } : {},
-    );
-  }
+  const setPhase = (cwd: string, id: string, phase: TaskState["phase"]) =>
+    writeTask(cwd, { ...readTask(cwd, id), phase });
 
   test("blocked until every named parent is DONE", () => {
     const cwd = tmpCwd();
-    const a = makeTask(cwd, "parent a");
-    const b = makeTask(cwd, "parent b");
-    const d = makeTask(cwd, "child d", [a.id, b.id]);
-    expect(blockedOn(cwd, d)).toBe(a.id);
+    plant(cwd, "A");
+    plant(cwd, "B");
+    const d = plant(cwd, "D", { depends_on: ["A", "B"] });
+    expect(blockedOn(cwd, d)).toBe("A");
 
-    const aDone = { ...readTask(cwd, a.id), phase: "DONE" as const };
-    writeTask(cwd, aDone);
-    // A is DONE, B is not — blocked-on-B specifically, not A
-    expect(blockedOn(cwd, d)).toBe(b.id);
+    setPhase(cwd, "A", "DONE");
+    // A is DONE, B is not: blocked on B specifically, not A
+    expect(blockedOn(cwd, d)).toBe("B");
 
-    const bDone = { ...readTask(cwd, b.id), phase: "DONE" as const };
-    writeTask(cwd, bDone);
+    setPhase(cwd, "B", "DONE");
     expect(blockedOn(cwd, d)).toBeNull();
+  });
+
+  test("a missing parent blocks too", () => {
+    const cwd = tmpCwd();
+    const d = plant(cwd, "D", { depends_on: ["GHOST"] });
+    expect(blockedOn(cwd, d)).toBe("GHOST");
   });
 
   test("block-policy dependent stays blocked when its parent is ABANDONED", () => {
     const cwd = tmpCwd();
-    const a = makeTask(cwd, "parent a");
-    const bSpec = parseSpec(
-      "task: block child\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: t\non_dependency_failure: block\n",
-    ).spec!;
-    const b = createTask(
-      cwd,
-      bSpec,
-      "s",
-      { mode: "worktree", branch: null, base_sha: "a" },
-      {
-        dependsOn: a.id,
-      },
-    );
-    writeTask(cwd, { ...readTask(cwd, a.id), phase: "ABANDONED" as const });
-    expect(blockedOn(cwd, b)).toBe(a.id);
+    plant(cwd, "A");
+    const b = plant(cwd, "B", { depends_on: ["A"], on_dependency_failure: "block" });
+    setPhase(cwd, "A", "ABANDONED");
+    expect(blockedOn(cwd, b)).toBe("A");
     expect(skippedOn(cwd, b)).toBeNull();
   });
 
   test("skip-policy (default) dependent is skipped when its parent is ABANDONED", () => {
     const cwd = tmpCwd();
-    const a = makeTask(cwd, "parent a");
-    const b = makeTask(cwd, "child b", a.id);
-    writeTask(cwd, { ...readTask(cwd, a.id), phase: "ABANDONED" as const });
-    expect(skippedOn(cwd, b)).toBe(a.id);
+    plant(cwd, "A");
+    const b = plant(cwd, "B", { depends_on: ["A"] });
+    setPhase(cwd, "A", "ABANDONED");
+    expect(skippedOn(cwd, b)).toBe("A");
   });
 
   test("fan-in child skips if any one of several parents is ABANDONED, even if others are DONE", () => {
     const cwd = tmpCwd();
-    const a = makeTask(cwd, "parent a");
-    const b = makeTask(cwd, "parent b");
-    const d = makeTask(cwd, "child d", [a.id, b.id]);
-    writeTask(cwd, { ...readTask(cwd, a.id), phase: "DONE" as const });
-    writeTask(cwd, { ...readTask(cwd, b.id), phase: "ABANDONED" as const });
-    expect(skippedOn(cwd, d)).toBe(b.id);
+    plant(cwd, "A");
+    plant(cwd, "B");
+    const d = plant(cwd, "D", { depends_on: ["A", "B"] });
+    setPhase(cwd, "A", "DONE");
+    setPhase(cwd, "B", "ABANDONED");
+    expect(skippedOn(cwd, d)).toBe("B");
   });
 
   test("skip cascades transitively through a chain of skip-policy tasks", () => {
     const cwd = tmpCwd();
-    const a = makeTask(cwd, "root a");
-    const s1 = makeTask(cwd, "mid s1", a.id);
-    const s2 = makeTask(cwd, "leaf s2", s1.id);
-    writeTask(cwd, { ...readTask(cwd, a.id), phase: "ABANDONED" as const });
-    expect(skippedOn(cwd, s1)).toBe(a.id);
-    expect(skippedOn(cwd, s2)).toBe(s1.id);
+    plant(cwd, "A");
+    const s1 = plant(cwd, "S1", { depends_on: ["A"] });
+    const s2 = plant(cwd, "S2", { depends_on: ["S1"] });
+    setPhase(cwd, "A", "ABANDONED");
+    expect(skippedOn(cwd, s1)).toBe("A");
+    expect(skippedOn(cwd, s2)).toBe("S1");
   });
 
   test("an unrelated sibling with no shared edge is unaffected", () => {
     const cwd = tmpCwd();
-    const a = makeTask(cwd, "root a");
-    makeTask(cwd, "dependent b", a.id);
-    const r = makeTask(cwd, "unrelated root r");
-    writeTask(cwd, { ...readTask(cwd, a.id), phase: "ABANDONED" as const });
+    plant(cwd, "A");
+    plant(cwd, "B", { depends_on: ["A"] });
+    const r = plant(cwd, "R");
+    setPhase(cwd, "A", "ABANDONED");
     expect(blockedOn(cwd, r)).toBeNull();
     expect(skippedOn(cwd, r)).toBeNull();
   });
 });
 
 describe("abandonOrRetry", () => {
-  test("default policy (max_attempts 1) abandons immediately", () => {
-    const t = createTask(tmpCwd(), spec, "s", { mode: "worktree", branch: null, base_sha: "a" });
-    const outcome = abandonOrRetry(t);
+  test("default policy (max_attempts 1) abandons immediately and records the reason", () => {
+    const t = plant(tmpCwd(), "T1");
+    const outcome = abandonOrRetry(t, "dead end");
     expect(outcome).toEqual({ retried: false, attempt_count: 1, max_attempts: 1 });
     expect(t.phase).toBe("ABANDONED");
+    expect(t.abandon_reason).toBe("dead end");
+    expect(t.history.at(-1)).toMatchObject({ phase: "ABANDONED", note: "dead end" });
   });
 
   test("retries twice before reaching ABANDONED on the third exhaustion", () => {
-    const retrySpec = parseSpec(
-      "task: flaky\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: t\nretry:\n  max_attempts: 3\n",
-    ).spec!;
-    const t = createTask(tmpCwd(), retrySpec, "s", {
-      mode: "worktree",
-      branch: null,
-      base_sha: "a",
-    });
-    t.phase = "GREEN" as Phase;
+    const t = plant(tmpCwd(), "T1", { retry: { max_attempts: 3 } });
+    // a function, so the compiler does not narrow t.phase across the calls
+    const resume = () => {
+      t.phase = "IN_PROGRESS";
+    };
+    resume();
 
-    const first = abandonOrRetry(t);
+    const first = abandonOrRetry(t, "one");
     expect(first).toEqual({ retried: true, attempt_count: 2, max_attempts: 3 });
-    expect(t.phase).toBe("PLAN");
+    expect(t.phase).toBe("PLANNED");
 
-    t.phase = "GREEN" as Phase;
-    const second = abandonOrRetry(t);
+    resume();
+    const second = abandonOrRetry(t, "two");
     expect(second).toEqual({ retried: true, attempt_count: 3, max_attempts: 3 });
-    expect(t.phase).toBe("PLAN");
+    expect(t.phase).toBe("PLANNED");
 
-    t.phase = "GREEN" as Phase;
-    const third = abandonOrRetry(t);
+    resume();
+    const third = abandonOrRetry(t, "three");
     expect(third).toEqual({ retried: false, attempt_count: 3, max_attempts: 3 });
     expect(t.phase).toBe("ABANDONED");
   });
 
-  test("a retry clears iterations, evidence, and stuck; appends a PLAN history entry", () => {
-    const retrySpec = parseSpec(
-      "task: flaky\nsuccess_criteria:\n  - a\noracle:\n  type: command\n  run: t\nretry:\n  max_attempts: 2\n",
-    ).spec!;
-    const t = createTask(tmpCwd(), retrySpec, "s", {
-      mode: "worktree",
-      branch: null,
-      base_sha: "a",
-    });
-    t.phase = "GREEN" as Phase;
+  test("a retry clears iterations, verify results, stuck and strict evidence; appends a PLANNED entry", () => {
+    const t = plant(tmpCwd(), "T1", { retry: { max_attempts: 2 } });
+    const at = new Date().toISOString();
+    t.phase = "IN_REVIEW";
     t.iterations = 4;
-    t.evidence.red = { test_exit: 1, at: new Date().toISOString() };
-    t.stuck = { fingerprint: "x", count: 3, since: new Date().toISOString() };
-    abandonOrRetry(t);
+    t.verified = {
+      base_sha: "a".repeat(40),
+      tree_sha: "b".repeat(40),
+      test_files: [],
+      red: { exit_code: 1, stdout_sha256: "0".repeat(64), stderr_sha256: "0".repeat(64) },
+      green: [],
+      at,
+    };
+    t.last_failure = { half: "green", exit_code: 1, message: "boom", at };
+    t.stuck = { fingerprint: "x", count: 3, since: at };
+    t.strict = { phase: "RED", runs: [{ test_exit: 1, source: "hook", at }] };
+    abandonOrRetry(t, "try again");
     expect(t.iterations).toBe(0);
-    expect(t.evidence).toEqual({});
+    expect(t.verified).toBeUndefined();
+    expect(t.last_failure).toBeUndefined();
     expect(t.stuck).toBeUndefined();
-    expect(t.history.at(-1)?.phase).toBe("PLAN");
+    expect(t.strict).toBeUndefined();
+    expect(t.history.at(-1)).toMatchObject({ phase: "PLANNED", note: "retry after: try again" });
   });
 
   test("refuses on an already-terminal task", () => {
-    const t = createTask(tmpCwd(), spec, "s", { mode: "worktree", branch: null, base_sha: "a" });
+    const t = plant(tmpCwd(), "T1");
     t.phase = "DONE";
-    expect(() => abandonOrRetry(t)).toThrow(/illegal transition/);
+    expect(() => abandonOrRetry(t, "late")).toThrow(/illegal transition/);
   });
 });
 
 describe("integration field", () => {
   test("absent by default", () => {
-    const t = createTask(tmpCwd(), spec, "s", { mode: "worktree", branch: null, base_sha: "a" });
-    expect(t.integration).toBeUndefined();
+    expect(plant(tmpCwd(), "T1").integration).toBeUndefined();
   });
 
   test("round-trips a merged record", () => {
     const cwd = tmpCwd();
-    const t = createTask(cwd, spec, "s", { mode: "worktree", branch: null, base_sha: "a" });
+    const t = plant(cwd, "T1");
     t.integration = {
-      run_branch: "sddx/run-g1",
+      run_branch: "sddx/run-2026-01-01-test-goal",
       merge_commit: "a".repeat(40),
       merged_at: new Date().toISOString(),
       result: "merged",
     };
     writeTask(cwd, t);
-    const back = readTask(cwd, t.id);
+    const back = readTask(cwd, "T1");
     expect(back.integration?.result).toBe("merged");
     expect(back.integration?.merge_commit).toBe("a".repeat(40));
   });
 });
 
 describe("resolveTaskState", () => {
-  test("finds a task in the main checkout (branch/none mode)", () => {
+  test("finds a PLANNED task in the main checkout", () => {
     const cwd = tmpCwd();
-    const t = createTask(cwd, spec, "s", { mode: "worktree", branch: null, base_sha: "a" });
-    expect(resolveTaskState(cwd, t.id)?.id).toBe(t.id);
+    plant(cwd, "T1");
+    expect(resolveTaskState(cwd, "T1")?.id).toBe("T1");
   });
 
   test("finds a task in a live worktree directory before the main checkout", () => {
     const cwd = tmpCwd();
-    const t = createTask(cwd, spec, "s", { mode: "worktree", branch: null, base_sha: "a" });
-    const wtTasksDir = join(cwd, ".sddx-worktrees", t.id, ".sddx", "tasks");
+    const t = plant(cwd, "T1");
+    const wtTasksDir = join(cwd, ".sddx-worktrees", "T1", ".sddx", "tasks");
     mkdirSync(wtTasksDir, { recursive: true });
-    writeFileSync(
-      join(wtTasksDir, `${t.id}.json`),
-      JSON.stringify({ ...t, phase: "GREEN" }, null, 2),
-    );
-    // worktree copy wins — it's the live one
-    expect(resolveTaskState(cwd, t.id)?.phase).toBe("GREEN");
+    writeFileSync(join(wtTasksDir, "T1.json"), JSON.stringify({ ...t, phase: "IN_PROGRESS" }));
+    // the worktree copy wins: it is the live one
+    expect(resolveTaskState(cwd, "T1")?.phase).toBe("IN_PROGRESS");
   });
 
   test("falls back to the tip of the task's own branch once no live copy exists", () => {
@@ -376,13 +348,13 @@ describe("resolveTaskState", () => {
       const r = spawnSync("git", args, { cwd: repo, encoding: "utf8" });
       if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
     };
-    const t = createTask(repo, spec, "s", { mode: "worktree", branch: "sddx/x", base_sha: "a" });
-    g("switch", "-c", `sddx/${t.id}`);
+    plant(repo, "T1");
+    g("switch", "-c", "sddx/T1");
     g("add", "-A");
     g("commit", "-qm", "task commit");
     g("switch", "main");
-    // no task file at all on main or in any worktree dir — only on the branch
-    expect(resolveTaskState(repo, t.id)?.id).toBe(t.id);
+    // no task file on main or in any worktree directory, only on the branch
+    expect(resolveTaskState(repo, "T1")?.id).toBe("T1");
   });
 
   test("returns null when the task doesn't exist anywhere", () => {

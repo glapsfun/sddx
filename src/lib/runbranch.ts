@@ -1,17 +1,27 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, rmdirSync, statSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { commit, git, stagePath } from "./git";
+import { checkedOutAt, commitOnBranch, git } from "./git";
 import { findGoalForTask, readGoal, writeGoal } from "./goal";
-import { readTask, writeTask } from "./task";
-import { removeWorktreeForced, resolveMainRepoRoot, worktreesDir } from "./worktree";
+import { readTask } from "./task";
+import {
+  isRunBranchScratch,
+  removeScratchWorktree,
+  removeWorktreeForced,
+  resolveMainRepoRoot,
+  worktreesDir,
+} from "./worktree";
 
 export interface IntegrationOutcome {
   result: "merged" | "conflict" | "none";
+  /** On a conflict, the paths git could not merge. */
+  conflicts?: string[];
   /** Set only when `result` is "none" and the task belongs to a goal but has
    * no branch to merge (`--workspace none`) — distinguishes a real
    * integration gap from an ordinary task-with-no-goal no-op. */
-  reason?: "no-goal" | "no-branch";
+  reason?: "no-goal" | "no-branch" | "error";
+  /** Set with reason "error": why the merge could not be attempted. */
+  error?: string;
   runBranch?: string;
   mergeCommit?: string;
 }
@@ -77,22 +87,40 @@ export function integrateTaskIntoRunBranch(taskCwd: string, id: string): Integra
   if (!goal) return { result: "none", reason: "no-goal" };
 
   const task = readTask(taskCwd, id);
-  const branch = task.workspace.branch;
+  const branch = task.workspace?.branch;
   if (!branch) return { result: "none", reason: "no-branch", runBranch: goal.run_branch };
 
   const outcome = withGoalLock(root, goal.id, () => {
     const tmpPath = join(worktreesDir(root), `integrate-${id}`);
+    // under the goal lock, any scratch checkout of this run branch was left by
+    // a killed run; it would make git refuse the checkout below
+    const holder = checkedOutAt(root, goal.run_branch);
+    if (holder && isRunBranchScratch(holder)) removeScratchWorktree(root, holder);
+    if (existsSync(tmpPath)) removeScratchWorktree(root, tmpPath);
     git(root, "worktree", "add", "-q", tmpPath, goal.run_branch);
     let result: IntegrationOutcome;
     try {
+      // --no-verify: a hook must not change or veto a merge of reviewed work
       const r = spawnSync(
         "git",
-        ["merge", "--no-ff", "-m", `sddx: merge ${id} into ${goal.run_branch}`, branch],
+        [
+          "merge",
+          "--no-ff",
+          "--no-verify",
+          "-m",
+          `sddx: merge ${id} into ${goal.run_branch}`,
+          branch,
+        ],
         { cwd: tmpPath, encoding: "utf8" },
       );
       if (r.status !== 0) {
+        const unmerged = spawnSync("git", ["diff", "--name-only", "--diff-filter=U"], {
+          cwd: tmpPath,
+          encoding: "utf8",
+        });
+        const conflicts = (unmerged.stdout ?? "").split("\n").filter((l) => l.trim() !== "");
         spawnSync("git", ["merge", "--abort"], { cwd: tmpPath });
-        result = { result: "conflict", runBranch: goal.run_branch };
+        result = { result: "conflict", runBranch: goal.run_branch, conflicts };
       } else {
         const mergeSha = git(tmpPath, "rev-parse", "HEAD");
         result = { result: "merged", runBranch: goal.run_branch, mergeCommit: mergeSha };
@@ -120,9 +148,14 @@ export function integrateTaskIntoRunBranch(taskCwd: string, id: string): Integra
     merged_at: new Date().toISOString(),
     result: outcome.result === "merged" ? "merged" : "conflict",
   };
-  writeTask(taskCwd, task);
-  stagePath(taskCwd, join(".sddx", "tasks", `${id}.json`));
-  commit(taskCwd, `sddx(${id}): record integration (${outcome.result})`);
+  task.updated_at = new Date().toISOString();
+  commitOnBranch({
+    worktree: taskCwd,
+    branch,
+    baseTree: git(taskCwd, "rev-parse", "HEAD^{tree}"),
+    files: { [join(".sddx", "tasks", `${id}.json`)]: `${JSON.stringify(task, null, 2)}\n` },
+    message: `sddx(${id}): record integration (${outcome.result})`,
+  });
 
   return outcome;
 }

@@ -22,6 +22,7 @@ All notable changes to sddx are documented here. The format follows
 
 ### Fixed
 
+* leave applying the sddx 5 migration to the user ([47e4cb4](https://github.com/glapsfun/sddx/commit/47e4cb4e113abc7f998d6732cb0b881b34451376))
 * tighten the patch heredoc, leading cd and hook cwd checks ([7be9379](https://github.com/glapsfun/sddx/commit/7be937988a74e58f3e63481db2ef4d8a56de01ad))
 * word the token-forgery refusal so it holds in every harness ([89afd49](https://github.com/glapsfun/sddx/commit/89afd4993b6b59deae8480b1381122444b7876ff))
 

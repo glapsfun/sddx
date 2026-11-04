@@ -4,6 +4,13 @@ All notable changes to sddx are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and sddx adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.0.1](https://github.com/glapsfun/sddx/compare/v6.0.0...v6.0.1) (2026-11-04)
+
+
+### Fixed
+
+* keep Codex's command suffix off the approve command it hands to the user ([9bf3343](https://github.com/glapsfun/sddx/commit/9bf3343c071fb0c529bfa45b498e7553e04529ee))
+
 ## [6.0.0](https://github.com/glapsfun/sddx/compare/v5.0.0...v6.0.0) (2026-10-29)
 
 

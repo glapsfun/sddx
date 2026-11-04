@@ -10955,7 +10955,7 @@ function handOff(decision) {
     return [
       reason,
       "",
-      "In Codex a hook cannot ask the user, so this was refused. If the user wants it run, they can type it themselves with the ! prefix."
+      "In Codex a hook cannot ask the user, so this was refused. If the user wants it run, they can type it themselves with the ! prefix"
     ].join(`
 `);
   }
@@ -10963,7 +10963,8 @@ function handOff(decision) {
     reason,
     "",
     "In Codex only a person can approve a plan, so this was refused. Ask the user to review the plan and type:",
-    `  !${pluginCommand("codex")} plan approve ${shellWord(decision.spec)}`
+    `  !${pluginCommand("codex")} plan approve ${shellWord(decision.spec)}`,
+    "Then wait for them to run it"
   ].join(`
 `);
 }

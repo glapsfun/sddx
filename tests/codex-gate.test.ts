@@ -201,6 +201,16 @@ describe("the approval gate in Codex", () => {
     expect(reason(out)).not.toContain("plan approve <spec>");
   });
 
+  scenario("codex-hooks", "Hand-off reason as Codex shows it", () => {
+    const command = "sddx plan approve .sddx/specs/x.md";
+    const shown = (out: HookOut, cmd: string) =>
+      `Command blocked by PreToolUse hook: ${reason(out).trim()}. Command: ${cmd}`;
+    const plan = shown(gate(fixtureRepo(), bash(command), "codex"), command);
+    expect(plan.split("\n").map((l) => l.trim())).toContain(`!/p/bin/${command}`);
+    expect(plan).not.toContain("..");
+    expect(shown(gate(fixtureRepo(), bash("sddx plan start"), "codex"), "x")).not.toContain("..");
+  });
+
   test("a plugin path or spec holding a space is quoted in the command to type", () => {
     const out = gate(
       fixtureRepo(),

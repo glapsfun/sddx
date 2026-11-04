@@ -93,14 +93,18 @@ function pluginCommand(harness: Harness): string {
   return plugin ? shellWord(join(plugin, "bin", "sddx")) : "sddx";
 }
 
-/** Codex has no dialog: an ask becomes a deny. One about a plan hands the approve command to the user. */
+/**
+ * Codex has no dialog: an ask becomes a deny. One about a plan hands the approve command to the user.
+ * Codex appends `. Command: <command>` to the reason, so it ends on a sentence without a period,
+ * never on the command to type.
+ */
 function handOff(decision: ApprovalGateDecision): string {
   const reason = decision.reason ?? "sddx: approval required";
   if (decision.spec === undefined) {
     return [
       reason,
       "",
-      "In Codex a hook cannot ask the user, so this was refused. If the user wants it run, they can type it themselves with the ! prefix.",
+      "In Codex a hook cannot ask the user, so this was refused. If the user wants it run, they can type it themselves with the ! prefix",
     ].join("\n");
   }
   return [
@@ -108,6 +112,7 @@ function handOff(decision: ApprovalGateDecision): string {
     "",
     "In Codex only a person can approve a plan, so this was refused. Ask the user to review the plan and type:",
     `  !${pluginCommand("codex")} plan approve ${shellWord(decision.spec)}`,
+    "Then wait for them to run it",
   ].join("\n");
 }
 

@@ -9,7 +9,6 @@ All notable changes to sddx are documented here. The format follows
 
 ### Fixed
 
-* keep Codex's command suffix off the approve command it hands to the user ([8bf0c5e](https://github.com/glapsfun/sddx/commit/8bf0c5ef610020f2387b6bdc523c167e6c3bab44))
 * keep Codex's command suffix off the approve command it hands to the user ([9bf3343](https://github.com/glapsfun/sddx/commit/9bf3343c071fb0c529bfa45b498e7553e04529ee))
 
 ## [6.0.0](https://github.com/glapsfun/sddx/compare/v5.0.0...v6.0.0) (2026-10-29)

@@ -22,4 +22,5 @@ examples/*/.sandbox/
 .sddx/cache/
 .sddx/sessions/
 .sddx-worktrees/
+.docs/scripts/
 # end sddx
